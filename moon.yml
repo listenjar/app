@@ -1,0 +1,47 @@
+language: go
+layer: application
+stack: frontend
+toolchains:
+  default: system
+fileGroups:
+  sources:
+    - ./**/*.go
+    - "!internal/backend/**/*"
+    - go.mod
+    - go.sum
+    - mygo.json
+    - public.yaml
+    - resources/**/*
+tasks:
+  codegen:
+    description: Generate the Go client in internal/backend from public.yaml with oasmith.
+    inputs: [public.yaml, main.go, go.mod, go.sum]
+    outputs: [internal/backend/**/*]
+    command: go generate .
+    options:
+      cache: true
+  dev:
+    description: Run the app with live reload against backend:dev on http://localhost:8787.
+    deps: [~:codegen]
+    command: go tool mygo dev
+    preset: server
+  vet:
+    deps: [~:codegen]
+    inputs: ["@group(sources)"]
+    command: go vet ./...
+    options:
+      cache: true
+  build:
+    description: Package the app into build/.
+    deps: [~:codegen]
+    inputs: ["@group(sources)"]
+    outputs: [build/**/*]
+    command: go tool mygo build
+    options:
+      cache: true
+      runInCI: false
+  check:
+    deps: [~:vet]
+    options:
+      cache: false
+      runInCI: false
