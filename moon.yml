@@ -25,12 +25,6 @@ tasks:
     deps: [~:codegen]
     command: go tool mygo dev
     preset: server
-  vet:
-    deps: [~:codegen]
-    inputs: ["@group(sources)"]
-    command: go vet ./...
-    options:
-      cache: true
   build:
     description: Package the app into build/.
     deps: [~:codegen]
@@ -41,7 +35,8 @@ tasks:
       cache: true
       runInCI: false
   check:
-    deps: [~:vet]
+    description: Format and lint the Go code with golangci-lint (root .golangci.yaml).
+    deps: [root:lint-go]
     options:
       cache: false
       runInCI: false
