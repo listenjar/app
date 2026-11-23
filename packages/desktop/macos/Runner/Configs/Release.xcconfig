@@ -1,0 +1,5 @@
+#include "../../Flutter/Flutter-Release.xcconfig"
+#include "Warnings.xcconfig"
+
+// The URL scheme the sign-in page opens the app with (appScheme in lib/config.dart).
+LISTENJAR_URL_SCHEME = listenjar

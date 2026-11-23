@@ -1,0 +1,35 @@
+name: desktop
+description: "The ListenJar app for desktop and Android"
+publish_to: 'none'
+version: 0.1.0+1
+resolution: workspace
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cancellation_token: ^2.0.1
+  crypto: ^3.0.8
+  flutter_secure_storage: ^11.2.0
+  http: ^1.6.0
+  material_ui: ^1.1.0
+  sqlite3: ^3.9.2
+  url_launcher: ^6.3.3
+  youtubei: any
+  path_parsing: ^1.1.0
+  path_provider: ^2.1.6
+  nativeapi_flutter: ^0.6.2
+  nativeapi: ^0.6.2
+  workmanager: ^0.10.10
+  file_selector: ^1.1.0
+  image: ^4.13.1
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/podcast_apps/
+    - assets/tray/

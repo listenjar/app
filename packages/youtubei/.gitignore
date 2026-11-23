@@ -1,0 +1,3 @@
+.dart_tool/
+# Built by `moon run desktop:bundle` from packages/youtubejs.
+/native/youtubejs.js

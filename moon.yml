@@ -1,42 +1,97 @@
-language: go
+language: dart
 layer: application
 stack: frontend
 toolchains:
   default: system
 fileGroups:
+  youtubejs:
+    - packages/youtubejs/src/**/*
+    - packages/youtubejs/protos/generated/**/*
+    - packages/youtubejs/package.json
+    - packages/aube-workspace.yaml
+    - packages/aube-lock.yaml
   sources:
-    - ./**/*.go
-    - "!internal/backend/**/*"
-    - go.mod
-    - go.sum
-    - mygo.json
+    - pubspec.yaml
+    - pubspec.lock
     - public.yaml
-    - resources/**/*
+    - packages/desktop/lib/**/*
+    - packages/desktop/pubspec.yaml
+    - packages/desktop/{android,linux,macos,windows}/**/*
+    - "!packages/desktop/**/ephemeral/**/*"
+    - "!packages/desktop/android/{.gradle,.kotlin,app/build}/**/*"
+    - packages/youtubei/{hook,lib,native,tool}/**/*
+    - packages/youtubei/pubspec.yaml
+    - tool/**/*
 tasks:
-  codegen:
-    description: Generate the Go client in internal/backend from public.yaml with oasmith.
-    inputs: [public.yaml, main.go, go.mod, go.sum]
-    outputs: [internal/backend/**/*]
-    command: go generate .
+  install:
+    description: Install the YouTube.js fork's JavaScript dependencies (its own aube workspace in packages/).
+    command: aube -C packages install --frozen-lockfile --ignore-scripts
+    inputs: [packages/youtubejs/package.json, packages/aube-workspace.yaml, packages/aube-lock.yaml]
+    options:
+      cache: false
+      internal: true
+      outputStyle: buffer-only-failure
+  bundle:
+    description: Bundle packages/youtubejs into packages/youtubei/native/youtubejs.js, which youtubei's build hook compiles in.
+    deps: [~:install]
+    script: >-
+      aube -C packages/youtubejs exec --no-install esbuild src/platform/cf-worker.ts
+      --bundle --target=es2020 --keep-names --minify --format=iife --global-name=YouTubeJS
+      --define:global=globalThis --conditions=module --platform=node --log-level=warning
+      --outfile=../youtubei/native/youtubejs.js
+    inputs: ["@group(youtubejs)"]
+    outputs: [packages/youtubei/native/youtubejs.js]
     options:
       cache: true
+  codegen:
+    description: >-
+      Generate the Dart API client in packages/desktop/lib/backend from public.yaml with oasmith,
+      and the plans and prices in packages/desktop/lib/pricing from the Stripe catalog.
+    inputs: [public.yaml, /mise.toml, /pricing/catalog.live.json, /pricing/catalog.ts, /scripts/pricing-dart.ts]
+    outputs: [packages/desktop/lib/backend/**/*, packages/desktop/lib/pricing/**/*]
+    script: |-
+      set -euo pipefail
+      rm -rf packages/desktop/lib/backend
+      oasmith --openapi public.yaml --mode client --lang dart --out packages/desktop/lib/backend
+      node ../../scripts/pricing-dart.ts packages/desktop/lib/pricing/catalog.dart
+    options:
+      cache: true
+  icons:
+    description: >-
+      Render every platform's app icon from resources/icon.svg: as is for release, with a DEBUG
+      ribbon for debug builds (tool/icons.py; macOS with Google Chrome). The outputs are committed.
+    inputs: [resources/icon.svg, tool/icons.py]
+    script: python3 tool/icons.py
+    options:
+      cache: false
+      runInCI: false
+  ffigen:
+    description: Regenerate packages/youtubei/lib/src/bindings.g.dart from native/bridge.h after changing it.
+    deps: [~:bundle]
+    script: cd packages/youtubei && dart run tool/ffigen.dart
+    options:
+      cache: false
+      outputStyle: stream
   dev:
-    description: Run the app with live reload against backend:dev on http://localhost:8787.
-    deps: [~:codegen]
-    command: go tool mygo dev
+    description: >-
+      Run the app on macOS against backend:dev on http://localhost:8787, hot reloading on every
+      save under packages/*/lib (tool/dev.dart) and printing the DTD URI for the Dart MCP server.
+    deps: [~:codegen, ~:bundle]
+    script: dart tool/dev.dart macos
     preset: server
   build:
-    description: Package the app into build/.
-    deps: [~:codegen]
+    description: Package the release macOS app into packages/desktop/build/macos.
+    deps: [~:codegen, ~:bundle]
     inputs: ["@group(sources)"]
-    outputs: [build/**/*]
-    command: go tool mygo build
+    outputs: [packages/desktop/build/macos/Build/Products/Release/**/*]
+    script: cd packages/desktop && flutter build macos --release
     options:
       cache: true
       runInCI: false
   check:
-    description: Format and lint the Go code with golangci-lint (root .golangci.yaml).
-    deps: [root:lint-go]
+    description: Analyze the Flutter app and youtubei.
+    deps: [~:codegen, ~:bundle]
+    script: flutter analyze packages/desktop packages/youtubei
     options:
       cache: false
       runInCI: false

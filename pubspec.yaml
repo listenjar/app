@@ -1,0 +1,7 @@
+name: listenjar_desktop
+publish_to: none
+environment:
+  sdk: ^3.14.0
+workspace:
+  - packages/youtubei
+  - packages/desktop

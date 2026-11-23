@@ -6,16 +6,76 @@ info:
     The API the ListenJar desktop app calls. The listeners-backend Cloudflare
     Worker serves it next to its private API, and publishes this document at
     `/public.yaml`.
+
+
+    Signing in (RFC 8252, loopback redirect with PKCE): the app listens on
+    `http://127.0.0.1:<port>/callback` and opens
+    `https://listenjar.com/desktop/authorize?redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`
+    in the browser. The person signs in there and allows the app; the browser
+    comes back to the app's address with `code` and `state` (or
+    `error=access_denied`), and the app trades the code for a token with
+    `createDesktopToken`. It sends the token as `Authorization: Bearer <token>`.
+
+
+    Feeds: the listener's feeds are under `/me/feeds`. The app adds a YouTube
+    video, playlist or channel with `addFeed` after reading its title from
+    YouTube itself. Free listeners add videos only, each its own podcast,
+    removed a day after it was added (`Feed.expiresAt`). Paying listeners
+    (`User.plan`, 10 GB or 100 GB) keep what they add, and also add playlists
+    and channels, which follow their YouTube source, and podcasts of their own
+    (`addFeed` without a source), whose episodes are whatever videos they add,
+    including the video of one of their YouTube video feeds. Their plan caps
+    what they store: each video counts once, however many of their feeds have
+    it.
+
+
+    Syncing: the app keeps each feed in step with its source. It lists what the
+    feed has (`listEpisodes`) and adds each missing video (`createEpisode`).
+    Every video's audio is stored once, shared by every feed that has it, so
+    an episode whose video someone already uploaded is live at once. For the
+    rest, the app downloads the audio on the listener's computer, asks for an
+    upload address (`createUpload`, a presigned S3 `PUT` straight to the R2
+    media bucket), uploads, and confirms (`completeEpisode`), which puts the
+    episode in the RSS of every feed that has the video. Videos gone from a
+    playlist or channel leave the feed through `deleteEpisode`; a podcast of
+    the listener's own changes only when they add or remove videos.
+
+
+    Uploads: every file the app stores, an episode's audio or a podcast's
+    artwork, goes the same way. The app asks for an upload (`NewUpload`: the
+    file's type and exact size), gets a `PresignedUpload` (a presigned S3
+    `PUT` straight to the R2 bucket that keeps it, and the headers to send
+    with it, exactly), uploads, and confirms, which checks the object and
+    makes it live. Stored files never change: new artwork is a new URL, so
+    every file is cached for a year.
+
+
+    Artwork: a YouTube feed shows its source's, as YouTube serves it. A
+    podcast of the listener's own shows what they upload
+    (`createImageUpload`, then `completeImage`), from images.listenjar.com.
+
+
+    Storage: the server counts who holds each video's audio, per listener and
+    video, one for each episode of theirs that has it. Adding an episode counts
+    it; removing an episode or a feed (`deleteEpisode`, `deleteFeed`, or a free
+    feed expiring) uncounts it. A listener's storage is every video they hold,
+    once; audio nobody holds any more is deleted from the media bucket.
 servers:
   - url: https://api.listenjar.com
     description: Production.
   - url: http://localhost:8787
     description: Development, the backend's local dev server.
+security:
+  - token: []
 paths:
   /feeds:
     get:
       operationId: listFeeds
-      summary: List feeds
+      summary: List feeds that belong to no listener
+      description: >-
+        Listeners' own feeds are never listed here; the app reads those from
+        `/me/feeds`.
+      security: []
       responses:
         "200":
           description: Feeds, newest first.
@@ -29,6 +89,7 @@ paths:
     get:
       operationId: getFeed
       summary: Get one feed
+      security: []
       parameters:
         - name: id
           in: path
@@ -44,7 +105,366 @@ paths:
                 $ref: "#/components/schemas/Feed"
         "404":
           description: No feed with that id.
+  /me/feeds:
+    get:
+      operationId: listMyFeeds
+      summary: The signed-in listener's feeds
+      responses:
+        "200":
+          description: The listener's feeds, newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Feed"
+        "401":
+          description: The token is missing, revoked or expired.
+    post:
+      operationId: addFeed
+      summary: Add a YouTube video, playlist or channel as a feed, or a podcast of the listener's own
+      description: >-
+        The app reads the title and artwork from YouTube; the server never
+        calls YouTube. `source.url` must be canonical: `https://www.youtube.com/watch?v=<id>`,
+        `https://www.youtube.com/playlist?list=<id>` or
+        `https://www.youtube.com/channel/<UC id>`. Adding a source the listener
+        already has returns that feed. Without a source, it is a new podcast of
+        the listener's own, which they fill with `createEpisode`. A feed has
+        no RSS until its first episode is live.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewFeed"
+      responses:
+        "200":
+          description: The listener already had this source; its feed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "201":
+          description: The new feed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "400":
+          description: The source is not a canonical YouTube video, playlist or channel URL, or the title is empty.
+        "401":
+          description: The token is missing, revoked or expired.
+        "402":
+          description: Only paying listeners add playlists, channels and podcasts of their own.
+  /me/feeds/events:
+    get:
+      operationId: watchMyFeeds
+      summary: The signed-in listener's feeds, live
+      description: >-
+        Server-sent events. The first event is the whole list, as
+        `listMyFeeds` returns it; another follows whenever it changes: a feed
+        added or removed on any device, an episode uploaded, a plan started or
+        ended. Each event's `data` is a `FeedList`. A `: ping` comment every 25
+        seconds keeps proxies from closing it. The stream ends when the
+        session does (signed out, expired) or after about 15 minutes, when a
+        client reconnects and gets the list afresh.
+      responses:
+        "200":
+          description: The listener's feeds, then the list again on every change.
+          content:
+            text/event-stream:
+              itemSchema:
+                $ref: "#/components/schemas/FeedList"
+        "401":
+          description: The token is missing, revoked or expired.
+  /me/feeds/{feedId}:
+    delete:
+      operationId: deleteFeed
+      summary: Remove a feed, its episodes and its RSS
+      description: >-
+        The listener stops holding its videos: their storage goes down by
+        those no other feed of theirs has, and audio nobody else holds is
+        deleted with it.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no feed with that id.
+  /me/feeds/{feedId}/image/upload:
+    post:
+      operationId: createImageUpload
+      summary: Get an address to upload a podcast's artwork to
+      description: >-
+        For a podcast of the listener's own; a YouTube feed shows its source's
+        artwork. A square JPEG or PNG, 1400 to 3000 pixels a side, is what
+        podcast apps ask for. Returns a presigned `PUT` to the R2 images
+        bucket, valid for `expiresAt`. Send the file's bytes with the
+        returned headers, then call `completeImage`. Asking again replaces the
+        upload asked for before. Artwork doesn't count against the plan's
+        storage.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewUpload"
+      responses:
+        "201":
+          description: Where to upload the artwork.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignedUpload"
+        "400":
+          description: >-
+            The content type is not image/jpeg or image/png, the size is over
+            10 MB, or the feed follows a YouTube source.
+        "401":
+          description: The token is missing, revoked or expired.
+        "402":
+          description: Podcasts of the listener's own take artwork while the listener pays.
+        "404":
+          description: The listener has no feed with that id.
+  /me/feeds/{feedId}/image/complete:
+    post:
+      operationId: completeImage
+      summary: Confirm an artwork upload and show it
+      description: >-
+        Checks that the image is in the bucket with the size and type
+        `createImageUpload` was given, makes it the feed's `imageUrl`,
+        republishes the RSS and deletes the artwork it replaces.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      responses:
+        "200":
+          description: The feed, with its new artwork.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "400":
+          description: Nothing was asked to be uploaded, or the image is missing or differs; upload again.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no feed with that id.
+  /me/feeds/{feedId}/episodes:
+    get:
+      operationId: listEpisodes
+      summary: Every episode of a feed, uploaded or not
+      description: >-
+        The sync inventory: an episode without `uploadedAt` has no audio yet,
+        so the app downloads and uploads it.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      responses:
+        "200":
+          description: Episodes, newest published first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Episode"
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no feed with that id.
+    post:
+      operationId: createEpisode
+      summary: Add a video to a feed
+      description: >-
+        Records the episode, or updates the title, description and dates of
+        the one the feed already has for this video. When the video's audio
+        is already uploaded, the episode is live at once (`uploadedAt` is
+        set) and the RSS is republished; otherwise upload it with
+        `createUpload`. A video feed takes only its own video; playlists,
+        channels and podcasts of the listener's own take any, while the
+        listener pays. Adding a video another feed of the listener's already
+        has, such as a video feed's to a podcast of their own, costs no
+        storage.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewEpisode"
+      responses:
+        "200":
+          description: The feed already had this video; its episode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Episode"
+        "201":
+          description: The new episode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Episode"
+        "400":
+          description: A field is missing or out of range, or the feed is a different video's.
+        "401":
+          description: The token is missing, revoked or expired.
+        "402":
+          description: The feed is a playlist, channel or podcast of the listener's own, and the listener no longer pays.
+        "404":
+          description: The listener has no feed with that id.
+        "507":
+          description: The video's audio is already uploaded, and it would take the listener past their plan's storage.
+  /me/feeds/{feedId}/episodes/{episodeId}:
+    delete:
+      operationId: deleteEpisode
+      summary: Remove an episode and republish the RSS
+      description: >-
+        The listener's storage goes down by its audio unless another feed of
+        theirs has the video, and the audio is deleted when nobody else holds
+        it.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+        - $ref: "#/components/parameters/episodeId"
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no such episode.
+  /me/feeds/{feedId}/episodes/{episodeId}/upload:
+    post:
+      operationId: createUpload
+      summary: Get an address to upload an episode's audio to
+      description: >-
+        Returns a presigned `PUT` to the R2 media bucket, valid for
+        `expiresAt`. Send the file's bytes with the returned headers, then
+        call `completeEpisode`. A video's audio is uploaded once for every
+        feed: while it is not uploaded, asking again (from any feed) replaces
+        the size and type the upload must have.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+        - $ref: "#/components/parameters/episodeId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewUpload"
+      responses:
+        "201":
+          description: Where to upload the audio.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignedUpload"
+        "400":
+          description: The size is out of range, or the content type is not audio/mp4 or audio/webm.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no such episode.
+        "409":
+          description: The video's audio is already uploaded; the episode is live.
+        "507":
+          description: The audio would take the listener past their plan's storage.
+  /me/feeds/{feedId}/episodes/{episodeId}/complete:
+    post:
+      operationId: completeEpisode
+      summary: Confirm an upload and publish the episode
+      description: >-
+        Checks that the media object exists with the `byteLength` that
+        `createUpload` was given, marks the video's audio uploaded and
+        republishes the RSS of every feed that has the video. Completing an
+        uploaded episode again returns it unchanged.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+        - $ref: "#/components/parameters/episodeId"
+      responses:
+        "200":
+          description: The uploaded episode.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Episode"
+        "400":
+          description: Nothing was asked to be uploaded, or the media object is missing or its size differs; upload again.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no such episode.
+  /desktop/token:
+    post:
+      operationId: createDesktopToken
+      summary: Trade the code from the browser for the app's token
+      description: >-
+        The code is single-use and expires five minutes after the person
+        allowed the app. `codeVerifier` must hash (S256) to the
+        `code_challenge` the app opened the browser with, and `redirectUri`
+        must be the same loopback address.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DesktopTokenRequest"
+      responses:
+        "200":
+          description: The app is signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: The code is unknown, used, expired, or does not match the verifier or redirect URI.
+  /me:
+    get:
+      operationId: getMe
+      summary: The signed-in user
+      responses:
+        "200":
+          description: The user the token belongs to.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: The token is missing, revoked or expired.
+  /logout:
+    post:
+      operationId: logout
+      summary: Revoke the token
+      responses:
+        "204":
+          description: Signed out; the token no longer works.
+        "401":
+          description: The token is missing, revoked or expired.
 components:
+  parameters:
+    feedId:
+      name: feedId
+      in: path
+      required: true
+      schema:
+        type: string
+    episodeId:
+      name: episodeId
+      in: path
+      required: true
+      schema:
+        type: string
+  securitySchemes:
+    token:
+      type: http
+      scheme: bearer
+      description: The token from `createDesktopToken`.
   schemas:
     Feed:
       type: object
@@ -57,3 +477,214 @@ components:
         createdAt:
           type: string
           format: date-time
+        source:
+          $ref: "#/components/schemas/Source"
+          description: >-
+            The YouTube video, playlist or channel the feed follows. Absent on
+            a podcast of the listener's own.
+        imageUrl:
+          type: string
+          format: uri
+          description: >-
+            The feed's artwork: its source's, as YouTube serves it, or what the
+            listener uploaded for a podcast of their own (`completeImage`).
+        episodeCount:
+          type: integer
+          minimum: 0
+          description: Episodes uploaded to R2 and in the RSS. Only on the listener's own feeds.
+        rssUrl:
+          type: string
+          format: uri
+          description: >-
+            The feed's public RSS, for the listener's podcast app. Only on the listener's own feeds, and
+            only once an episode is uploaded: until then there is no RSS to subscribe to.
+        expiresAt:
+          type: string
+          format: date-time
+          description: >-
+            When the feed is removed, with its episodes and RSS: a day after a
+            free listener added it, unless they start paying first. Absent
+            while the listener pays.
+    SourceKind:
+      type: string
+      enum: [video, playlist, channel]
+    Source:
+      type: object
+      required: [kind, url]
+      properties:
+        kind:
+          $ref: "#/components/schemas/SourceKind"
+        url:
+          type: string
+          format: uri
+          description: Canonical YouTube URL of the video, playlist or channel (`/channel/UC…`).
+    FeedList:
+      type: object
+      description: One `watchMyFeeds` event.
+      required: [feeds]
+      properties:
+        feeds:
+          type: array
+          description: The listener's feeds, newest first.
+          items:
+            $ref: "#/components/schemas/Feed"
+    NewFeed:
+      type: object
+      required: [title]
+      properties:
+        source:
+          $ref: "#/components/schemas/Source"
+          description: Omitted for a podcast of the listener's own (paying listeners only).
+        title:
+          type: string
+          maxLength: 500
+        imageUrl:
+          type: string
+          format: uri
+    Episode:
+      type: object
+      required: [id, videoId, title, publishedAt, createdAt]
+      properties:
+        id:
+          type: string
+        videoId:
+          type: string
+          description: The YouTube video id.
+        title:
+          type: string
+        publishedAt:
+          type: string
+          format: date-time
+        durationSeconds:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          description: The audio's type; present once an upload was asked for.
+        byteLength:
+          type: integer
+          minimum: 1
+          description: The audio's size; present once an upload was asked for.
+        createdAt:
+          type: string
+          format: date-time
+        uploadedAt:
+          type: string
+          format: date-time
+          description: When the video's audio was uploaded; absent until then.
+        mediaUrl:
+          type: string
+          format: uri
+          description: The public media URL; present once uploaded.
+    NewEpisode:
+      type: object
+      required: [videoId, title, publishedAt]
+      properties:
+        videoId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{11}$"
+        title:
+          type: string
+          maxLength: 500
+        description:
+          type: string
+          maxLength: 10000
+        publishedAt:
+          type: string
+          format: date-time
+        durationSeconds:
+          type: integer
+          minimum: 1
+    NewUpload:
+      type: object
+      description: >-
+        A file to upload. Audio (`createUpload`) is audio/mp4 or audio/webm,
+        up to 5 GB, what R2 takes in one PUT; artwork (`createImageUpload`) is
+        image/jpeg or image/png, up to 10 MB.
+      required: [contentType, byteLength]
+      properties:
+        contentType:
+          type: string
+          enum: [audio/mp4, audio/webm, image/jpeg, image/png]
+        byteLength:
+          type: integer
+          minimum: 1
+          maximum: 5000000000
+          description: The file's exact size.
+    PresignedUpload:
+      type: object
+      required: [url, method, headers, expiresAt]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Presigned S3 URL of the object in the R2 bucket that keeps it.
+        method:
+          type: string
+          enum: [PUT]
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: >-
+            Headers to send with the body, exactly: its Content-Type, and the
+            Cache-Control it is served with.
+        expiresAt:
+          type: string
+          format: date-time
+    Plan:
+      type: string
+      enum: [free, paid]
+      description: >-
+        `paid` while a 10 GB or 100 GB subscription bought by this account
+        (or with its email) is live. Free listeners add videos only, each its
+        own podcast for a day.
+    User:
+      type: object
+      required: [id, email, name, plan]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+          description: The Google account's name, or its email when it has none.
+        pictureUrl:
+          type: string
+          format: uri
+          description: The Google account's profile picture, as Google serves it; absent when it has none.
+        plan:
+          $ref: "#/components/schemas/Plan"
+        storageLimitBytes:
+          type: integer
+          minimum: 1
+          description: What the listener's plan stores, in bytes (10 or 100 GB). Absent on the free plan.
+        storageUsedBytes:
+          type: integer
+          minimum: 0
+          description: >-
+            What the listener stores, in bytes: each video once, however many
+            of their feeds have it, counting uploads in progress. Only from
+            `getMe`.
+    Session:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          description: Bearer token for the app. It lasts a year.
+        user:
+          $ref: "#/components/schemas/User"
+    DesktopTokenRequest:
+      type: object
+      required: [code, codeVerifier, redirectUri]
+      properties:
+        code:
+          type: string
+        codeVerifier:
+          type: string
+        redirectUri:
+          type: string
+          format: uri

@@ -33,14 +33,14 @@ nothing anywhere but the ListenJar API: no telemetry, tracing or crash reports.
 
 ## Capabilities and Constraints
 
-- Ships on macOS, Windows and Linux; iOS and Android later.
-- 100% native desktop app in Go: MyGo native UI (Go `ui` package, drawn on the GPU). No HTML, no
-  webview, no WebAssembly or browser build. One design language on every OS. Preview it by running the
-  native app (`moon run desktop:dev`).
-- `adaptive` above is the only Impeccable platform value for a native app that is neither iOS nor
-  Android. It routes design work to the native, source-based reviews instead of browser tooling. It
-  does not mean the design changes per OS, and there is no SwiftUI, UIKit or Compose here: apply
-  iOS/Android guidance only where it is about platform conventions (shortcuts, menus, windows).
+- Ships on macOS, Windows, Linux and Android; iOS later.
+- A Flutter app: one Dart codebase drawn by Flutter on every OS. No HTML, no webview, no browser
+  build. One design language everywhere. Preview it by running the native app
+  (`moon run desktop:dev`).
+- `adaptive` above routes design work to the native, source-based reviews instead of browser
+  tooling. It does not mean the design changes per OS, and there is no SwiftUI, UIKit or Compose
+  here: apply iOS/Android guidance only where it is about platform conventions (shortcuts, menus,
+  windows).
 - Today it is a placeholder: a title, a Refresh button and a list of feeds.
 
 ## Brand Commitments

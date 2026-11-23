@@ -1,0 +1,7 @@
+[submodule "packages/youtubejs"]
+	path = packages/youtubejs
+	url = https://github.com/listenbox/YouTube.js
+	branch = master
+[submodule "packages/youtubei/native/quickjs"]
+	path = packages/youtubei/native/quickjs
+	url = https://github.com/bellard/quickjs.git
