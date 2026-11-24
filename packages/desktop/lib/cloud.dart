@@ -1,632 +1,576 @@
-// The ListenJar section of the app: the signed-in listener's own ListenJar
-// feeds (account.dart), what they add to them from YouTube links, and how each feed syncs from this device (feeds.dart, sync.dart)
-// through the ListenJar API (public.yaml) and its oasmith client in
-// lib/backend (`moon run desktop:codegen`). A podcast of the listener's own
-// opens in place of the list (podcast.dart): its episodes and artwork, with
-// the link field adding videos to it. Words typed in the link field search
-// on the Search page (search_page.dart), the app's one search, which adds
-// results to the Cloud as well as playing them. Signed out, it says what an account
-// adds to the free player. The shell (shell.dart) shows it beside the
-// player's own sections.
+// ListenJar Cloud inside the one player: the signed-in listener's own
+// ListenJar feeds (account.dart) and how each syncs from this device
+// (feeds.dart, sync.dart) through the ListenJar API (public.yaml) and its
+// oasmith client in lib/backend (`moon run desktop:codegen`). There is no
+// Cloud section: the feeds are shows in the Library (library_page.dart),
+// each with what its sync is doing, and one opens here (CloudShowPage) with
+// its episodes, uploaded or on their way (podcast.dart). Library makes
+// podcasts of the listener's own, on this device or here; Search
+// (search_page.dart) adds YouTube links and videos to them; Settings holds
+// the account (AccountPanel). A followed playlist or channel, or a podcast
+// of the listener's own, moves between this device and here either way,
+// and where the listener was in each video comes along.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
-import 'package:url_launcher/link.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'account.dart';
 import 'backend/api.dart';
 import 'feeds.dart';
-import 'links.dart';
 import 'marks.dart';
 import 'menu.dart';
 import 'plans.dart';
 import 'podcast.dart';
 import 'podcast_apps.dart';
-import 'shell.dart' show PageBody, windowCommand;
-import 'ui.dart' show Navigation;
-import 'ui.dart' show Services, pageTitle;
+import 'podcasts.dart' show Podcasts;
+import 'library.dart' show Podcast;
+import 'links.dart' show parseYouTubeLink;
+import 'shared_links.dart' show CloudOwn, LocalOwn, mayFollowInCloud, mayMakePodcast, newOwnPodcast;
+import 'shell.dart' show PageBody, backButton;
 import 'sync.dart';
 import 'theme.dart' as brand;
-import 'youtube.dart' show YouTubeService;
+import 'ui.dart' show Navigation, Services, tell;
 
-class CloudPage extends StatefulWidget {
-  const CloudPage({super.key, required this.youtube, required this.account, required this.feeds});
-  final YouTubeService youtube;
-  final Account account;
-  final Feeds feeds;
+/// Opens the browser to sign in; the account says how it went.
+Future<void> signIn(Account account) => account.signIn((url) async {
+  if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw StateError('open the browser');
+});
 
-  @override
-  State<CloudPage> createState() => _CloudPageState();
-}
+/// One ListenJar feed, pushed onto a section's stack: what went wrong
+/// syncing, then its page (podcast.dart). Gone once it is removed.
+final class CloudShowPage extends StatelessWidget {
+  const CloudShowPage({super.key, required this.feedId});
+  final String feedId;
 
-class _CloudPageState extends State<CloudPage> {
-  Account get _account => widget.account;
-  Feeds get _feeds => widget.feeds;
-  late final _shown = Listenable.merge([_account, _feeds]);
-
-  /// Cancels the window's own calls when it goes away; the feeds' go on.
-  final _life = CancellationToken();
-
-  /// The window's one scroll view; the scrollbar needs it on desktop, where
-  /// no PrimaryScrollController is attached.
-  final _scroll = ScrollController();
-
-  /// Coming back to the window, often from checkout in the browser: the
-  /// plan and storage may have changed.
-  late final _lifecycle = AppLifecycleListener(onResume: () => unawaited(_account.refresh()));
-
-  /// The podcast apps this device can open feeds in, asked once.
-  final _podcastApps = installedPodcastApps();
-
-  /// The link field in the top bar (⌘L), and the link being added.
-  final _link = TextEditingController();
-  final _linkFocus = FocusNode();
-  bool _linkHover = false;
-  CancellationToken? _adding;
-  Object? _addError;
-
-  /// Video feeds whose video is being added to a podcast of the listener's own.
-  final _copying = <String>{};
-
-  /// The podcast of the listener's own open in place of the list, while it
-  /// is still theirs.
-  String? _openId;
-  Feed? get _open => _feeds.feeds.where((f) => f.id == _openId).firstOrNull;
-
-  void _openPodcast(Feed feed) {
-    setState(() => _openId = feed.id);
-    if (_scroll.hasClients) _scroll.jumpTo(0);
-  }
-
-  void _back() {
-    if (_openId == null) return;
-    setState(() => _openId = null);
-    if (_scroll.hasClients) _scroll.jumpTo(0);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _shown.addListener(_rebuild);
-    _link.addListener(() {
-      setState(() => _addError = null);
-      _searchInstead();
-    });
-    _linkFocus.addListener(_rebuild);
-    _lifecycle;
-  }
-
-  @override
-  void dispose() {
-    _shown.removeListener(_rebuild);
-    _lifecycle.dispose();
-    _life.cancel();
-    _link.dispose();
-    _linkFocus.dispose();
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _rebuild() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _startSignIn() => _account.signIn((url) async {
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw StateError('open the browser');
-  });
-
-  /// Words typed in the link field search on the Search page, the app's one
-  /// search: it carries on there with what was typed, caret and all, and
-  /// this field stays for links. From an open podcast, search adds what it
-  /// finds to that podcast.
-  void _searchInstead() {
-    final typed = _link.text;
-    if (!_isQuery(typed.trim())) return;
-    _link.clear();
-    Navigation.of(context).openSearch(query: typed, youtube: true, into: _openId);
-  }
-
-  /// Looks the pasted link up on YouTube and adds
-  /// it; the sync takes it from there.
-  Future<void> _add([String? input]) async {
-    final link = input ?? _link.text;
-    if (_account.user == null || _adding != null || parseYouTubeLink(link) == null) return;
-    final token = CancellationToken();
-    setState(() {
-      _adding = token;
-      _addError = null;
-    });
-    Object? error;
-    try {
-      await _feeds.add(link, _life.merge(token));
-      if (!mounted) return;
-      // The new feed is in the list.
-      _back();
-      _link.clear();
-      _linkFocus.requestFocus();
-    } on CancelledException {
-      if (_life.isCancelled || token.isCancelled) return;
-      error = 'It took too long.';
-    } catch (e) {
-      error = e;
-    } finally {
-      if (mounted) setState(() => _adding = null);
-    }
-    if (mounted) setState(() => _addError = error);
-  }
-
-  /// Adds the pasted video, or the video of [from], a YouTube video feed,
-  /// to [feed], a podcast of the listener's own, or to a new one they name.
-  /// Its audio is stored once for both, so the plan's storage stays the same.
-  Future<void> _addTo(Feed? feed, {Feed? from, String? link}) async {
-    link ??= from?.source?.url ?? _link.text;
-    if (_account.user == null || _adding != null || parseYouTubeLink(link)?.kind != SourceKind.video) return;
-    if (from != null && _copying.contains(from.id)) return;
-    final target = feed ?? await _newPodcast();
-    if (target == null || !mounted) return;
-    final token = CancellationToken();
-    setState(() {
-      if (from == null) {
-        _adding = token;
-      } else {
-        _copying.add(from.id);
-      }
-      _addError = null;
-    });
-    Object? error;
-    try {
-      await _feeds.addVideo(target, link, _life.merge(token));
-      if (!mounted) return;
-      if (from == null) {
-        _link.clear();
-        _linkFocus.requestFocus();
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            from == null ? 'Added to “${target.title}”. It uploads from this computer.' : 'Added to “${target.title}”.',
-          ),
-        ),
-      );
-    } on CancelledException {
-      if (_life.isCancelled || token.isCancelled) return;
-      error = 'It took too long.';
-    } catch (e) {
-      error = e;
-    } finally {
-      if (mounted) {
-        setState(() {
-          if (from == null) {
-            _adding = null;
-          } else {
-            _copying.remove(from.id);
-          }
-        });
-      }
-    }
-    if (mounted) setState(() => _addError = error);
-  }
-
-  /// Names and makes a podcast of the listener's own.
-  Future<Feed?> _newPodcast() async {
-    final title = await askPodcastTitle(context);
-    if (title == null || !mounted) return null;
-    try {
-      return await _feeds.create(title);
-    } catch (e) {
-      if (mounted) setState(() => _addError = e);
-      return null;
-    }
-  }
-
-  void _plans([String title = 'Keep what you add']) => unawaited(showPlans(context, title: title));
-
-  void _makeRoom() => unawaited(showMakeRoom(context, account: _account, feeds: _feeds, onRemove: _remove));
-
-  Future<void> _copyFeedLink(Feed feed) async {
-    final url = feed.rssUrl;
-    if (url == null) return;
-    await Clipboard.setData(ClipboardData(text: url));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Feed link copied. Add it to your podcast app as a podcast by URL.')),
-    );
-  }
-
-  /// What removing [feed] does, in its own terms: what leaves the podcast
-  /// app, and that its audio goes. Audio is shared, so when another feed of
-  /// the listener's may have the same videos, it says those keep theirs.
-  String _removeConsequence(Feed feed) {
-    final shared = _feeds.feeds.any((f) => f.id != feed.id);
-    return switch (feed.source?.kind) {
-      SourceKind.video => [
-        'It leaves your podcast app, and its audio is deleted.',
-        if (shared) 'If another podcast of yours has this video, it stays there.',
-      ],
-      SourceKind.playlist || SourceKind.channel => [
-        'ListenJar stops following it. Its episodes leave your podcast app, and their audio is deleted.',
-        if (shared) 'Videos another podcast of yours also has stay there.',
-      ],
-      null => [
-        'Its episodes leave your podcast app, and their audio is deleted.',
-        if (shared) 'Videos another podcast of yours also has stay there.',
-      ],
-    }.join(' ');
-  }
-
-  /// Asks, then removes the feed and everything uploaded to it.
-  Future<void> _remove(Feed feed) async {
-    final text = Theme.of(context).textTheme;
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: brand.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-        title: Text('Remove “${feed.title}”?', style: text.titleLarge),
-        content: Text(_removeConsequence(feed), style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
-        actions: [
-          TextButton(
-            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Keep it'),
-          ),
-          TextButton(
-            style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-    if (sure == true && mounted) await _feeds.remove(feed);
-  }
-
-  // The section's own bar holds the link field and the account; the
-  // listener's feeds fill the page below it.
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final width = MediaQuery.sizeOf(context).width;
-    final gutter = (width * 0.04).clamp(16.0, 40.0);
-    if (_account.user == null) {
-      return PageBody(maxWidth: 600, children: [
-        pageTitle(context, 'ListenJar Cloud'),
-        const SizedBox(height: 20),
-        brand.panel(padding: 28, child: _signInPanel(text)),
-      ]);
-    }
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.bracketLeft, meta: true): _back,
+    final s = Services.of(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([s.feeds, s.account]),
+      builder: (context, _) {
+        final feed = s.feeds.feeds.where((f) => f.id == feedId).firstOrNull;
+        if (feed == null) {
+          return PageBody(children: [
+            if (Navigator.of(context).canPop()) backButton(context, 'Back'),
+            Text('This podcast is gone', style: Theme.of(context).textTheme.titleLarge),
+          ]);
+        }
+        return PageBody(children: [
+          if (Navigator.of(context).canPop()) backButton(context, 'Back'),
+          if (s.feeds.storageFull) ...[const StorageFullNotice(), const SizedBox(height: 20)],
+          PodcastPage(
+            key: ValueKey(feed.id),
+            feed: feed,
+            feeds: s.feeds,
+            onRemove: () => unawaited(removeCloudFeed(context, feed)),
+          ),
+        ]);
       },
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _topBar(text),
-        Expanded(
-          child: Scrollbar(
-            controller: _scroll,
-            child: SingleChildScrollView(
-              controller: _scroll,
-              padding: EdgeInsets.fromLTRB(gutter, 20, gutter, 48),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 880),
-                  child: AnimatedSwitcher(
-                        duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 220),
-                        switchInCurve: brand.easeOutExpo,
-                        switchOutCurve: const Threshold(0),
-                        transitionBuilder: (child, animation) => FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: Tween(begin: const Offset(0, 0.012), end: Offset.zero).animate(animation),
-                            child: child,
-                          ),
-                        ),
-                        layoutBuilder: (current, _) => current ?? const SizedBox.shrink(),
-                        child: switch (_open) {
-                          final feed? => KeyedSubtree(key: ValueKey(feed.id), child: _podcast(text, feed)),
-                          null => KeyedSubtree(key: const ValueKey('list'), child: _feedsList(text)),
-                        },
-                      ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ]),
     );
   }
+}
 
-  /// The section's bar: back from an open podcast, the link field, the
-  /// account.
-  Widget _topBar(TextTheme text) {
-    final mac = defaultTargetPlatform == TargetPlatform.macOS;
-    final wide = MediaQuery.sizeOf(context).width >= 760;
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onPanStart: (_) => windowCommand('startDrag'),
-      child: Container(
-        height: mac && wide ? 60 : 56,
-        padding: EdgeInsets.only(left: 14, right: 14, top: mac && wide ? 8 : 0),
-        decoration: const BoxDecoration(
-          color: brand.paper,
-          border: Border(bottom: BorderSide(color: brand.line)),
+/// Makes a podcast of the listener's own, named by them, on this device or
+/// in ListenJar Cloud, and opens it to fill from Search. Asks them to sign
+/// in or pick a plan first if they need to.
+Future<void> createPodcast(BuildContext context) async {
+  final navigation = Navigation.of(context);
+  switch (await newOwnPodcast(context)) {
+    case CloudOwn(:final feed):
+      navigation.openFeed(feed.id);
+    case LocalOwn(:final show):
+      navigation.openShow(show.id);
+    case null:
+  }
+}
+
+/// What removing [feed] does, in its own terms: what leaves the podcast
+/// app, and that its audio goes. Audio is shared, so when another feed of
+/// the listener's may have the same videos, it says those keep theirs.
+String _removeConsequence(Feeds feeds, Feed feed) {
+  final shared = feeds.feeds.any((f) => f.id != feed.id);
+  return switch (feed.source?.kind) {
+    SourceKind.video => [
+      'It leaves your podcast app, and its audio is deleted.',
+      if (shared) 'If another podcast of yours has this video, it stays there.',
+    ],
+    SourceKind.playlist || SourceKind.channel => [
+      'ListenJar stops following it. Its episodes leave your podcast app, and their audio is deleted.',
+      if (shared) 'Videos another podcast of yours also has stay there.',
+    ],
+    null => [
+      'Its episodes leave your podcast app, and their audio is deleted.',
+      if (shared) 'Videos another podcast of yours also has stay there.',
+    ],
+  }.join(' ');
+}
+
+/// Asks, then removes the feed and everything uploaded to it, and leaves
+/// its page.
+Future<void> removeCloudFeed(BuildContext context, Feed feed) async {
+  final feeds = Services.of(context).feeds;
+  final text = Theme.of(context).textTheme;
+  final sure = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: brand.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
+      title: Text('Remove “${feed.title}”?', style: text.titleLarge),
+      content: Text(_removeConsequence(feeds, feed), style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
+      actions: [
+        TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Keep it'),
         ),
-        child: Row(children: [
-          if (_open != null) ...[
-            Tooltip(
-              message: 'Back to your feeds (⌘[)',
-              waitDuration: const Duration(milliseconds: 500),
-              child: TextButton.icon(
-                style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm).copyWith(
-                  minimumSize: const WidgetStatePropertyAll(Size(0, 32)),
-                  padding: const WidgetStatePropertyAll(EdgeInsets.only(left: 6, right: 12)),
-                  backgroundColor: WidgetStateProperty.fromMap({
-                    WidgetState.hovered: brand.paperDeep,
-                    WidgetState.any: const Color(0x00000000),
-                  }),
-                ),
-                onPressed: _back,
-                icon: const Icon(Icons.chevron_left_rounded, size: 20),
-                label: const Text('Feeds'),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: _linkField(text),
-              ),
-            ),
-          ),
-          if (_account.user case final user?) ...[const SizedBox(width: 12), _accountMenu(text, user)],
-        ]),
-      ),
+        TextButton(
+          style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
+  if (sure != true || !context.mounted) return;
+  final navigator = Navigator.of(context);
+  try {
+    await feeds.remove(feed);
+    if (navigator.canPop()) navigator.pop();
+  } catch (e) {
+    if (context.mounted) tell(context, failure('Couldn’t remove it', e, other: 'Try again.'));
+  }
+}
+
+/// Asks, then moves [show], a YouTube playlist or channel followed on this
+/// device or a podcast of the listener's own there, to ListenJar Cloud:
+/// this device uploads its videos, for any podcast app. Where the listener
+/// was comes along as the uploads arrive.
+Future<void> moveToCloud(BuildContext context, Podcast show) async {
+  final own = show.isOwn;
+  if (!own && parseYouTubeLink(show.feedUrl) == null) return;
+  final may = own ? await mayMakePodcast(context) : await mayFollowInCloud(context, '“${show.title}”');
+  if (!may || !context.mounted) return;
+  final sure = await _confirm(
+    context,
+    title: 'Move “${show.title}” to ListenJar Cloud?',
+    body: [
+      own
+        ? 'This device fetches each of its videos from YouTube and uploads it, so it plays in any podcast app.'
+        : 'This device fetches every video from YouTube and uploads it, so it plays in any podcast app.',
+      'It uses your plan’s storage. Where you are in each video comes along.',
+    ].join(' '),
+    action: 'Move to Cloud',
+  );
+  if (!sure || !context.mounted) return;
+  final s = Services.of(context);
+  final navigation = Navigation.of(context);
+  final navigator = Navigator.of(context);
+  try {
+    tell(context, 'Moving it to ListenJar Cloud…');
+    final feed = own ? await ownToCloud(s.feeds, s.podcasts, show) : await showToCloud(s.feeds, s.podcasts, show);
+    if (navigator.canPop()) navigator.pop();
+    navigation.openFeed(feed.id);
+  } on PlanLimit {
+    if (context.mounted) await showPlans(context, title: 'Your storage is full');
+  } catch (e) {
+    if (context.mounted) tell(context, failure('Couldn’t move it', e, other: 'Try again.'));
+  }
+}
+
+/// Asks, then moves [feed], a YouTube playlist or channel or a podcast of
+/// the listener's own in ListenJar Cloud, to this device: it streams here
+/// from YouTube, and the feed and its uploads are deleted. Where the
+/// listener was comes along.
+Future<void> moveToDevice(BuildContext context, Feed feed) async {
+  final own = feed.source == null;
+  if (!own && parseYouTubeLink(feed.source?.url ?? '') == null) return;
+  final sure = await _confirm(
+    context,
+    title: 'Move “${feed.title}” to this device?',
+    body: [
+      'Here its videos stream from YouTube as you play them, and only this app has it.',
+      own
+        ? 'It leaves your other podcast apps, and its audio is deleted from the cloud.'
+        : 'ListenJar stops following it: it leaves your other podcast apps, and its audio is deleted from the cloud.',
+      'Where you are in each episode comes along.',
+    ].join(' '),
+    action: 'Move to this device',
+  );
+  if (!sure || !context.mounted) return;
+  final s = Services.of(context);
+  final navigation = Navigation.of(context);
+  final navigator = Navigator.of(context);
+  try {
+    tell(context, own ? 'Moving it to this device…' : 'Listing its videos…');
+    final show = own ? await ownToDevice(s.feeds, s.podcasts, feed) : await feedToDevice(s.feeds, s.podcasts, feed);
+    if (navigator.canPop()) navigator.pop();
+    navigation.openShow(show.id);
+  } catch (e) {
+    if (context.mounted) tell(context, failure('Couldn’t move it', e, other: 'Try again.'));
+  }
+}
+
+/// [show], a YouTube playlist or channel on this device, as a ListenJar
+/// Cloud feed: where the listener was is carried to it, and the show here
+/// goes.
+Future<Feed> showToCloud(Feeds feeds, Podcasts podcasts, Podcast show) async {
+  final feed = await feeds.add(show.feedUrl, CancellationToken().merge(TimeoutCancellationToken(const Duration(minutes: 2))));
+  podcasts.library.carry(show.id, feed.id);
+  await podcasts.unfollow(show);
+  return feed;
+}
+
+/// [feed], a YouTube playlist or channel in ListenJar Cloud, followed on
+/// this device instead: where the listener was comes along, and the feed
+/// and its uploads are removed.
+Future<Podcast> feedToDevice(Feeds feeds, Podcasts podcasts, Feed feed) async {
+  final link = parseYouTubeLink(feed.source?.url ?? '') ?? (throw StateError('Not a YouTube playlist or channel'));
+  final show = await podcasts.followYouTube(link, TimeoutCancellationToken(const Duration(minutes: 3)));
+  final library = podcasts.library;
+  // What was carried to the Cloud and hasn't arrived there yet, then the
+  // Cloud show's own.
+  library.applyCarried(show.id, feed.id);
+  if (library.podcasts.where((p) => p.cloudFeedId == feed.id).firstOrNull case final cloud?) {
+    library.copyListening(cloud.id, show.id);
+  }
+  await feeds.remove(feed);
+  return show;
+}
+
+/// [show], a podcast of the listener's own on this device, as one in
+/// ListenJar Cloud: its artwork and videos, oldest first so they list in
+/// the same order; where the listener was is carried to it, and the show
+/// here goes. If a video can't be added, the Cloud one goes instead.
+Future<Feed> ownToCloud(Feeds feeds, Podcasts podcasts, Podcast show) async {
+  final library = podcasts.library;
+  final videos = [for (final e in library.episodes(show.id, oldestFirst: true)) ?e.videoId];
+  final feed = await feeds.create(show.title);
+  try {
+    if (await podcasts.artworkBytes(show.artworkUrl) case final picture?) await feeds.setArtwork(feed, picture);
+    for (final id in videos) {
+      await feeds.addVideo(feed, 'https://www.youtube.com/watch?v=$id', TimeoutCancellationToken(const Duration(minutes: 2)));
+    }
+  } catch (_) {
+    await feeds.remove(feed);
+    rethrow;
+  }
+  library.carry(show.id, feed.id);
+  await podcasts.deleteOwn(show);
+  return feeds.feeds.where((f) => f.id == feed.id).firstOrNull ?? feed;
+}
+
+/// [feed], a podcast of the listener's own in ListenJar Cloud, as one on
+/// this device: its artwork and videos, dated when they were added there;
+/// where the listener was comes along, and the feed and its uploads are
+/// removed.
+Future<Podcast> ownToDevice(Feeds feeds, Podcasts podcasts, Feed feed) async {
+  final episodes = (await feeds.episodes(feed))..sort((a, b) => a.publishedAt.compareTo(b.publishedAt));
+  final picture = await podcasts.artworkBytes(feed.imageUrl);
+  final library = podcasts.library;
+  final show = library.createOwn(feed.title);
+  if (picture != null) await podcasts.setOwnArtwork(show, picture);
+  for (final e in episodes) {
+    library.addOwnVideo(
+      show.id,
+      videoId: e.videoId,
+      title: e.title,
+      duration: switch (e.durationSeconds) {
+        final s? => Duration(seconds: s),
+        null => null,
+      },
+      addedAt: DateTime.tryParse(e.publishedAt),
     );
   }
+  library.applyCarried(show.id, feed.id);
+  if (library.podcasts.where((p) => p.cloudFeedId == feed.id).firstOrNull case final cloud?) {
+    library.copyListening(cloud.id, show.id);
+  }
+  await feeds.remove(feed);
+  return library.podcast(show.id)!;
+}
 
-  /// Paste a link, or type to search: says what it recognises as you type.
-  /// A compact address field like a browser's: recessed paper at rest, a
-  /// shade deeper under the pointer, white with the accent ring while
-  /// typing.
-  Widget _linkField(TextTheme text) {
-    final typed = _link.text.trim();
-    final link = parseYouTubeLink(typed);
-    final adding = _adding != null;
-    final focused = _linkFocus.hasFocus;
-    final hint = text.bodySmall!.copyWith(color: brand.fgSoft);
-    // Even leading keeps the glyphs (and the caret) on the icon's centre line;
-    // proportional leading drops SF Pro a few pixels low.
-    final input = text.bodySmall!.copyWith(
-      color: brand.fg,
-      height: 1.2,
-      leadingDistribution: TextLeadingDistribution.even,
-    );
-    final open = _open;
-    final trailing = switch ((adding, link)) {
-      (true, _) => Text('Looking it up…', style: hint),
-      (_, final l?) when l.kind == SourceKind.video && open != null => TextButton(
-        style: _chip(text),
-        onPressed: () => _addTo(open),
-        child: const Text('Add to this podcast'),
+Future<bool> _confirm(BuildContext context, {required String title, required String body, required String action}) async {
+  final text = Theme.of(context).textTheme;
+  final sure = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: brand.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
+      title: Text(title, style: text.titleLarge),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Text(body, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
       ),
-      (_, final l?) when l.kind == SourceKind.video && _account.user?.plan == Plan.paid => _addSplit(text, l),
-      (_, final l?) => TextButton(
-        style: _chip(text),
-        onPressed: _add,
-        child: Text('Add ${kindLabel(l.kind).replaceFirst('YouTube ', '')}'),
-      ),
-      _ when _looksLikeUrl(typed) => Text('Not a YouTube link', style: hint.copyWith(color: brand.danger)),
-      _ when focused || typed.isNotEmpty => null,
-      _ => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-        decoration: BoxDecoration(
-          color: brand.paper,
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: brand.line),
+      actions: [
+        TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
         ),
-        child: Text('⌘L', style: text.labelSmall!.copyWith(color: brand.fgSoft, fontSize: 11, height: 1.4)),
-      ),
-    };
-    final icon = typed.isNotEmpty && link == null && !_looksLikeUrl(typed) ? Icons.search_rounded : Icons.link_rounded;
-    return MouseRegion(
-      cursor: SystemMouseCursors.text,
-      onEnter: (_) => setState(() => _linkHover = true),
-      onExit: (_) => setState(() => _linkHover = false),
-      child: GestureDetector(
-        // Clicking the padding focuses the field, not the window drag.
-        onTap: _linkFocus.requestFocus,
-        onPanStart: (_) {},
-        child: AnimatedContainer(
-          duration: brand.quick,
-          curve: brand.easeOutExpo,
-          height: 34,
-          padding: const EdgeInsets.only(left: 11, right: 4),
-          decoration: BoxDecoration(
-            color: focused ? brand.white : (_linkHover ? brand.paperDeep : const Color(0xFFEFEDE8)),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: focused ? brand.accent.withValues(alpha: 0.6) : brand.line,
-              width: focused ? 1.5 : 1,
-            ),
-            boxShadow: focused ? const [BoxShadow(color: Color(0x1F5165EE), blurRadius: 0, spreadRadius: 3)] : null,
-          ),
-          child: Row(children: [
-            SizedBox.square(
-              dimension: 16,
-              child: adding
-                ? const Padding(
-                    padding: EdgeInsets.all(1.5),
-                    child: CircularProgressIndicator(strokeWidth: 1.75, color: brand.accent),
-                  )
-                : Icon(icon, size: 16, color: focused ? brand.accent : brand.fgFaint),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _link,
-                focusNode: _linkFocus,
-                enabled: !adding,
-                // A link adds itself; typed words have gone to Search.
-                onSubmitted: (_) => switch ((link, open)) {
-                  (final l?, final o?) when l.kind == SourceKind.video => _addTo(o),
-                  (_?, _) => _add(),
-                  _ => null,
-                },
-                style: input,
-                strutStyle: StrutStyle.fromTextStyle(input, forceStrutHeight: true),
-                cursorColor: brand.accent,
-                cursorHeight: 16,
-                cursorWidth: 1.5,
-                cursorRadius: const Radius.circular(1),
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  border: InputBorder.none,
-                  // Clear of the caret, which sits at the start of the empty field.
-                  hint: Padding(
-                    padding: const EdgeInsets.only(left: 3),
-                    child: Text(
-                      open == null ? 'Search YouTube or paste a link' : 'Paste a video link to add it here, or search',
-                      style: input.copyWith(color: brand.fgFaint),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (trailing != null) ...[const SizedBox(width: 8), trailing],
-            const SizedBox(width: 4),
-          ]),
+        TextButton(
+          style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(action),
         ),
-      ),
-    );
+      ],
+    ),
+  );
+  return sure ?? false;
+}
+
+/// "Listen in…": the podcast apps on this device, then copying the link.
+/// Until the feed's first episode is uploaded it has no RSS, so the button
+/// waits, disabled, while the page shows the sync.
+final class ListenIn extends StatefulWidget {
+  const ListenIn({super.key, required this.feed});
+  final Feed feed;
+
+  @override
+  State<ListenIn> createState() => _ListenInState();
+}
+
+final class _ListenInState extends State<ListenIn> {
+  /// The podcast apps this device can open feeds in, asked once.
+  static final _podcastApps = installedPodcastApps();
+
+  Future<void> _copyFeedLink(String url) async {
+    await Clipboard.setData(ClipboardData(text: url));
+    if (mounted) tell(context, 'Feed link copied. Add it to your podcast app as a podcast by URL.');
   }
 
-  /// The small accent button inside the link field.
-  ButtonStyle _chip(TextTheme text, [BorderRadius? radius]) => brand.button(brand.Tone.accent, brand.ButtonSize.sm).copyWith(
-    minimumSize: const WidgetStatePropertyAll(Size(0, 26)),
-    padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 12)),
-    shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: radius ?? BorderRadius.circular(7))),
-    textStyle: WidgetStatePropertyAll(text.labelLarge!.copyWith(fontSize: 13)),
+  Widget _menuIcon(String asset) => ClipRRect(
+    borderRadius: BorderRadius.circular(5),
+    child: Image.asset(asset, width: 22, height: 22, filterQuality: FilterQuality.medium),
   );
 
-  /// A video, for a listener with a plan: its own podcast (Return), or the
-  /// chevron's menu of their own podcasts to add it to.
-  Widget _addSplit(TextTheme text, YouTubeLink link) {
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      TextButton(
-        style: _chip(text, const BorderRadius.horizontal(left: Radius.circular(7))),
-        onPressed: _add,
-        child: const Text('Add video'),
-      ),
-      const SizedBox(width: 1),
-      Dropdown(
-        align: MenuAlign.end,
-        items: _ownPodcasts(_addTo),
-        builder: (context, menu) => Tooltip(
-          message: 'Add to a podcast of yours',
-          waitDuration: const Duration(milliseconds: 400),
-          child: TextButton(
-            style: _chip(text, const BorderRadius.horizontal(right: Radius.circular(7))).copyWith(
-              padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 5)),
+  @override
+  Widget build(BuildContext context) {
+    final rss = widget.feed.rssUrl;
+    if (rss == null) {
+      return Tooltip(
+        message: 'Ready once the first episode is uploaded',
+        child: TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: null,
+          child: const Text('Listen in…'),
+        ),
+      );
+    }
+    return FutureBuilder(
+      future: _podcastApps,
+      builder: (context, snapshot) => Dropdown(
+        items: [
+          for (final app in snapshot.data ?? const <PodcastApp>[])
+            MenuEntry(
+              app.web ? '${app.title} (web)' : app.title,
+              leading: _menuIcon(app.icon),
+              onPressed: () => openInPodcastApp(app, rss),
             ),
-            onPressed: menu.toggle,
-            child: const Icon(Icons.expand_more_rounded, size: 17),
-          ),
+          if (snapshot.data?.isNotEmpty ?? false) const MenuDivider(),
+          MenuEntry('Copy feed link', leading: _menuIcon(podcastAppIcon('rss')), onPressed: () => _copyFeedLink(rss)),
+        ],
+        builder: (context, menu) => TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: menu.toggle,
+          child: const Text('Listen in…'),
         ),
       ),
+    );
+  }
+}
+
+/// What syncing is doing with a feed, in a line, and whether it failed.
+(String, bool) feedStatus(Feed feed, FeedSync? sync) {
+  String episodes(int n) => n == 1 ? '1 episode' : '$n episodes';
+  switch (sync) {
+    case FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true), :final waiting):
+      return (waiting > 0 ? 'Storage full · $waiting waiting to upload' : 'Storage full', true);
+    case FeedSync(phase: FeedPhase.failed, error: PlanLimit()):
+      return ('Paused until you have a plan', true);
+    case FeedSync(phase: FeedPhase.upToDate, episodes: 0) when feed.source == null:
+      return ('No episodes yet', false);
+  }
+  return switch (sync?.phase) {
+    null || FeedPhase.waiting => ('Waiting to sync', false),
+    FeedPhase.scanning => ('Checking YouTube…', false),
+    FeedPhase.syncing => (
+      [
+        if (sync!.current case final title?)
+          '${sync.stage ?? 'Syncing'} “$title”${sync.fraction == null ? '' : ' ${(sync.fraction! * 100).floor()}%'}',
+        '${sync.queued} to go',
+      ].join(' · '),
+      false,
+    ),
+    FeedPhase.upToDate => (
+      [
+        episodes(sync!.episodes),
+        'up to date',
+        if (sync.skipped > 0) '${sync.skipped} unavailable',
+      ].join(' · '),
+      false,
+    ),
+    FeedPhase.failed => ('Couldn’t sync: ${sync!.error}', true),
+  };
+}
+
+/// A feed's sync, short enough for a Library tile; null when there is
+/// nothing to say, so the tile says who makes the show.
+(String, bool)? feedTileStatus(Feed feed, FeedSync? sync, {required bool playable}) => switch (sync) {
+  FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true)) => ('Storage full', true),
+  FeedSync(phase: FeedPhase.failed, error: PlanLimit()) => ('Paused until you have a plan', true),
+  FeedSync(phase: FeedPhase.failed) => ('Couldn’t sync', true),
+  FeedSync(phase: FeedPhase.scanning) => ('Checking YouTube…', false),
+  FeedSync(phase: FeedPhase.syncing, :final stage?, :final fraction?) => ('$stage ${(fraction * 100).floor()}%', false),
+  FeedSync(phase: FeedPhase.syncing, :final queued) => ('Syncing · $queued to go', false),
+  FeedSync(phase: FeedPhase.upToDate, episodes: 0) => ('No episodes yet', false),
+  _ when !playable => ('Waiting to sync', false),
+  _ => null,
+};
+
+/// The plan's storage is full and episodes wait: make room, or move to a
+/// bigger plan.
+final class StorageFullNotice extends StatelessWidget {
+  const StorageFullNotice({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Services.of(context);
+    final user = s.account.user;
+    if (user == null) return const SizedBox.shrink();
+    final waiting = s.feeds.waitingForRoom;
+    final bigger = biggerPlan(user);
+    return Notice(
+      danger: true,
+      title: switch (user.storageLimitBytes) {
+        final limit? => 'Your ${formatBytes(limit)} is full',
+        null => 'Your storage is full',
+      },
+      body: [
+        if (waiting > 0) waiting == 1 ? '1 episode is waiting to upload.' : '$waiting episodes are waiting to upload.',
+        'Remove podcasts or episodes you’ve heard${bigger == null ? '' : ', or move to a bigger plan'}, and they upload by themselves.',
+      ].join(' '),
+      actions: [
+        if (bigger != null)
+          TextButton(
+            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+            onPressed: () => openInBrowser(context, billingUrl),
+            child: Text('Move to ${bigger.name.replaceFirst('ListenJar ', '')}'),
+          ),
+        TextButton(
+          style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
+          onPressed: () => unawaited(showMakeRoom(
+            context,
+            account: s.account,
+            feeds: s.feeds,
+            onRemove: (feed) => removeCloudFeed(context, feed),
+          )),
+          child: const Text('Make room'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Settings' ListenJar Cloud: how to sign in, while nobody is; then who is,
+/// their plan and storage, syncing now and signing out.
+final class AccountPanel extends StatefulWidget {
+  const AccountPanel({super.key});
+
+  @override
+  State<AccountPanel> createState() => _AccountPanelState();
+}
+
+final class _AccountPanelState extends State<AccountPanel> {
+  void _plans([String title = 'Keep what you add']) => unawaited(showPlans(context, title: title));
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Services.of(context);
+    final text = Theme.of(context).textTheme;
+    return ListenableBuilder(
+      listenable: Listenable.merge([s.account, s.feeds]),
+      builder: (context, _) => brand.panel(
+        padding: 24,
+        child: switch (s.account.user) {
+          null => _signIn(text, s.account),
+          final user => _signedIn(text, s, user),
+        },
+      ),
+    );
+  }
+
+  Widget _signedIn(TextTheme text, Services s, User user) {
+    final soft = text.bodySmall!.copyWith(color: brand.fgSoft);
+    final limit = user.storageLimitBytes;
+    final used = user.storageUsedBytes ?? 0;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        _avatar(text, user),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(user.name.isEmpty ? user.email : user.name, style: text.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (user.name.isNotEmpty) Text(user.email, style: soft, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ]),
+        ),
+      ]),
+      const SizedBox(height: 20),
+      Text(planName(user), style: text.titleMedium!.copyWith(fontSize: 15)),
+      const SizedBox(height: 6),
+      if (user.plan == Plan.free)
+        Text('Single videos, each removed about a day after you add it', style: soft)
+      else
+        Row(children: [
+          if (limit != null) ...[StorageMeter(used: used, limit: limit), const SizedBox(width: 10)],
+          Flexible(
+            child: Text(
+              limit == null ? 'Playlists, channels and podcasts of your own' : '${formatBytes(used)} of ${formatBytes(limit)} used',
+              style: soft.copyWith(
+                color: used >= (limit ?? 1 << 62) ? brand.danger : brand.fgSoft,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ]),
+      const SizedBox(height: 4),
+      Text(s.feeds.summary, style: soft),
+      const SizedBox(height: 18),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        if (user.plan == Plan.free)
+          brand.accentShadow(
+            enabled: true,
+            child: TextButton(style: brand.button(brand.Tone.accent, brand.ButtonSize.sm), onPressed: _plans, child: const Text('See plans')),
+          )
+        else
+          TextButton.icon(
+            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+            onPressed: () => openInBrowser(context, billingUrl),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Manage plan'),
+          ),
+        TextButton.icon(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: s.feeds.loading ? null : s.feeds.syncNow,
+          icon: const Icon(Icons.sync_rounded, size: 16),
+          label: const Text('Sync now'),
+        ),
+        TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: s.account.signOut,
+          child: const Text('Sign out'),
+        ),
+      ]),
     ]);
   }
 
-  /// The menu of the listener's own podcasts to add a video to, then a new one.
-  List<Widget> _ownPodcasts(void Function(Feed?) pick) {
-    final own = _feeds.own;
-    return [
-      const MenuHeader('Add to a podcast of yours'),
-      for (final feed in own) MenuEntry(feed.title, icon: Icons.podcasts_rounded, onPressed: () => pick(feed)),
-      if (own.isNotEmpty) const MenuDivider(),
-      MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => pick(null)),
-    ];
-  }
-
-  /// A YouTube video feed's video, for a listener with a plan: added to a
-  /// podcast of theirs from the row, without pasting its link again.
-  Widget _addToPodcast(TextTheme text, Feed feed) {
-    if (_copying.contains(feed.id)) {
-      return const SizedBox.square(
-        dimension: 40,
-        child: Center(
-          child: SizedBox.square(
-            dimension: 15,
-            child: CircularProgressIndicator(strokeWidth: 1.75, color: brand.accent),
-          ),
-        ),
-      );
-    }
-    return Dropdown(
-      align: MenuAlign.end,
-      items: _ownPodcasts((target) => _addTo(target, from: feed)),
-      builder: (context, menu) => IconButton(
-        tooltip: 'Add to a podcast of yours',
-        visualDensity: VisualDensity.compact,
-        onPressed: menu.toggle,
-        icon: const Icon(Icons.playlist_add_rounded, size: 19, color: brand.fgSoft),
-      ),
-    );
-  }
-
-  /// The listener's initial; it opens who is signed in, syncing and signing out.
-  Widget _accountMenu(TextTheme text, User user) => Dropdown(
-    align: MenuAlign.end,
-    items: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(user.email, style: text.bodySmall!.copyWith(color: brand.fgSoft)),
-          const SizedBox(height: 2),
-          Text(
-            [
-              planName(user),
-              if (user.storageLimitBytes case final limit?) '${formatBytes(user.storageUsedBytes ?? 0)} of ${formatBytes(limit)}',
-            ].join(' · '),
-            style: text.bodySmall!.copyWith(color: brand.fg, fontWeight: FontWeight.w600),
-          ),
-        ]),
-      ),
-      const MenuDivider(),
-      if (user.plan == Plan.free)
-        MenuEntry('See plans…', icon: Icons.workspace_premium_outlined, onPressed: _plans)
-      else
-        MenuEntry('Manage plan', icon: Icons.open_in_new_rounded, onPressed: () => openInBrowser(context, billingUrl)),
-      MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: _feeds.loading ? null : _feeds.syncNow),
-      const MenuDivider(),
-      MenuEntry('Sign out', icon: Icons.logout_rounded, onPressed: _account.signOut),
-    ],
-    builder: (context, menu) => Tooltip(
-      message: user.email,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () {
-          if (menu.isOpen) return menu.close();
-          unawaited(_account.refresh());
-          menu.open();
-        },
-        child: _avatar(text, user),
-      ),
-    ),
-  );
-
   /// The Google account's picture, or the listener's initial without one.
   Widget _avatar(TextTheme text, User user) {
-    const size = 30.0;
+    const size = 40.0;
     final name = user.name.isEmpty ? user.email : user.name;
     final initial = Container(
       alignment: Alignment.center,
@@ -655,25 +599,24 @@ class _CloudPageState extends State<CloudPage> {
     );
   }
 
-  /// How to sign in, while nobody is.
-  Widget _signInPanel(TextTheme text) {
-    final (title, body, action) = switch (_account) {
-      Account(restoring: true) => (null, null, null),
+  Widget _signIn(TextTheme text, Account account) {
+    final (title, body, action) = switch (account) {
+      Account(restoring: true) => ('Signing in…', null, null),
       Account(signingIn: final token?) => (
         'Finish in your browser',
         'Allow the app on the page that opened. It comes back here when you do.',
-        TextButton(style: brand.button(brand.Tone.quiet), onPressed: token.cancel, child: const Text('Cancel')),
+        TextButton(style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm), onPressed: token.cancel, child: const Text('Cancel')),
       ),
       _ => (
         'Your YouTube, as podcasts',
         'Follow YouTube playlists and channels, or gather any videos into a podcast of your own. '
-          'ListenJar keeps them as podcast feeds in the cloud, so new episodes reach this app and any podcast app you use. '
+          'ListenJar keeps them as podcast feeds in the cloud, so new episodes reach your Library and any podcast app you use. '
           'This device fetches them from YouTube and uploads them; the plans pay for the storage.',
         brand.accentShadow(
           enabled: true,
           child: TextButton.icon(
-            style: brand.button(brand.Tone.accent),
-            onPressed: _startSignIn,
+            style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
+            onPressed: () => unawaited(signIn(account)),
             iconAlignment: IconAlignment.end,
             icon: const Arrow(),
             label: const Text('Sign in with your browser'),
@@ -681,558 +624,39 @@ class _CloudPageState extends State<CloudPage> {
         ),
       ),
     };
-    if (title == null) return const _Skeleton(lines: 2);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: text.titleLarge),
-        const SizedBox(height: 8),
-        Text(body!, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
-        if (_account.authError case final error?) ...[
-          const SizedBox(height: 16),
-          _problem(text, _failure('Couldn’t sign in', error, other: 'Try again.'), error),
-        ],
-        const SizedBox(height: 22),
-        Wrap(spacing: 10, runSpacing: 10, children: [
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: text.titleMedium),
+      if (body != null) ...[
+        const SizedBox(height: 6),
+        Text(body, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
+      ],
+      if (account.authError case final error?) ...[
+        const SizedBox(height: 14),
+        Text(failure('Couldn’t sign in', error, other: 'Try again.'), style: text.bodyMedium!.copyWith(color: brand.danger)),
+      ],
+      if (action != null || !account.restoring) ...[
+        const SizedBox(height: 18),
+        Wrap(spacing: 8, runSpacing: 8, children: [
           ?action,
-          if (!_account.restoring && _account.signingIn == null)
-            TextButton(style: brand.button(brand.Tone.quiet), onPressed: () => _plans('ListenJar Cloud plans'), child: const Text('See plans')),
+          if (!account.restoring && account.signingIn == null)
+            TextButton(
+              style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+              onPressed: () => _plans('ListenJar Cloud plans'),
+              child: const Text('See plans'),
+            ),
         ]),
       ],
-    );
+    ]);
   }
-
-  /// What went wrong adding a link, and a full plan, above the list or an
-  /// open podcast.
-  List<Widget> _problems(TextTheme text) => [
-      if (_addError case PlanLimit(storageFull: false)) ...[
-        Notice(
-          title: 'Playlists and channels come with a plan',
-          body: 'On Free, ListenJar takes single videos for a day. A plan follows a playlist or a channel '
-            'and adds its new videos as episodes, and keeps them.',
-          actions: [
-            TextButton(
-              style: whiteButton(),
-              onPressed: () => setState(() => _addError = null),
-              child: const Text('Not now'),
-            ),
-            brand.accentShadow(
-              enabled: true,
-              child: TextButton(
-                style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
-                onPressed: () => _plans('Follow playlists and channels'),
-                child: const Text('See plans'),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-      ] else if (_addError case PlanLimit(storageFull: true)) ...[
-        _storageFull(),
-        const SizedBox(height: 12),
-      ] else if (_addError case final error?) ...[
-        _problem(
-          text,
-          _failure('Couldn’t add that link', error, other: 'Check it plays on YouTube, then try again.'),
-          error,
-        ),
-        const SizedBox(height: 12),
-      ],
-      if (_feeds.storageFull && _addError is! PlanLimit) ...[
-        _storageFull(),
-        const SizedBox(height: 12),
-      ],
-  ];
-
-  /// An open podcast of the listener's own: problems, then its page.
-  Widget _podcast(TextTheme text, Feed feed) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      ..._problems(text),
-      const SizedBox(height: 8),
-      PodcastPage(
-        feed: feed,
-        feeds: _feeds,
-        listenIn: _listenIn(text, feed, feed.rssUrl),
-        onRemove: () => _remove(feed),
-      ),
-    ],
-  );
-
-  /// The listener's feeds: problems first, then each feed, or how to start.
-  Widget _feedsList(TextTheme text) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (_account.user case final user? when _feeds.feeds.isNotEmpty || user.plan == Plan.paid)
-        PlanBar(user: user, onPlans: _plans, onNewPodcast: () => unawaited(_newPodcast())),
-      ..._problems(text),
-      if (_feeds.feedsError case final error?)
-        _problem(text, _failure('Couldn’t load your podcasts', error, other: 'Sync again.'), error)
-      else if (_feeds.loading && _feeds.feeds.isEmpty)
-        const _Skeleton(lines: 3, rows: true)
-      else if (_feeds.feeds.isEmpty)
-        _emptyFeeds(text)
-      else
-        DecoratedBox(
-          decoration: BoxDecoration(
-            color: brand.white,
-            borderRadius: BorderRadius.circular(brand.radiusTile),
-            boxShadow: const [brand.shadowSoft],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(brand.radiusTile),
-            child: Column(children: [
-              for (final (i, feed) in _feeds.feeds.indexed) ...[
-                if (i > 0) const Divider(height: 1, thickness: 1, indent: 84, color: brand.line),
-                // A podcast of the listener's own opens its episodes and artwork.
-                feed.source == null
-                  ? _OpenableRow(
-                      key: ValueKey(feed.id),
-                      label: 'Open “${feed.title}”',
-                      onOpen: () => _openPodcast(feed),
-                      child: _feedRow(text, feed),
-                    )
-                  : _feedRow(text, feed),
-              ],
-            ]),
-          ),
-        ),
-    ],
-  );
-
-  /// The plan's storage is full and episodes wait: make room, or move to
-  /// a bigger plan.
-  Widget _storageFull() {
-    final user = _account.user!;
-    final waiting = _feeds.waitingForRoom;
-    final bigger = biggerPlan(user);
-    return Notice(
-      danger: true,
-      title: switch (user.storageLimitBytes) {
-        final limit? => 'Your ${formatBytes(limit)} is full',
-        null => 'Your storage is full',
-      },
-      body: [
-        if (waiting > 0) waiting == 1 ? '1 episode is waiting to upload.' : '$waiting episodes are waiting to upload.',
-        'Remove podcasts or episodes you’ve heard${bigger == null ? '' : ', or move to a bigger plan'}, and they upload by themselves.',
-      ].join(' '),
-      actions: [
-        if (bigger != null)
-          TextButton(
-            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => openInBrowser(context, billingUrl),
-            child: Text('Move to ${bigger.name.replaceFirst('ListenJar ', '')}'),
-          ),
-        TextButton(
-          style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
-          onPressed: _makeRoom,
-          child: const Text('Make room'),
-        ),
-      ],
-    );
-  }
-
-  /// A feed: its artwork, its title, and what syncing is doing with it.
-  Widget _feedRow(TextTheme text, Feed feed) {
-    final sync = _feeds.statusOf(feed);
-    final (status, failed) = _statusLine(feed, sync);
-    final expiry = removedIn(feed, DateTime.now());
-    final phase = sync?.phase ?? FeedPhase.waiting;
-    final dot = switch (phase) {
-      FeedPhase.failed => brand.danger,
-      FeedPhase.upToDate => const Color(0xFF2F9E6E),
-      FeedPhase.syncing || FeedPhase.scanning => brand.accent,
-      FeedPhase.waiting => brand.fgFaint,
-    };
-    final fraction = phase == FeedPhase.syncing ? sync?.fraction : null;
-    return Padding(
-      key: ValueKey(feed.id),
-      padding: const EdgeInsets.fromLTRB(16, 14, 10, 14),
-      child: Row(children: [
-        _artwork(feed.imageUrl),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _FeedTitle(title: feed.title, url: feed.source?.url, style: text.titleMedium!.copyWith(fontSize: 15)),
-            const SizedBox(height: 4),
-            Row(children: [
-              Container(width: 7, height: 7, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(
-                  [
-                    switch (feed.source) {
-                      final source? => kindLabel(source.kind),
-                      null => 'Podcast of your own',
-                    },
-                    status,
-                  ].join(' · '),
-                  style: text.bodySmall!.copyWith(color: failed ? brand.danger : brand.fgSoft),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (expiry != null)
-                Tooltip(
-                  message: removedAt(feed),
-                  child: Text(' · $expiry', style: text.bodySmall!.copyWith(color: brand.fgSoft), maxLines: 1),
-                ),
-            ]),
-            if (fraction != null) ...[
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(2),
-                child: LinearProgressIndicator(
-                  value: fraction,
-                  minHeight: 3,
-                  color: brand.accent,
-                  backgroundColor: brand.mist,
-                ),
-              ),
-            ],
-          ]),
-        ),
-        const SizedBox(width: 16),
-        if (feed.source?.kind == SourceKind.video && _account.user?.plan == Plan.paid) ...[
-          _addToPodcast(text, feed),
-          const SizedBox(width: 6),
-        ],
-        _listenIn(text, feed, feed.rssUrl),
-        const SizedBox(width: 2),
-        IconButton(
-          tooltip: 'Remove',
-          visualDensity: VisualDensity.compact,
-          onPressed: () => _remove(feed),
-          icon: const Icon(Icons.close_rounded, size: 17, color: brand.fgFaint),
-        ),
-      ]),
-    );
-  }
-
-  /// A feed's artwork, square like a podcast's; a plain tile without one.
-  Widget _artwork(String? url) {
-    const size = 52.0;
-    final placeholder = Container(
-      color: brand.paper,
-      alignment: Alignment.center,
-      child: const Icon(Icons.podcasts_rounded, size: 22, color: brand.fgSoft),
-    );
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: SizedBox.square(
-        dimension: size,
-        child: url == null
-          ? placeholder
-          : Image.network(
-              url,
-              fit: BoxFit.cover,
-              cacheHeight: (size * MediaQuery.devicePixelRatioOf(context)).round(),
-              errorBuilder: (_, _, _) => placeholder,
-              frameBuilder: (_, child, frame, sync) => sync || frame != null ? child : placeholder,
-            ),
-      ),
-    );
-  }
-
-  /// A podcast app's icon in the menu, rounded like an app icon.
-  Widget _menuIcon(String asset) => ClipRRect(
-    borderRadius: BorderRadius.circular(5),
-    child: Image.asset(asset, width: 22, height: 22, filterQuality: FilterQuality.medium),
-  );
-
-  /// "Listen in…": the podcast apps on this device, then copying the link.
-  /// Until the feed's first episode is uploaded it has no RSS, so the button
-  /// waits, disabled, while the status line shows the sync.
-  Widget _listenIn(TextTheme text, Feed feed, String? rss) => rss == null
-    ? Tooltip(
-        message: 'Ready once the first episode is uploaded',
-        child: TextButton(
-          // Deep paper and faint text: brand.button's disabled look.
-          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-          onPressed: null,
-          child: const Text('Listen in…'),
-        ),
-      )
-    : FutureBuilder(
-    future: _podcastApps,
-    builder: (context, snapshot) => Dropdown(
-      items: [
-        for (final app in snapshot.data ?? const <PodcastApp>[])
-          MenuEntry(
-            app.web ? '${app.title} (web)' : app.title,
-            leading: _menuIcon(app.icon),
-            onPressed: () => openInPodcastApp(app, rss),
-          ),
-        if (snapshot.data?.isNotEmpty ?? false) const MenuDivider(),
-        MenuEntry('Copy feed link', leading: _menuIcon(podcastAppIcon('rss')), onPressed: () => _copyFeedLink(feed)),
-      ],
-      builder: (context, menu) => TextButton(
-        style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-        onPressed: menu.toggle,
-        child: const Text('Listen in…'),
-      ),
-    ),
-  );
-
-  /// What syncing is doing with a feed, in a line, and whether it failed.
-  (String, bool) _statusLine(Feed feed, FeedSync? sync) {
-    String episodes(int n) => n == 1 ? '1 episode' : '$n episodes';
-    switch (sync) {
-      case FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true), :final waiting):
-        return (waiting > 0 ? 'Storage full · $waiting waiting to upload' : 'Storage full', true);
-      case FeedSync(phase: FeedPhase.failed, error: PlanLimit()):
-        return ('Paused until you have a plan', true);
-      case FeedSync(phase: FeedPhase.upToDate, episodes: 0) when feed.source == null:
-        return ('No episodes yet. Paste a video link above to add one', false);
-    }
-    return switch (sync?.phase) {
-      null || FeedPhase.waiting => ('Waiting to sync', false),
-      FeedPhase.scanning => ('Checking YouTube…', false),
-      FeedPhase.syncing => (
-        [
-          if (sync!.current case final title?)
-            '${sync.stage ?? 'Syncing'} “$title”${sync.fraction == null ? '' : ' ${(sync.fraction! * 100).floor()}%'}',
-          '${sync.queued} to go',
-        ].join(' · '),
-        false,
-      ),
-      FeedPhase.upToDate => (
-        [
-          episodes(sync!.episodes),
-          'up to date',
-          if (sync.skipped > 0) '${sync.skipped} unavailable',
-        ].join(' · '),
-        false,
-      ),
-      FeedPhase.failed => ('Couldn’t sync: ${sync!.error}', true),
-    };
-  }
-
-  /// Before the first link: what the field above is for.
-  Widget _emptyFeeds(TextTheme text) => Padding(
-    padding: const EdgeInsets.only(top: 72),
-    child: Column(children: [
-      logo(height: 34),
-      const SizedBox(height: 28),
-      Text('Turn YouTube into a podcast', style: text.headlineSmall, textAlign: TextAlign.center),
-      const SizedBox(height: 10),
-      ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: Text(
-          'Search for a video, a playlist or a whole channel in the field above, '
-          'or paste its link. Its episodes arrive in your podcast app.',
-          style: text.bodyMedium!.copyWith(color: brand.fgSoft),
-          textAlign: TextAlign.center,
-        ),
-      ),
-    ]),
-  );
-
-  /// What went wrong and what to do, with the detail underneath.
-  Widget _problem(TextTheme text, String message, Object error) => DecoratedBox(
-    decoration: BoxDecoration(color: brand.paper, borderRadius: BorderRadius.circular(brand.radiusSheet)),
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(message, style: text.bodyMedium!.copyWith(color: brand.danger)),
-        const SizedBox(height: 4),
-        SelectableText(
-          error is CancelledException ? 'It took too long.' : '$error',
-          style: text.bodySmall!.copyWith(color: brand.fgSoft),
-        ),
-      ]),
-    ),
-  );
 }
 
 /// What failed, said as [what], and what the listener can do about it: check
 /// their connection when the network failed, wait when ListenJar's server
 /// did, and [other] otherwise.
-String _failure(String what, Object error, {required String other}) => switch (error) {
+String failure(String what, Object error, {required String other}) => switch (error) {
   SocketException() || HttpException() || TimeoutException() || CancelledException() || http.ClientException() =>
     '$what. Check your connection, then try again.',
   ApiStatusException(:final statusCode) when statusCode >= 500 =>
     '$what. Something went wrong on our side, so try again in a minute.',
   _ => '$what. $other',
 };
-
-/// Words to search for: not a link, nor too short to mean much.
-bool _isQuery(String text) => text.characters.length >= 2 && parseYouTubeLink(text) == null && !_looksLikeUrl(text);
-
-/// A link, though not one ListenJar takes.
-bool _looksLikeUrl(String text) =>
-  RegExp(r'^(https?://|www\.)|^[\w-]+(\.[\w-]+)+/', caseSensitive: false).hasMatch(text.trim());
-
-/// A feed row that opens: a paper tint under the pointer or with keyboard
-/// focus, and a chevron saying where it goes. Its own buttons keep their
-/// clicks.
-final class _OpenableRow extends StatefulWidget {
-  const _OpenableRow({super.key, required this.label, required this.onOpen, required this.child});
-  final String label;
-  final VoidCallback onOpen;
-  final Widget child;
-
-  @override
-  State<_OpenableRow> createState() => _OpenableRowState();
-}
-
-final class _OpenableRowState extends State<_OpenableRow> {
-  bool _hover = false;
-  bool _focused = false;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    button: true,
-    label: widget.label,
-    child: FocusableActionDetector(
-      mouseCursor: SystemMouseCursors.click,
-      onShowHoverHighlight: (hover) => setState(() => _hover = hover),
-      onShowFocusHighlight: (focused) => setState(() => _focused = focused),
-      actions: {ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) => widget.onOpen())},
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onOpen,
-        child: AnimatedContainer(
-          duration: brand.quick,
-          curve: brand.easeOutExpo,
-          decoration: BoxDecoration(
-            color: _hover || _focused ? const Color(0xFFFAF9F6) : brand.white,
-            border: _focused ? Border.all(color: brand.accent, width: 2) : null,
-          ),
-          child: Row(children: [
-            Expanded(child: widget.child),
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: AnimatedSlide(
-                offset: Offset(_hover ? 0.15 : 0, 0),
-                duration: brand.quick,
-                curve: brand.easeOutExpo,
-                child: Icon(Icons.chevron_right_rounded, size: 20, color: _hover ? brand.fgSoft : brand.fgFaint),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    ),
-  );
-}
-
-/// A feed's title, a link to its source on YouTube: underlined under the
-/// pointer, like the website's links.
-final class _FeedTitle extends StatefulWidget {
-  const _FeedTitle({required this.title, required this.url, required this.style});
-  final String title;
-  final String? url;
-  final TextStyle style;
-
-  @override
-  State<_FeedTitle> createState() => _FeedTitleState();
-}
-
-final class _FeedTitleState extends State<_FeedTitle> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = Text(
-      widget.title,
-      style: widget.style.copyWith(
-        decoration: _hover ? TextDecoration.underline : null,
-        decorationColor: widget.style.color,
-      ),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-    );
-    final url = Uri.tryParse(widget.url ?? '');
-    if (url == null || !url.hasScheme) return label;
-    return Tooltip(
-      message: url.toString(),
-      waitDuration: const Duration(milliseconds: 600),
-      child: Link(
-        uri: url,
-        target: LinkTarget.blank,
-        builder: (context, follow) => MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: GestureDetector(onTap: follow, child: label),
-        ),
-      ),
-    );
-  }
-}
-
-/// Placeholder bars that pulse like the website's skeletons, still when the
-/// system asks for less motion.
-final class _Skeleton extends StatefulWidget {
-  const _Skeleton({required this.lines, this.rows = false});
-  final int lines;
-
-  /// Feed-row tiles instead of text bars.
-  final bool rows;
-
-  @override
-  State<_Skeleton> createState() => _SkeletonState();
-}
-
-final class _SkeletonState extends State<_Skeleton> with SingleTickerProviderStateMixin {
-  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _pulse.stop();
-      _pulse.value = 0;
-    } else if (!_pulse.isAnimating) {
-      _pulse.repeat(reverse: true);
-    }
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    label: 'Loading',
-    child: FadeTransition(
-      opacity: Tween(begin: 1.0, end: 0.5).animate(CurvedAnimation(parent: _pulse, curve: Curves.easeInOut)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var i = 0; i < widget.lines; i++) ...[
-            if (i > 0) SizedBox(height: widget.rows ? 8 : 12),
-            widget.rows
-              ? Container(
-                  height: 52,
-                  decoration: BoxDecoration(color: brand.paper, borderRadius: BorderRadius.circular(brand.radiusTile)),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.centerLeft,
-                  child: FractionallySizedBox(widthFactor: 0.6 - i * 0.12, child: _bar(14)),
-                )
-              : FractionallySizedBox(widthFactor: i == 0 ? 0.4 : 0.8, child: _bar(i == 0 ? 20 : 14)),
-          ],
-        ],
-      ),
-    ),
-  );
-
-  Widget _bar(double height) => Container(
-    height: height,
-    decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(height)),
-  );
-}
-
-/// The ListenJar section, with the app's own account and feeds.
-final class CloudSection extends StatelessWidget {
-  const CloudSection({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Services.of(context);
-    return CloudPage(youtube: s.youtube, account: s.account, feeds: s.feeds);
-  }
-}

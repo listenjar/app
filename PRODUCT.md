@@ -19,6 +19,13 @@ refresh, download for offline, Up Next, playback speed, a sleep timer, and the s
 controls and headphone buttons. All of it is free and needs no account. A single YouTube video
 plays here as an episode of its own, also free.
 
+On a paid plan, a YouTube playlist or channel can be followed two ways, and the Library shows
+which each one is: on this device, where its videos list as episodes and stream from YouTube as
+they play, with nothing downloaded or uploaded; or in ListenJar Cloud. A podcast of the
+listener's own, YouTube videos they gather under their own name and artwork, lives either place
+too. Either kind moves between this device and the Cloud whenever the listener likes, keeping
+where they were in each video.
+
 Signed in, it is also the syncing side of ListenJar Cloud: YouTube playlists, channels and custom
 podcasts become feeds ListenJar hosts. The app downloads what the listener added on their own
 device, uploads it to ListenJar, and deletes the local files once the upload is done; the feeds

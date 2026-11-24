@@ -25,6 +25,7 @@ import 'dart:ui' show IsolateNameServer;
 import 'package:workmanager/workmanager.dart';
 
 import 'account.dart';
+import 'backend/api.dart' show Plan;
 import 'downloads.dart';
 import 'feeds.dart';
 import 'library.dart';
@@ -71,7 +72,7 @@ Future<void> runSyncJob() async {
   final feeds = Feeds(account, youtube);
   final library = await Library.open();
   final downloads = Downloads(library, youtube);
-  final podcasts = Podcasts(library, downloads, youtube);
+  final podcasts = Podcasts(library, downloads, youtube)..paid = () => account.restoring ? null : account.user?.plan == Plan.paid;
   try {
     await downloads.start();
     await account.restore();

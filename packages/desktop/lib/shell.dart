@@ -1,5 +1,5 @@
-// The window: the player's sections and the ListenJar section side by side.
-// Wide windows (desktop, tablets) get a sidebar; phones a bottom bar. The
+// The window: the player's sections. ListenJar Cloud has none of its own:
+// its feeds are shows in the Library (cloud.dart). Wide windows (desktop, tablets) get a sidebar; phones a bottom bar. The
 // mini player sits under every section once something is loaded and opens
 // Now Playing (now_playing.dart). Each section keeps one stack of pages, so
 // a show opened from search comes back with the search behind it.
@@ -29,7 +29,6 @@ enum Section {
   search('Search', Icons.search_rounded),
   queue('Up Next', Icons.queue_music_rounded),
   downloads('Downloads', Icons.download_rounded),
-  cloud('ListenJar Cloud', Icons.cloud_outlined),
   settings('Settings', Icons.tune_rounded);
 
   const Section(this.label, this.icon);
@@ -38,7 +37,7 @@ enum Section {
 }
 
 /// Phones' bottom bar: Downloads and Settings are a tap away in Library.
-const _phoneSections = [Section.home, Section.library, Section.search, Section.queue, Section.cloud];
+const _phoneSections = [Section.home, Section.library, Section.search, Section.queue];
 
 /// From this width the sidebar shows.
 const wideWidth = 760.0;
@@ -61,7 +60,13 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   final search = SearchRequest();
 
   late final _lifecycle = AppLifecycleListener(
-    onResume: () => unawaited(Services.of(context).podcasts.refreshAll()),
+    // Often back from checkout in the browser: the plan and storage may
+    // have changed too.
+    onResume: () {
+      final s = Services.of(context);
+      unawaited(s.podcasts.refreshAll());
+      if (s.account.user != null) unawaited(s.account.refresh());
+    },
   );
 
   late Navigation _navigation;
@@ -118,10 +123,23 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
 
   @override
   void openShow(int podcastId) {
-    final section = _section == Section.settings || _section == Section.cloud ? Section.library : _section;
+    _push(_section == Section.settings ? Section.library : _section, ShowPage(podcastId: podcastId));
+  }
+
+  @override
+  void openFeed(String feedId) => _push(Section.library, CloudShowPage(feedId: feedId), fresh: true);
+
+  @override
+  void openSettings() => _go(Section.settings);
+
+  /// Shows [section] with [page] on top; [fresh] first goes back to the
+  /// section's first page.
+  void _push(Section section, Widget page, {bool fresh = false}) {
     setState(() => _section = section);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _navigators[section]!.currentState?.push(_page(ShowPage(podcastId: podcastId)));
+      final navigator = _navigators[section]!.currentState;
+      if (fresh) navigator?.popUntil((r) => r.isFirst);
+      navigator?.push(_page(page));
     });
   }
 
@@ -135,11 +153,12 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     search.ask(query: query, youtube: youtube, into: into);
   }
 
-  @override
-  void openCloud() => _go(Section.cloud);
-
+  // Each page is a Material of its own, so its ink (an InkWell's hover,
+  // focus or pressed highlight) paints with the page. On the Scaffold's
+  // Material it painted under every section, and a hidden page's stuck
+  // highlight showed through the others as grey bars.
   static Route<void> _page(Widget page) => PageRouteBuilder<void>(
-    pageBuilder: (_, _, _) => page,
+    pageBuilder: (_, _, _) => Material(type: MaterialType.transparency, child: page),
     transitionDuration: const Duration(milliseconds: 220),
     reverseTransitionDuration: const Duration(milliseconds: 160),
     transitionsBuilder: (context, animation, _, child) {
@@ -161,7 +180,6 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     Section.search => SearchPage(request: search),
     Section.queue => const QueuePage(),
     Section.downloads => const DownloadsPage(),
-    Section.cloud => const CloudSection(),
     Section.settings => const SettingsPage(),
   };
 
@@ -284,7 +302,7 @@ final class _Sidebar extends StatelessWidget {
         Padding(padding: const EdgeInsets.fromLTRB(22, 0, 22, 22), child: Align(alignment: Alignment.centerLeft, child: logo(height: 26))),
         Expanded(
           child: ListenableBuilder(
-            listenable: Listenable.merge([s.library, s.account]),
+            listenable: s.library,
             builder: (context, _) {
               final queued = s.library.queue.length;
               final downloading = s.library.unfinishedDownloads().length;
@@ -300,13 +318,6 @@ final class _Sidebar extends StatelessWidget {
                     },
                     onTap: () => onGo(item),
                   ),
-                const SizedBox(height: 18),
-                _NavItem(
-                  section: Section.cloud,
-                  selected: section == Section.cloud,
-                  subtitle: s.account.user == null ? 'Your YouTube as podcasts' : s.account.user!.email,
-                  onTap: () => onGo(Section.cloud),
-                ),
               ]);
             },
           ),
@@ -321,12 +332,11 @@ final class _Sidebar extends StatelessWidget {
 }
 
 final class _NavItem extends StatefulWidget {
-  const _NavItem({required this.section, required this.selected, required this.onTap, this.badge, this.subtitle});
+  const _NavItem({required this.section, required this.selected, required this.onTap, this.badge});
   final Section section;
   final bool selected;
   final VoidCallback onTap;
   final String? badge;
-  final String? subtitle;
 
   @override
   State<_NavItem> createState() => _NavItemState();
@@ -353,7 +363,7 @@ final class _NavItemState extends State<_NavItem> {
             child: AnimatedContainer(
               duration: brand.quick,
               curve: brand.easeOutExpo,
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.subtitle == null ? 9 : 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
                 color: selected ? brand.white : (_hover ? _sidebarHover : _sidebar),
                 borderRadius: BorderRadius.circular(12),
@@ -363,16 +373,10 @@ final class _NavItemState extends State<_NavItem> {
                 Icon(widget.section.icon, size: 20, color: selected ? brand.accent : brand.fgSoft),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(
-                      widget.section.label,
-                      style: text.labelLarge!.copyWith(fontSize: 14.5, color: brand.fg, fontWeight: selected ? FontWeight.w700 : FontWeight.w600),
-                    ),
-                    if (widget.subtitle case final sub?) ...[
-                      const SizedBox(height: 3),
-                      Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall!.copyWith(fontSize: 12, color: brand.fgSoft, height: 1.2)),
-                    ],
-                  ]),
+                  child: Text(
+                    widget.section.label,
+                    style: text.labelLarge!.copyWith(fontSize: 14.5, color: brand.fg, fontWeight: selected ? FontWeight.w700 : FontWeight.w600),
+                  ),
                 ),
                 if (widget.badge case final badge?)
                   Container(
@@ -421,7 +425,7 @@ final class _PhoneBar extends StatelessWidget {
         onDestinationSelected: (i) => onGo(_phoneSections[i]),
         destinations: [
           for (final s in _phoneSections)
-            NavigationDestination(icon: Icon(s.icon), label: s == Section.cloud ? 'Cloud' : s.label),
+            NavigationDestination(icon: Icon(s.icon), label: s.label),
         ],
       ),
     );

@@ -1,6 +1,9 @@
 // Library: every show the listener follows, as covers, newest episode
-// first, with how many episodes they haven't heard. OPML in and out lives
-// here, and on phones the way to Downloads and Settings.
+// first, with how many episodes they haven't heard. The listener's
+// ListenJar Cloud feeds are shows here like any other, each saying what its
+// sync is doing, and one not yet published waits here too (cloud.dart).
+// Podcasts of the listener's own start here; OPML in and out lives here,
+// and on phones the way to Downloads and Settings.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -9,12 +12,16 @@ import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'backend/api.dart' show Feed;
+import 'cloud.dart';
 import 'downloads_page.dart';
 import 'home_page.dart' show unplayedLabel;
 import 'library.dart';
+import 'links.dart' show kindLabel;
 import 'menu.dart';
 import 'settings_page.dart';
 import 'shell.dart';
+import 'sync.dart' show FeedPhase;
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -26,12 +33,30 @@ final class LibraryPage extends StatelessWidget {
     final s = Services.of(context);
     final wide = MediaQuery.sizeOf(context).width >= wideWidth;
     return ListenableBuilder(
-      listenable: Listenable.merge([s.library, s.podcasts]),
+      listenable: Listenable.merge([s.library, s.podcasts, s.feeds, s.account]),
       builder: (context, _) {
         final shows = s.library.podcasts;
+        final feeds = {for (final f in s.feeds.feeds) f.id: f};
+        // Feeds with no RSS yet aren't followed; they wait, first, until
+        // their first episode is uploaded.
+        final followed = {for (final p in shows) ?p.cloudFeedId};
+        final pending = [for (final f in s.feeds.feeds) if (!followed.contains(f.id)) f];
+        final count = shows.length + pending.length;
         return PageBody(maxWidth: 1100, children: [
           pageTitle(context, 'Library', actions: [
-            if (!wide) ...[
+            if (wide)
+              TextButton.icon(
+                style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+                onPressed: () => unawaited(createPodcast(context)),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('New podcast'),
+              )
+            else ...[
+              IconButton(
+                tooltip: 'New podcast',
+                onPressed: () => unawaited(createPodcast(context)),
+                icon: const Icon(Icons.add_rounded, color: brand.fgSoft),
+              ),
               IconButton(
                 tooltip: 'Downloads',
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const DownloadsPage(pushed: true))),
@@ -45,11 +70,18 @@ final class LibraryPage extends StatelessWidget {
             ],
             const OpmlMenu(),
           ]),
-          if (shows.isEmpty) ...[
+          if (s.account.user != null && s.feeds.storageFull) ...[const SizedBox(height: 8), const StorageFullNotice(), const SizedBox(height: 16)],
+          if (s.feeds.feedsError case final error? when s.account.user != null) ...[
+            const SizedBox(height: 8),
+            problem(context, failure('Couldn’t load your ListenJar podcasts', error, other: 'Sync again in Settings.'), error),
+            const SizedBox(height: 16),
+          ],
+          if (count == 0) ...[
             const SizedBox(height: 16),
             EmptyState(
-              title: 'Nothing followed yet',
-              body: 'Shows you follow collect here, with their new episodes counted. Search for one, or paste its RSS link into search.',
+              title: 'Nothing here yet',
+              body: 'Shows you follow collect here, with their new episodes counted, and so do podcasts you make from YouTube videos. '
+                'Search for a show, or paste its RSS link into search.',
               actions: [
                 brand.accentShadow(
                   enabled: true,
@@ -68,7 +100,7 @@ final class LibraryPage extends StatelessWidget {
             ),
           ] else ...[
             Text(
-              '${shows.length} ${shows.length == 1 ? 'show' : 'shows'}',
+              '$count ${count == 1 ? 'show' : 'shows'}',
               style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.fgSoft),
             ),
             const SizedBox(height: 20),
@@ -78,7 +110,8 @@ final class LibraryPage extends StatelessWidget {
                 const gap = 20.0;
                 final tile = (box.maxWidth - gap * (columns - 1)) / columns;
                 return Wrap(spacing: gap, runSpacing: 26, children: [
-                  for (final show in shows) _ShowTile(show: show, size: tile, refreshing: s.podcasts.refreshing.contains(show.id)),
+                  for (final feed in pending) _feedTile(context, feed, tile),
+                  for (final show in shows) _showTile(context, show, feeds[show.cloudFeedId], tile),
                 ]);
               },
             ),
@@ -87,13 +120,91 @@ final class LibraryPage extends StatelessWidget {
       },
     );
   }
+
+  /// A show, saying what its ListenJar feed's sync is doing when it has one.
+  Widget _showTile(BuildContext context, Podcast show, Feed? feed, double size) {
+    final s = Services.of(context);
+    final sync = feed == null ? null : s.feeds.statusOf(feed);
+    final status = feed == null ? null : feedTileStatus(feed, sync, playable: true);
+    final unplayed = unplayedLabel(show);
+    return _ShowTile(
+      key: ValueKey('show ${show.id}'),
+      title: show.title,
+      artworkUrl: show.artworkUrl,
+      size: size,
+      count: unplayed,
+      badge: switch (show) {
+        Podcast(kind: PodcastKind.youtubeFeed || PodcastKind.own) => (Icons.laptop_mac_rounded, 'On this device'),
+        Podcast(cloudFeedId: _?) => (Icons.cloud_outlined, 'Cloud'),
+        Podcast(isYouTube: true) => (Icons.smart_display_outlined, 'YouTube'),
+        _ => null,
+      },
+      semantics: '${show.title}${unplayed.isEmpty ? '' : ', $unplayed unplayed'}${status == null ? '' : ', ${status.$1}'}',
+      subtitle: switch (status) {
+        final st? => st,
+        _ when s.podcasts.refreshing.contains(show.id) => ('Checking…', false),
+        _ when show.refreshError != null => ('Couldn’t refresh', true),
+        _ when show.author.isNotEmpty => (show.author, false),
+        _ when feed != null => (feed.source == null ? 'Your podcast' : kindLabel(feed.source!.kind), false),
+        _ => (' ', false),
+      },
+      fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
+      onTap: () => feed == null
+        ? Navigation.of(context).openShow(show.id)
+        : Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CloudShowPage(feedId: feed.id))),
+    );
+  }
+
+  /// A ListenJar feed with no episode published yet.
+  Widget _feedTile(BuildContext context, Feed feed, double size) {
+    final sync = Services.of(context).feeds.statusOf(feed);
+    final status = feedTileStatus(feed, sync, playable: false)!;
+    return _ShowTile(
+      key: ValueKey('feed ${feed.id}'),
+      title: feed.title,
+      artworkUrl: feed.imageUrl,
+      size: size,
+      count: '',
+      badge: (Icons.cloud_outlined, 'Cloud'),
+      semantics: '${feed.title}, ${status.$1}',
+      subtitle: status,
+      fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
+      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CloudShowPage(feedId: feed.id))),
+    );
+  }
 }
 
 final class _ShowTile extends StatefulWidget {
-  const _ShowTile({required this.show, required this.size, required this.refreshing});
-  final Podcast show;
+  const _ShowTile({
+    super.key,
+    required this.title,
+    required this.artworkUrl,
+    required this.size,
+    required this.count,
+    required this.badge,
+    required this.semantics,
+    required this.subtitle,
+    required this.fraction,
+    required this.onTap,
+  });
+  final String title;
+  final String? artworkUrl;
   final double size;
-  final bool refreshing;
+
+  /// Unplayed episodes, or empty.
+  final String count;
+
+  /// Where the show lives, when it isn't a plain podcast feed: a YouTube
+  /// playlist or channel on this device, a ListenJar Cloud feed, a video.
+  final (IconData, String)? badge;
+  final String semantics;
+
+  /// The line under the title, and whether it says something went wrong.
+  final (String, bool) subtitle;
+
+  /// How far the episode syncing now has got.
+  final double? fraction;
+  final VoidCallback onTap;
 
   @override
   State<_ShowTile> createState() => _ShowTileState();
@@ -104,9 +215,8 @@ final class _ShowTileState extends State<_ShowTile> {
 
   @override
   Widget build(BuildContext context) {
-    final show = widget.show;
     final text = Theme.of(context).textTheme;
-    final count = unplayedLabel(show);
+    final (subtitle, failed) = widget.subtitle;
     return SizedBox(
       width: widget.size,
       child: MouseRegion(
@@ -114,10 +224,10 @@ final class _ShowTileState extends State<_ShowTile> {
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: GestureDetector(
-          onTap: () => Navigation.of(context).openShow(show.id),
+          onTap: widget.onTap,
           child: Semantics(
             button: true,
-            label: '${show.title}${count.isEmpty ? '' : ', $count unplayed'}',
+            label: widget.semantics,
             excludeSemantics: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               AnimatedContainer(
@@ -128,46 +238,55 @@ final class _ShowTileState extends State<_ShowTile> {
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [_hover ? brand.shadowFloat : brand.shadowSoft],
                 ),
-                child: Stack(children: [
-                  Artwork(url: show.artworkUrl, title: show.title, size: widget.size, radius: 18),
-                  if (count.isNotEmpty)
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: brand.accent, borderRadius: BorderRadius.circular(99)),
-                        child: Text(
-                          count,
-                          style: text.labelSmall!.copyWith(color: brand.white, fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()]),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Stack(children: [
+                    Artwork(url: widget.artworkUrl, title: widget.title, size: widget.size, radius: 18),
+                    if (widget.count.isNotEmpty)
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(color: brand.accent, borderRadius: BorderRadius.circular(99)),
+                          child: Text(
+                            widget.count,
+                            style: text.labelSmall!.copyWith(color: brand.white, fontWeight: FontWeight.w700, fontFeatures: const [FontFeature.tabularFigures()]),
+                          ),
                         ),
                       ),
-                    ),
-                  if (show.isYouTube || show.cloudFeedId != null)
-                    Positioned(
-                      left: 10,
-                      bottom: 10,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(color: const Color(0xD90A0B0F), borderRadius: BorderRadius.circular(99)),
-                        child: Text(
-                          show.isYouTube ? 'YouTube' : 'ListenJar',
-                          style: text.labelSmall!.copyWith(color: brand.snow, fontSize: 11, fontWeight: FontWeight.w600),
+                    if (widget.badge case (final icon, final label))
+                      Positioned(
+                        left: 10,
+                        bottom: 10,
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(7, 3, 8, 3),
+                          decoration: BoxDecoration(color: const Color(0xD90A0B0F), borderRadius: BorderRadius.circular(99)),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            Icon(icon, size: 12, color: brand.snow),
+                            const SizedBox(width: 4),
+                            Text(label, style: text.labelSmall!.copyWith(color: brand.snow, fontSize: 11, fontWeight: FontWeight.w600)),
+                          ]),
                         ),
                       ),
-                    ),
-                ]),
+                    if (widget.fraction case final fraction?)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: LinearProgressIndicator(value: fraction, minHeight: 3, color: brand.accent, backgroundColor: const Color(0x66FFFFFF)),
+                      ),
+                  ]),
+                ),
               ),
               const SizedBox(height: 10),
-              Text(show.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleMedium!.copyWith(fontSize: 14.5, height: 1.25)),
+              Text(widget.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleMedium!.copyWith(fontSize: 14.5, height: 1.25)),
               const SizedBox(height: 2),
               Text(
-                widget.refreshing
-                  ? 'Checking…'
-                  : (show.refreshError != null ? 'Couldn’t refresh' : (show.author.isEmpty ? ' ' : show.author)),
+                subtitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: text.bodySmall!.copyWith(fontSize: 12.5, color: show.refreshError != null ? brand.danger : brand.fgSoft),
+                style: text.bodySmall!.copyWith(fontSize: 12.5, color: failed ? brand.danger : brand.fgSoft),
               ),
             ]),
           ),

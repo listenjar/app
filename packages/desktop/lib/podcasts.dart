@@ -7,12 +7,14 @@
 // (library.dart) holds the results. No widgets here.
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
 import 'package:xml/xml.dart';
 
-import 'backend/api.dart' show Feed;
+import 'backend/api.dart' show Feed, SourceKind;
+import 'artwork.dart';
 import 'downloads.dart';
 import 'library.dart';
 import 'links.dart';
@@ -59,6 +61,11 @@ final class Podcasts extends ChangeNotifier {
   Podcasts(this.library, this._downloads, this._youtube);
 
   final Library library;
+
+  /// Whether the listener has a paid plan, which following YouTube
+  /// playlists and channels takes, on this device as in the Cloud; null
+  /// while the account isn't known yet. Set where the account is.
+  bool? Function() paid = () => null;
   final Downloads _downloads;
   final YouTubeService _youtube;
   final _http = HttpClient()
@@ -119,7 +126,7 @@ final class Podcasts extends ChangeNotifier {
   }
 
   Future<void> _refreshAll() async {
-    final shows = library.podcasts.where((p) => p.kind == PodcastKind.rss).toList();
+    final shows = library.podcasts.where((p) => p.refreshes).toList();
     var next = 0;
     Future<void> worker() async {
       while (next < shows.length && !_life.isCancelled) {
@@ -134,16 +141,31 @@ final class Podcasts extends ChangeNotifier {
   /// Refreshes [podcast]'s feed and downloads its new episodes if it's set
   /// to. Failures are kept on the show, not thrown.
   Future<void> refresh(Podcast podcast) async {
-    if (podcast.kind != PodcastKind.rss || !refreshing.add(podcast.id)) return;
+    if (!podcast.refreshes || !refreshing.add(podcast.id)) return;
     notifyListeners();
     try {
+      if (podcast.kind == PodcastKind.youtubeFeed) {
+        switch (paid()) {
+          case null:
+            return;
+          case false:
+            library.refreshFailed(podcast.id, 'Following YouTube playlists and channels takes a plan');
+            return;
+          case true:
+        }
+        await _refreshYouTube(podcast, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
+        return;
+      }
       final (etag, modified) = library.validators(podcast.id);
       final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 2)));
       final fetch = await fetchFeed(_http, Uri.parse(podcast.feedUrl), token, etag: etag, lastModified: modified);
       final added = library.refreshed(podcast.id, fetch);
+      if (podcast.cloudFeedId case final feed?) library.applyCarried(podcast.id, feed);
       if (added.isNotEmpty) await _downloads.downloadNew(added);
     } on CancelledException {
-      if (!_life.isCancelled) library.refreshFailed(podcast.id, 'The feed took too long to answer');
+      if (!_life.isCancelled) {
+        library.refreshFailed(podcast.id, podcast.kind == PodcastKind.rss ? 'The feed took too long to answer' : 'YouTube took too long to answer');
+      }
     } catch (e) {
       library.refreshFailed(podcast.id, e);
     } finally {
@@ -201,6 +223,131 @@ final class Podcasts extends ChangeNotifier {
     return library.episodes(show.id).first;
   }
 
+  // Podcasts of the listener's own, on this device.
+
+  /// Adds the YouTube video [link] to [own], a podcast of the listener's
+  /// own on this device, looking its title up unless given. Null when it's
+  /// already there.
+  Future<PodcastEpisode?> addToOwn(Podcast own, YouTubeLink link, CancellationToken token, {String? title, Duration? duration}) async {
+    if (paid() != true) throw StateError('Podcasts of your own take a plan');
+    var name = title;
+    if (name == null) {
+      final merged = _life.merge(token);
+      name = (await (await _youtube.session(merged)).resolve(SourceRef(SourceRefKind.video, link.id, link.url), merged)).title;
+    }
+    _log.info('Adding video ${link.id} to own podcast ${own.id}');
+    return library.addOwnVideo(own.id, videoId: link.id, title: name, duration: duration);
+  }
+
+  /// Makes [picture] the artwork of [own], a podcast of the listener's own
+  /// on this device: squared, as for podcast apps, and kept beside the
+  /// library.
+  Future<void> setOwnArtwork(Podcast own, Uint8List picture) async {
+    final dir = Directory('${library.directory.path}/artwork');
+    await dir.create(recursive: true);
+    // A new name each time, so the old picture isn't shown from cache.
+    final file = File('${dir.path}/own-${own.id}-${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await file.writeAsBytes(await podcastArtwork(picture));
+    await _deleteOwnArtwork(own);
+    library.setArtwork(own.id, file.uri.toString());
+  }
+
+  /// The artwork at [url], a picture on the web or one kept here.
+  Future<Uint8List?> artworkBytes(String? url) async {
+    final uri = url == null ? null : Uri.tryParse(url);
+    if (uri == null) return null;
+    try {
+      if (uri.isScheme('file')) return await File.fromUri(uri).readAsBytes();
+      final request = await _http.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        return null;
+      }
+      final builder = BytesBuilder(copy: false);
+      await response.forEach(builder.add);
+      return builder.takeBytes();
+    } catch (e) {
+      _log.warning('Couldn’t read artwork $url', e);
+      return null;
+    }
+  }
+
+  Future<void> _deleteOwnArtwork(Podcast own) async {
+    if (own.artworkUrl case final url? when url.startsWith('file:')) {
+      final file = File.fromUri(Uri.parse(url));
+      if (file.path.startsWith(library.directory.path) && await file.exists()) await file.delete();
+    }
+  }
+
+  /// Deletes [own], a podcast of the listener's own on this device.
+  Future<void> deleteOwn(Podcast own) async {
+    await _deleteOwnArtwork(own);
+    await unfollow(own);
+  }
+
+  // YouTube playlists and channels, on this device.
+
+  /// Follows the YouTube playlist or channel [link] on this device: its
+  /// videos list as episodes and stream from YouTube, with no upload and no
+  /// ListenJar feed. The whole listing comes now; refreshes add new videos.
+  Future<Podcast> followYouTube(YouTubeLink link, CancellationToken token) => traced<Podcast>(
+    _log,
+    'follow YouTube ${link.kind.name} ${link.id}',
+    () async {
+      if (paid() != true) throw StateError('Following YouTube playlists and channels takes a plan');
+      final merged = _life.merge(token);
+      final youtube = await _youtube.session(merged);
+      // A channel lists by its UC… id, not a @handle, and is named for
+      // itself, not its uploads playlist.
+      final channel = link.kind == SourceKind.channel ? await youtube.resolve(_sourceOf(link), merged) : null;
+      if (channel != null) link = parseYouTubeLink(channel.url) ?? (throw StateError('YouTube gave no channel for ${link.url}'));
+      final snapshot = await youtube.snapshot(_sourceOf(link), merged);
+      final title = channel?.title ?? snapshot.title;
+      final artwork = channel?.artworkUrl ?? snapshot.artworkUrl;
+      final show = library.followYouTubeFeed(
+        url: link.url,
+        title: title,
+        author: channel?.title ?? kindLabel(link.kind),
+        artworkUrl: artwork,
+      );
+      library.youtubeFeedRefreshed(show.id, title: title, artworkUrl: artwork, videos: _videos(snapshot), dated: false);
+      return library.podcast(show.id)!;
+    },
+    describe: (p) => 'show ${p.id}',
+  );
+
+  /// Lists a followed playlist's videos again, or a channel's newest
+  /// uploads, and keeps the new ones.
+  Future<void> _refreshYouTube(Podcast podcast, CancellationToken token) async {
+    final link = parseYouTubeLink(podcast.feedUrl) ?? (throw StateError('Not a YouTube link: ${podcast.feedUrl}'));
+    final snapshot = await (await _youtube.session(token)).snapshot(
+      _sourceOf(link),
+      token,
+      pages: link.kind == SourceKind.channel ? 1 : null,
+    );
+    // A channel's listing is its uploads playlist, named for that: it keeps
+    // the name and picture it was followed with.
+    final playlist = link.kind == SourceKind.playlist;
+    library.youtubeFeedRefreshed(
+      podcast.id,
+      title: playlist ? snapshot.title : null,
+      artworkUrl: playlist ? snapshot.artworkUrl : null,
+      videos: _videos(snapshot),
+      dated: true,
+    );
+  }
+
+  static SourceRef _sourceOf(YouTubeLink link) => SourceRef(switch (link.kind) {
+    SourceKind.video => SourceRefKind.video,
+    SourceKind.playlist => SourceRefKind.playlist,
+    SourceKind.channel => SourceRefKind.channel,
+  }, link.id, link.url);
+
+  static List<YouTubeVideo> _videos(Snapshot snapshot) => [
+    for (final v in snapshot.videos) (id: v.id, title: v.title, seconds: v.durationSeconds),
+  ];
+
   // The listener's ListenJar feeds.
 
   /// Follows each of the signed-in listener's ListenJar feeds once it has an
@@ -208,6 +355,7 @@ final class Podcasts extends ChangeNotifier {
   /// stay: their addresses still work in any podcast app.
   Future<void> followCloud(List<Feed> feeds) async {
     final live = {for (final f in feeds) f.id};
+    library.forgetCarried(live);
     for (final show in library.podcasts.where((p) => p.cloudFeedId != null && !live.contains(p.cloudFeedId))) {
       await unfollow(show);
     }
@@ -222,7 +370,8 @@ final class Podcasts extends ChangeNotifier {
       }
       try {
         final fetch = await fetchFeed(_http, Uri.parse(rss), _life);
-        library.subscribe(rss, fetch.feed!, etag: fetch.etag, lastModified: fetch.lastModified, cloudFeedId: feed.id);
+        final show = library.subscribe(rss, fetch.feed!, etag: fetch.etag, lastModified: fetch.lastModified, cloudFeedId: feed.id);
+        library.applyCarried(show.id, feed.id);
       } catch (e) {
         _log.warning('Couldn’t follow ListenJar feed ${feed.id}', e);
       }

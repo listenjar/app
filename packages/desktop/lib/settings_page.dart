@@ -1,10 +1,11 @@
-// Settings: how the player skips and downloads, the space downloads take
+// Settings: the ListenJar Cloud account (cloud.dart), how the player skips and downloads, the space downloads take
 // (storage_page.dart), moving shows in and out, and what the app sends where.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 
+import 'cloud.dart' show AccountPanel;
 import 'library.dart';
 import 'library_page.dart' show exportOpml, importOpml;
 import 'menu.dart';
@@ -32,7 +33,9 @@ final class SettingsPage extends StatelessWidget {
         return PageBody(maxWidth: 720, children: [
           if (pushed) backButton(context, 'Library'),
           pageTitle(context, 'Settings'),
-          sectionHeading(context, 'Playback', top: 20),
+          sectionHeading(context, 'ListenJar Cloud', top: 20),
+          const AccountPanel(),
+          sectionHeading(context, 'Playback'),
           _group([
             _choice(
               context,

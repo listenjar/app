@@ -476,7 +476,12 @@ final class _PlanTileState extends State<_PlanTile> {
 }
 
 /// Asks for a podcast of the listener's own's name; null if they cancel.
-Future<String?> askPodcastTitle(BuildContext context) => showDialog<String>(
+/// A podcast of the listener's own to make: its name, and whether it lives
+/// in ListenJar Cloud or on this device.
+typedef NewPodcast = ({String title, bool cloud});
+
+/// Asks what to call a new podcast of the listener's own and where to keep it.
+Future<NewPodcast?> askNewPodcast(BuildContext context) => showDialog<NewPodcast>(
   context: context,
   builder: (context) => const _NewPodcastSheet(),
 );
@@ -490,6 +495,7 @@ final class _NewPodcastSheet extends StatefulWidget {
 
 final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
   final _title = TextEditingController();
+  bool _cloud = true;
 
   @override
   void initState() {
@@ -505,7 +511,38 @@ final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
 
   void _done() {
     final title = _title.text.trim();
-    if (title.isNotEmpty) Navigator.pop(context, title);
+    if (title.isNotEmpty) Navigator.pop(context, (title: title, cloud: _cloud));
+  }
+
+  Widget _where(TextTheme text, {required bool cloud, required IconData icon, required String title, required String body}) {
+    final on = _cloud == cloud;
+    return Semantics(
+      selected: on,
+      button: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() => _cloud = cloud),
+        child: AnimatedContainer(
+          duration: brand.quick,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: on ? brand.paper : brand.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: on ? brand.accent.withValues(alpha: 0.6) : brand.line, width: on ? 1.5 : 1),
+          ),
+          child: Row(children: [
+            Icon(icon, color: on ? brand.accent : brand.fgSoft, size: 20),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: text.titleMedium!.copyWith(fontSize: 14)),
+                Text(body, style: text.bodySmall!.copyWith(color: brand.fgSoft)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   @override
@@ -547,6 +584,10 @@ final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
             ),
           ),
         ),
+        const SizedBox(height: 14),
+        _where(text, cloud: false, icon: Icons.laptop_mac_rounded, title: 'On this device', body: ownLocalHint),
+        const SizedBox(height: 8),
+        _where(text, cloud: true, icon: Icons.cloud_outlined, title: 'In ListenJar Cloud', body: ownCloudHint),
         const SizedBox(height: 22),
         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
           TextButton(
@@ -568,6 +609,12 @@ final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
     );
   }
 }
+
+/// What keeping a podcast of the listener's own on this device means, in a line.
+const ownLocalHint = 'Its videos stream from YouTube when you play them. Only this app has it.';
+
+/// What keeping it in ListenJar Cloud means, in a line.
+const ownCloudHint = 'This device uploads each video you add, for any podcast app. Uses your storage.';
 
 /// Making room in a full plan: the listener's podcasts by how much they
 /// store, each removable; the episodes of their own podcasts one by one. A

@@ -1,17 +1,19 @@
 // What's playing, on ink (DESIGN.md: ink carries the moments that sell
 // listening): the mini player under every section, and Now Playing, which
 // it opens. Now Playing holds the cover, the scrubber, skip and play, the
-// speed, the sleep timer, Up Next and the show notes.
+// speed, the sleep timer, Up Next, a video's chapters and the show notes.
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'backend/api.dart' show Plan;
+import 'chapters.dart';
 import 'library.dart';
 import 'menu.dart';
 import 'player.dart';
-import 'shared_links.dart' show addVideoToOwnPodcast, makeVideoPodcast;
+import 'shared_links.dart' show addVideoToOwnPodcast, makeVideoPodcast, ownPodcasts;
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -241,7 +243,11 @@ final class _SeekLineState extends State<_SeekLine> {
           height: hot ? _SeekLine.active : _SeekLine.rest,
           child: CustomPaint(
             size: Size.infinite,
-            painter: _SeekPainter(played: played, pointer: _drag == null ? _hover : null),
+            painter: _SeekPainter(
+              played: played,
+              pointer: _drag == null ? _hover : null,
+              marks: total == null ? const [] : [for (final c in widget.player.chapters.skip(1)) c.start.inMilliseconds / total.inMilliseconds],
+            ),
           ),
         ),
       );
@@ -290,6 +296,9 @@ final class _SeekLineState extends State<_SeekLine> {
     if (fraction == null || box == null || overlay == null || !box.attached) return const SizedBox.shrink();
     final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
     final x = origin.dx + box.size.width * fraction;
+    final at = _at(total, fraction);
+    final chapters = widget.player.chapters;
+    final chapter = chapterAt(chapters, at);
     final bottom = overlay.size.height - (origin.dy + box.size.height - _SeekLine.active - 6);
     final style = Theme.of(context).textTheme.labelMedium!.copyWith(
       color: brand.ink,
@@ -307,7 +316,15 @@ final class _SeekLineState extends State<_SeekLine> {
             decoration: BoxDecoration(color: brand.white, borderRadius: BorderRadius.circular(7), boxShadow: const [brand.shadowFloat]),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              child: Text(clock(_at(total, fraction)), style: style),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 280),
+                child: Text(
+                  chapter < 0 ? clock(at) : '${clock(at)} · ${chapters[chapter].title}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
+              ),
             ),
           ),
         ),
@@ -317,22 +334,32 @@ final class _SeekLineState extends State<_SeekLine> {
 }
 
 final class _SeekPainter extends CustomPainter {
-  _SeekPainter({required this.played, required this.pointer});
+  _SeekPainter({required this.played, required this.pointer, required this.marks});
   final double played;
   final double? pointer;
 
+  /// Where chapters start, 0 to 1: cut out of the line.
+  final List<double> marks;
+
   @override
   void paint(Canvas canvas, Size size) {
+    if (marks.isNotEmpty) canvas.saveLayer(Offset.zero & size, Paint());
     canvas.drawRect(Offset.zero & size, Paint()..color = brand.inkTile);
     final p = pointer;
     if (p != null && p > played) {
       canvas.drawRect(Rect.fromLTRB(size.width * played, 0, size.width * p, size.height), Paint()..color = brand.snow.withValues(alpha: 0.22));
     }
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width * played, size.height), Paint()..color = brand.accentLight);
+    if (marks.isEmpty) return;
+    final cut = Paint()..blendMode = BlendMode.clear;
+    for (final mark in marks) {
+      canvas.drawRect(Rect.fromLTWH(size.width * mark - 1, 0, 2, size.height), cut);
+    }
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_SeekPainter old) => old.played != played || old.pointer != pointer;
+  bool shouldRepaint(_SeekPainter old) => old.played != played || old.pointer != pointer || !listEquals(old.marks, marks);
 }
 
 // Now Playing.
@@ -474,6 +501,12 @@ final class NowPlaying extends StatelessWidget {
           _identity(context, e, align: TextAlign.center),
           const SizedBox(height: 22),
           _controls(context, s),
+          if (s.player.chapters case final chapters when chapters.isNotEmpty) ...[
+            const SizedBox(height: 36),
+            Text('Chapters', style: Theme.of(context).textTheme.titleLarge!.copyWith(color: brand.snow)),
+            const SizedBox(height: 8),
+            _ChapterList(player: s.player, chapters: chapters),
+          ],
           const SizedBox(height: 36),
           Text('Show notes', style: Theme.of(context).textTheme.titleLarge!.copyWith(color: brand.snow)),
           const SizedBox(height: 12),
@@ -525,11 +558,7 @@ final class NowPlaying extends StatelessWidget {
                 decoration: BoxDecoration(color: brand.inkTile, borderRadius: BorderRadius.circular(brand.radiusCard)),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(brand.radiusCard),
-                  child: ListView(padding: const EdgeInsets.all(28), children: [
-                    Text('Show notes', style: Theme.of(context).textTheme.titleLarge!.copyWith(color: brand.snow)),
-                    const SizedBox(height: 14),
-                    _notes(context, s, e),
-                  ]),
+                  child: _SidePanel(key: ValueKey(e.id), player: s.player, notes: _notes(context, s, e)),
                 ),
               ),
             ),
@@ -564,6 +593,7 @@ final class _ScrubberState extends State<_Scrubber> {
         final ms = total.inMilliseconds.toDouble();
         final value = _dragging ?? (ms == 0 ? 0.0 : at.inMilliseconds.clamp(0, ms).toDouble());
         final shown = Duration(milliseconds: value.round());
+        final chapters = ms == 0 ? const <Chapter>[] : widget.player.chapters;
         return Column(children: [
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
@@ -573,7 +603,9 @@ final class _ScrubberState extends State<_Scrubber> {
               thumbColor: brand.white,
               overlayColor: brand.accentLight.withValues(alpha: 0.16),
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-              trackShape: const RoundedRectSliderTrackShape(),
+              trackShape: chapters.isEmpty
+                ? const RoundedRectSliderTrackShape()
+                : _ChapterTrack([for (final c in chapters.skip(1)) c.start.inMilliseconds / ms]),
             ),
             child: Slider(
               value: value,
@@ -590,13 +622,225 @@ final class _ScrubberState extends State<_Scrubber> {
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(children: [
               Text(clock(shown), style: time),
-              const Spacer(),
+              Expanded(
+                child: chapters.isEmpty
+                  ? const SizedBox.shrink()
+                  : _ChapterNav(player: widget.player, chapters: chapters, at: shown),
+              ),
               Text(total == Duration.zero ? '--:--' : '-${clock(total - shown)}', style: time),
             ]),
           ),
         ]);
       },
     );
+  }
+}
+
+/// The slider's track, cut where each chapter after the first starts.
+final class _ChapterTrack extends RoundedRectSliderTrackShape {
+  const _ChapterTrack(this.marks);
+
+  /// Where the chapters start, 0 to 1 along the track.
+  final List<double> marks;
+
+  /// The cut's width.
+  static const _gap = 3.0;
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 2,
+  }) {
+    final track = getPreferredRect(parentBox: parentBox, offset: offset, sliderTheme: sliderTheme, isEnabled: isEnabled, isDiscrete: isDiscrete);
+    final canvas = context.canvas;
+    // Cut through to what's under the slider, not painted over in a colour.
+    canvas.saveLayer(track.inflate(additionalActiveTrackHeight + 2), Paint());
+    super.paint(
+      context,
+      offset,
+      parentBox: parentBox,
+      sliderTheme: sliderTheme,
+      enableAnimation: enableAnimation,
+      textDirection: textDirection,
+      thumbCenter: thumbCenter,
+      secondaryOffset: secondaryOffset,
+      isDiscrete: isDiscrete,
+      isEnabled: isEnabled,
+      additionalActiveTrackHeight: additionalActiveTrackHeight,
+    );
+    final cut = Paint()..blendMode = BlendMode.clear;
+    for (final mark in marks) {
+      final x = textDirection == TextDirection.rtl ? track.right - track.width * mark : track.left + track.width * mark;
+      canvas.drawRect(Rect.fromLTRB(x - _gap / 2, track.top - additionalActiveTrackHeight - 2, x + _gap / 2, track.bottom + additionalActiveTrackHeight + 2), cut);
+    }
+    canvas.restore();
+  }
+}
+
+/// The chapter at [at], between the scrubber's times, with the previous and
+/// next chapter on either side.
+final class _ChapterNav extends StatelessWidget {
+  const _ChapterNav({required this.player, required this.chapters, required this.at});
+  final Player player;
+  final List<Chapter> chapters;
+  final Duration at;
+
+  @override
+  Widget build(BuildContext context) {
+    final i = chapterAt(chapters, at);
+    final style = Theme.of(context).textTheme.labelLarge!.copyWith(color: brand.snow, fontSize: 13);
+    Widget skip(IconData icon, String tip, Future<void> Function()? onPressed) => IconButton(
+      tooltip: tip,
+      onPressed: onPressed == null ? null : () => unawaited(onPressed()),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      style: IconButton.styleFrom(foregroundColor: brand.snowSoft, disabledForegroundColor: brand.inkLine, hoverColor: brand.inkTile),
+      icon: Icon(icon, size: 20),
+    );
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      skip(Icons.chevron_left_rounded, 'Previous chapter', i < 0 ? null : player.previousChapter),
+      Flexible(
+        child: Semantics(
+          label: i < 0 ? null : 'Chapter ${i + 1} of ${chapters.length}',
+          child: Text(i < 0 ? '' : chapters[i].title, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: style),
+        ),
+      ),
+      skip(Icons.chevron_right_rounded, 'Next chapter', i + 1 < chapters.length ? player.nextChapter : null),
+    ]);
+  }
+}
+
+/// A video's chapters: where each starts and what it is, the one playing
+/// marked. Choosing one plays from there.
+final class _ChapterList extends StatelessWidget {
+  const _ChapterList({required this.player, required this.chapters});
+  final Player player;
+  final List<Chapter> chapters;
+
+  Future<void> _play(Chapter chapter) async {
+    await player.seek(chapter.start);
+    if (!player.playing) await player.play();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return StreamBuilder<int>(
+      stream: player.positionStream.map((p) => chapterAt(chapters, p)).distinct(),
+      initialData: chapterAt(chapters, player.position),
+      builder: (context, snapshot) {
+        final playing = snapshot.data ?? -1;
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          for (final (i, c) in chapters.indexed)
+            Semantics(
+              button: true,
+              selected: i == playing,
+              child: Material(
+                type: MaterialType.transparency,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  hoverColor: brand.inkTile,
+                  onTap: () => unawaited(_play(c)),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      color: i == playing ? brand.inkLine : brand.inkLine.withValues(alpha: 0),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      SizedBox(
+                        width: 64,
+                        child: Text(
+                          clock(c.start),
+                          style: text.bodyMedium!.copyWith(
+                            color: i == playing ? brand.accentLight : brand.snowSoft,
+                            fontWeight: FontWeight.w600,
+                            height: 1.45,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          c.title,
+                          style: text.bodyMedium!.copyWith(
+                            color: brand.snow,
+                            fontWeight: i == playing ? FontWeight.w600 : FontWeight.w400,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+        ]);
+      },
+    );
+  }
+}
+
+/// Beside the player on a wide window: the show notes, and a video's
+/// chapters in a tab before them.
+final class _SidePanel extends StatefulWidget {
+  const _SidePanel({super.key, required this.player, required this.notes});
+  final Player player;
+  final Widget notes;
+
+  @override
+  State<_SidePanel> createState() => _SidePanelState();
+}
+
+final class _SidePanelState extends State<_SidePanel> {
+  bool _notes = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final chapters = widget.player.chapters;
+    final heading = Theme.of(context).textTheme.titleLarge!;
+    if (chapters.isEmpty) {
+      return ListView(padding: const EdgeInsets.all(28), children: [
+        Text('Show notes', style: heading.copyWith(color: brand.snow)),
+        const SizedBox(height: 14),
+        widget.notes,
+      ]);
+    }
+    Widget tab(String label, bool selected, bool notes) => Semantics(
+      selected: selected,
+      button: true,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        hoverColor: brand.inkTile,
+        onTap: () => setState(() => _notes = notes),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(label, style: heading.copyWith(color: selected ? brand.snow : brand.snowFaint)),
+        ),
+      ),
+    );
+    return ListView(padding: const EdgeInsets.fromLTRB(20, 24, 20, 28), children: [
+      Row(children: [
+        tab('Chapters', !_notes, false),
+        const SizedBox(width: 8),
+        tab('Show notes', _notes, true),
+      ]),
+      const SizedBox(height: 12),
+      if (_notes)
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: widget.notes)
+      else
+        _ChapterList(player: widget.player, chapters: chapters),
+    ]);
   }
 }
 
@@ -830,14 +1074,16 @@ final class _AddVideoButtonState extends State<_AddVideoButton> {
           const MenuDivider(),
           const MenuHeader('ListenJar Cloud, for any podcast app'),
           MenuEntry('Make it a podcast', icon: Icons.podcasts_rounded, onPressed: () => unawaited(_run((c) => makeVideoPodcast(c, url)))),
+          const MenuDivider(),
           if (planned) ...[
-            for (final feed in s.feeds.own)
+            const MenuHeader('Add to a podcast of yours'),
+            for (final own in ownPodcasts(context))
               MenuEntry(
-                'Add to “${feed.title}”',
-                icon: Icons.playlist_add_rounded,
-                onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, feed))),
+                own.title,
+                icon: own.icon,
+                onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, own, title: e.title))),
               ),
-            MenuEntry('Add to a new podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null)))),
+            MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null, title: e.title)))),
           ] else
             MenuEntry(
               'Add to a podcast of yours…',

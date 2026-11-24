@@ -2,15 +2,21 @@
 // episode, newest first, filtered to the unplayed or the downloaded and
 // searchable by title and show notes. Opened
 // from the library, search or an episode; a show looked at from search is
-// in the library unfollowed until the listener follows it.
+// in the library unfollowed until the listener follows it. A podcast of the
+// listener's own on this device is filled from Search instead, and moves to
+// ListenJar Cloud from here.
 import 'dart:async';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'artwork.dart' show artworkExtensions;
+import 'cloud.dart' show CloudShowPage, failure, moveToCloud;
 import 'library.dart';
 import 'menu.dart';
+import 'shared_links.dart' show LocalOwn;
 import 'shell.dart';
 import 'theme.dart' as brand;
 import 'ui.dart';
@@ -45,9 +51,12 @@ final class _ShowPageState extends State<ShowPage> {
   Widget build(BuildContext context) {
     final s = Services.of(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([s.library, s.podcasts]),
+      listenable: Listenable.merge([s.library, s.podcasts, s.feeds]),
       builder: (context, _) {
         final show = s.library.podcast(widget.podcastId);
+        // One of the listener's ListenJar feeds: its page says how each
+        // episode syncs, and manages the feed.
+        if (show?.cloudFeedId case final id? when s.feeds.feeds.any((f) => f.id == id)) return CloudShowPage(feedId: id);
         if (show == null) {
           return PageBody(children: [
             backButton(context, 'Back'),
@@ -56,6 +65,7 @@ final class _ShowPageState extends State<ShowPage> {
         }
         final episodes = s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst, query: _query.text);
         final query = _query.text.trim();
+        final videos = show.fromYouTube || episodes.any((e) => e.videoId != null);
         return PageBody(children: [
           if (Navigator.of(context).canPop()) backButton(context, 'Back'),
           _header(context, show),
@@ -76,6 +86,7 @@ final class _ShowPageState extends State<ShowPage> {
                     EpisodeFilter.unplayed => 'No unplayed episodes match “$query”.',
                     EpisodeFilter.downloaded => 'No downloaded episodes match “$query”.',
                   },
+                  EpisodeFilter.all when show.isOwn => 'Add videos: search YouTube or paste a video link, and it’s added here.',
                   EpisodeFilter.all => 'This feed lists no episodes with audio.',
                   EpisodeFilter.unplayed => 'You’ve heard every episode.',
                   EpisodeFilter.downloaded => 'No episodes downloaded.',
@@ -84,7 +95,19 @@ final class _ShowPageState extends State<ShowPage> {
               ),
             )
           else ...[
-            rowsPanel([for (final e in episodes.take(_shown)) EpisodeRow(episode: e)]),
+            rowsPanel([
+              for (final e in episodes.take(_shown))
+                EpisodeRow(
+                  episode: e,
+                  thumbnail: videos,
+                  trailing: !show.isOwn ? null : IconButton(
+                    tooltip: 'Remove episode',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => s.library.removeEpisode(e.id),
+                    icon: const Icon(Icons.close_rounded, size: 17, color: brand.fgFaint),
+                  ),
+                ),
+            ]),
             if (episodes.length > _shown)
               Padding(
                 padding: const EdgeInsets.only(top: 16),
@@ -116,7 +139,17 @@ final class _ShowPageState extends State<ShowPage> {
       ],
       const SizedBox(height: 18),
       Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-        if (show.followed)
+        if (show.isOwn)
+          brand.accentShadow(
+            enabled: true,
+            child: TextButton.icon(
+              style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
+              onPressed: () => Navigation.of(context).openSearch(youtube: true, into: LocalOwn(show).id),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add videos'),
+            ),
+          )
+        else if (show.followed)
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: show.cloudFeedId != null ? null : () => _unfollow(context, show),
@@ -133,7 +166,7 @@ final class _ShowPageState extends State<ShowPage> {
               label: Text(show.isYouTube ? 'Add to Library' : 'Follow'),
             ),
           ),
-        if (show.kind == PodcastKind.rss)
+        if (show.refreshes)
           Tooltip(
             message: 'Check for new episodes',
             child: IconButton(
@@ -154,6 +187,10 @@ final class _ShowPageState extends State<ShowPage> {
               ),
               const MenuDivider(),
             ],
+            if (show.isOwn) ...[
+              MenuEntry('Change artwork', icon: Icons.image_outlined, onPressed: () => unawaited(_pickArtwork(context, show))),
+              const MenuDivider(),
+            ],
             MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
             MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
               s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
@@ -161,13 +198,15 @@ final class _ShowPageState extends State<ShowPage> {
             if (show.kind == PodcastKind.rss)
               MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
             if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
-              MenuEntry(show.isYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
+              MenuEntry(show.fromYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
                 unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
               }),
+            if ((show.kind == PodcastKind.youtubeFeed && show.followed) || show.isOwn)
+              MenuEntry('Move to ListenJar Cloud', icon: Icons.cloud_upload_outlined, onPressed: () => unawaited(moveToCloud(context, show))),
             if (show.followed && show.cloudFeedId == null) ...[
               const MenuDivider(),
               MenuEntry(
-                show.isYouTube ? 'Remove from Library' : 'Unfollow',
+                show.isOwn ? 'Delete podcast' : show.isYouTube ? 'Remove from Library' : 'Unfollow',
                 icon: Icons.remove_circle_outline_rounded,
                 danger: true,
                 onPressed: () => _unfollow(context, show),
@@ -177,10 +216,18 @@ final class _ShowPageState extends State<ShowPage> {
           builder: (context, menu) => MoreButton(menu: menu),
         ),
       ]),
+      if (show.kind == PodcastKind.youtubeFeed || show.isOwn) ...[
+        const SizedBox(height: 12),
+        Text(
+          'On this device: its videos stream from YouTube as you play them, and nothing is downloaded or uploaded. '
+            'Only this app has it.',
+          style: text.bodySmall!.copyWith(color: brand.fgSoft),
+        ),
+      ],
       if (show.cloudFeedId != null) ...[
         const SizedBox(height: 12),
         Text(
-          'One of your ListenJar feeds. Manage it in ListenJar Cloud.',
+          'One of your ListenJar feeds. Sign in, in Settings, to manage it.',
           style: text.bodySmall!.copyWith(color: brand.fgSoft),
         ),
       ],
@@ -262,20 +309,24 @@ final class _ShowPageState extends State<ShowPage> {
           label: Text(_oldestFirst ? 'Oldest' : 'Newest'),
         ),
       );
-    if (MediaQuery.sizeOf(context).width < 640) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _searchField(context),
-        const SizedBox(height: 12),
-        Row(children: [Expanded(child: chips), sort]),
+    // The page's own width, not the window's: beside the sidebar, a mid-size
+    // window leaves the chips too little room and they stack one per line.
+    return LayoutBuilder(builder: (context, constraints) {
+      if (constraints.maxWidth < 680) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          _searchField(context),
+          const SizedBox(height: 12),
+          Row(children: [Expanded(child: chips), sort]),
+        ]);
+      }
+      return Row(children: [
+        Expanded(child: chips),
+        const SizedBox(width: 12),
+        SizedBox(width: 240, child: _searchField(context)),
+        const SizedBox(width: 4),
+        sort,
       ]);
-    }
-    return Row(children: [
-      Expanded(child: chips),
-      const SizedBox(width: 12),
-      SizedBox(width: 240, child: _searchField(context)),
-      const SizedBox(width: 4),
-      sort,
-    ]);
+    });
   }
 
   /// Narrows the episodes to those whose title or show notes hold every word typed.
@@ -347,10 +398,15 @@ final class _ShowPageState extends State<ShowPage> {
       builder: (context) => AlertDialog(
         backgroundColor: brand.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-        title: Text(show.isYouTube ? 'Remove “${show.title}”?' : 'Unfollow “${show.title}”?', style: text.titleLarge),
+        title: Text(
+          show.isOwn ? 'Delete “${show.title}”?' : show.isYouTube ? 'Remove “${show.title}”?' : 'Unfollow “${show.title}”?',
+          style: text.titleLarge,
+        ),
         content: Text(
           [
-            show.isYouTube ? 'It leaves your library.' : 'Its new episodes stop arriving.',
+            show.isOwn
+              ? 'It and its videos leave your library, with where you are in each.'
+              : show.isYouTube ? 'It leaves your library.' : 'Its new episodes stop arriving.',
             if (downloaded > 0) downloaded == 1 ? 'Its download is deleted from this device.' : 'Its $downloaded downloads are deleted from this device.',
           ].join(' '),
           style: text.bodyMedium!.copyWith(color: brand.fgSoft),
@@ -360,14 +416,29 @@ final class _ShowPageState extends State<ShowPage> {
           TextButton(
             style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
             onPressed: () => Navigator.pop(context, true),
-            child: Text(show.isYouTube ? 'Remove' : 'Unfollow'),
+            child: Text(show.isOwn ? 'Delete' : show.isYouTube ? 'Remove' : 'Unfollow'),
           ),
         ],
       ),
     );
     if (sure != true || !context.mounted) return;
     final navigator = Navigator.of(context);
-    await s.podcasts.unfollow(show);
+    await (show.isOwn ? s.podcasts.deleteOwn(show) : s.podcasts.unfollow(show));
     if (navigator.canPop()) navigator.pop();
+  }
+
+  /// Makes a picture the listener picks the artwork of [show], a podcast of
+  /// their own on this device.
+  Future<void> _pickArtwork(BuildContext context, Podcast show) async {
+    final podcasts = Services.of(context).podcasts;
+    final file = await openFile(acceptedTypeGroups: const [
+      XTypeGroup(label: 'Pictures', extensions: artworkExtensions, uniformTypeIdentifiers: ['public.image']),
+    ]);
+    if (file == null) return;
+    try {
+      await podcasts.setOwnArtwork(show, await file.readAsBytes());
+    } catch (e) {
+      if (context.mounted) tell(context, failure('Couldn’t change the artwork', e, other: 'Try another picture.'));
+    }
   }
 }

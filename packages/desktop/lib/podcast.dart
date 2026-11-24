@@ -1,8 +1,8 @@
-// A podcast of the listener's own, opened from the feed list: its artwork,
-// which they change by picking a picture (artwork.dart, uploaded through
-// uploads.dart), and every episode it has, uploaded or on its way. Videos go
-// in from the window's link field, which adds to this podcast while it is
-// open (main.dart). The player follows the podcast's RSS feed like any other
+// A ListenJar feed of the listener's, opened from the Library (cloud.dart):
+// what its sync is doing, and every episode it has, uploaded or on its way.
+// A podcast of their own also changes its artwork by picking a picture
+// (artwork.dart, uploaded through uploads.dart), and takes videos from
+// Search, which adds to it while opened from here. The player follows the podcast's RSS feed like any other
 // show (podcasts.dart), so an uploaded episode plays, downloads and keeps its
 // place from here just as it does there: the feed's guid is the episode's id.
 import 'dart:async';
@@ -11,22 +11,25 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import 'artwork.dart';
 import 'backend/api.dart';
+import 'cloud.dart' show ListenIn, feedStatus, moveToDevice;
 import 'feeds.dart';
+import 'links.dart' show kindLabel;
+import 'menu.dart';
+import 'shared_links.dart' show addVideoToOwnPodcast, ownPodcasts;
 import 'library.dart' show PodcastEpisode, videoThumbnail;
 import 'plans.dart' show formatBytes;
 import 'sync.dart';
 import 'theme.dart' as brand;
-import 'ui.dart' show Artwork, DownloadButton, EpisodeMenu, PlayButton, Services, showEpisode, spokenDate, spokenDuration;
+import 'ui.dart' show Artwork, DownloadButton, EpisodeMenu, Navigation, PlayButton, Services, showEpisode, spokenDate, spokenDuration;
 
 final class PodcastPage extends StatefulWidget {
-  const PodcastPage({super.key, required this.feed, required this.feeds, required this.listenIn, required this.onRemove});
+  const PodcastPage({super.key, required this.feed, required this.feeds, required this.onRemove});
   final Feed feed;
   final Feeds feeds;
-
-  /// The window's "Listen in…" button for this feed.
-  final Widget listenIn;
   final VoidCallback onRemove;
 
   @override
@@ -35,6 +38,9 @@ final class PodcastPage extends StatefulWidget {
 
 final class _PodcastPageState extends State<PodcastPage> {
   Feed get _feed => widget.feed;
+
+  /// A podcast of the listener's own, not a YouTube playlist, channel or video.
+  bool get _own => _feed.source == null;
 
   List<Episode>? _episodes;
   Object? _loadError;
@@ -180,67 +186,142 @@ final class _PodcastPageState extends State<PodcastPage> {
     final episodes = _episodes;
     final live = episodes?.where((e) => e.uploadedAt != null).length ?? _feed.episodeCount ?? 0;
     final waiting = (episodes?.length ?? live) - live;
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _ArtworkButton(
-        url: _feed.imageUrl,
-        picked: _picked,
-        sent: _sent,
-        onPressed: _pickArtwork,
+    final sync = widget.feeds.statusOf(_feed);
+    final (status, failed) = feedStatus(_feed, sync);
+    final phase = sync?.phase ?? FeedPhase.waiting;
+    final source = _feed.source;
+    final user = Services.of(context).account.user;
+    final narrow = MediaQuery.sizeOf(context).width < 640;
+    final artwork = _own
+      ? _ArtworkButton(url: _feed.imageUrl, picked: _picked, sent: _sent, onPressed: _pickArtwork)
+      : DecoratedBox(
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), boxShadow: const [brand.shadowSoft]),
+          child: Artwork(url: _feed.imageUrl, title: _feed.title, size: _artworkSize, radius: 18),
+        );
+    final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 6),
+      Text(
+        _feed.title,
+        style: text.headlineMedium!.copyWith(fontSize: 30),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
       ),
-      const SizedBox(width: 24),
-      Expanded(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const SizedBox(height: 6),
-          Text(
-            _feed.title,
-            style: text.headlineMedium!.copyWith(fontSize: 30),
+      const SizedBox(height: 8),
+      Text(
+        [
+          source == null ? 'Podcast of your own' : kindLabel(source.kind),
+          'In ListenJar Cloud',
+          live == 1 ? '1 episode' : '$live episodes',
+          if (waiting > 0) '$waiting on the way',
+        ].join(' · '),
+        style: text.bodySmall!.copyWith(color: brand.fgSoft),
+      ),
+      const SizedBox(height: 6),
+      // What the sync is doing with it, from this device.
+      Row(children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: switch (phase) {
+              FeedPhase.failed => brand.danger,
+              FeedPhase.upToDate => const Color(0xFF2F9E6E),
+              FeedPhase.syncing || FeedPhase.scanning => brand.accent,
+              FeedPhase.waiting => brand.fgFaint,
+            },
+          ),
+        ),
+        const SizedBox(width: 7),
+        Flexible(
+          child: Text(
+            status,
+            style: text.bodySmall!.copyWith(color: failed ? brand.danger : brand.fgSoft),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 8),
-          Text(
-            [
-              'Podcast of your own',
-              live == 1 ? '1 episode' : '$live episodes',
-              if (waiting > 0) '$waiting on the way',
-            ].join(' · '),
-            style: text.bodySmall!.copyWith(color: brand.fgSoft),
+        ),
+      ]),
+      if (phase == FeedPhase.syncing && sync?.fraction != null) ...[
+        const SizedBox(height: 8),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(value: sync!.fraction, minHeight: 3, color: brand.accent, backgroundColor: brand.mist),
           ),
-          const SizedBox(height: 18),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            widget.listenIn,
-            TextButton.icon(
+        ),
+      ],
+      const SizedBox(height: 18),
+      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        if (_own)
+          brand.accentShadow(
+            enabled: true,
+            child: TextButton.icon(
+              style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
+              onPressed: () => Navigation.of(context).openSearch(youtube: true, into: _feed.id),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add videos'),
+            ),
+          ),
+        ListenIn(feed: _feed),
+        if (source?.kind == SourceKind.video && user?.plan == Plan.paid)
+          Dropdown(
+            align: MenuAlign.end,
+            items: [
+              const MenuHeader('Add to a podcast of yours'),
+              for (final own in ownPodcasts(context))
+                MenuEntry(own.title, icon: own.icon, onPressed: () => unawaited(addVideoToOwnPodcast(context, source!.url, own, title: _feed.title))),
+              if (ownPodcasts(context).isNotEmpty) const MenuDivider(),
+              MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(addVideoToOwnPodcast(context, source!.url, null, title: _feed.title))),
+            ],
+            builder: (context, menu) => TextButton.icon(
               style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-              onPressed: _sent == null ? _pickArtwork : null,
-              icon: const Icon(Icons.image_outlined, size: 17),
-              label: Text(_feed.imageUrl == null ? 'Add artwork…' : 'Change artwork…'),
+              onPressed: menu.toggle,
+              icon: const Icon(Icons.playlist_add_rounded, size: 18),
+              label: const Text('Add to a podcast'),
             ),
-            TextButton(
-              style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm).copyWith(
-                foregroundColor: const WidgetStatePropertyAll(brand.danger),
+          ),
+        Dropdown(
+          align: MenuAlign.end,
+          items: [
+            if (_own)
+              MenuEntry(
+                _feed.imageUrl == null ? 'Add artwork…' : 'Change artwork…',
+                icon: Icons.image_outlined,
+                onPressed: _sent == null ? _pickArtwork : null,
               ),
-              onPressed: widget.onRemove,
-              child: const Text('Remove podcast'),
-            ),
-          ]),
-          if (_artworkError case final error?) ...[
-            const SizedBox(height: 12),
-            Text(
-              switch (error) {
-                UnreadablePicture() || PlanLimit() => '$error',
-                _ => 'Couldn’t change the artwork: $error',
-              },
-              style: text.bodySmall!.copyWith(color: brand.danger),
-            ),
-          ] else ...[
-            const SizedBox(height: 12),
-            Text(
-              'A square picture works best. Podcast apps show it at least 1400 pixels wide.',
-              style: text.bodySmall!.copyWith(color: brand.fgSoft, fontSize: 13),
-            ),
+            if (Uri.tryParse(source?.url ?? '') case final url? when url.hasScheme)
+              MenuEntry('Open on YouTube', icon: Icons.open_in_new_rounded, onPressed: () {
+                unawaited(launchUrl(url, mode: LaunchMode.externalApplication));
+              }),
+            MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: widget.feeds.loading ? null : widget.feeds.syncNow),
+            if (_own || source?.kind == SourceKind.playlist || source?.kind == SourceKind.channel)
+              MenuEntry('Move to this device', icon: Icons.laptop_mac_rounded, onPressed: () => unawaited(moveToDevice(context, _feed))),
+            const MenuDivider(),
+            MenuEntry(_own ? 'Remove podcast' : 'Remove', icon: Icons.remove_circle_outline_rounded, danger: true, onPressed: widget.onRemove),
           ],
-        ]),
-      ),
+          builder: (context, menu) => MoreButton(menu: menu),
+        ),
+      ]),
+      if (_artworkError case final error?) ...[
+        const SizedBox(height: 12),
+        Text(
+          switch (error) {
+            UnreadablePicture() || PlanLimit() => '$error',
+            _ => 'Couldn’t change the artwork: $error',
+          },
+          style: text.bodySmall!.copyWith(color: brand.danger),
+        ),
+      ],
+    ]);
+    if (narrow) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [artwork, const SizedBox(height: 20), info]);
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      artwork,
+      const SizedBox(width: 24),
+      Expanded(child: info),
     ]);
   }
 
@@ -264,8 +345,9 @@ final class _PodcastPageState extends State<PodcastPage> {
         _quiet(
           text,
           'No episodes yet',
-          'Search YouTube or paste a video link in the field above, and it’s added here. '
-            'It uploads from this computer.',
+          _own
+            ? 'Add videos: search YouTube or paste a video link, and it’s added here. It uploads from this device.'
+            : 'Its videos arrive as this device fetches them from YouTube and uploads them.',
         )
       else
         DecoratedBox(
@@ -347,7 +429,7 @@ final class _PodcastPageState extends State<PodcastPage> {
         ]),
       );
     }
-    final remove = IconButton(
+    final remove = !_own ? const SizedBox.shrink() : IconButton(
       tooltip: 'Remove episode',
       visualDensity: VisualDensity.compact,
       onPressed: removing ? null : () => _removeEpisode(episode),
@@ -437,6 +519,9 @@ final class _PodcastPageState extends State<PodcastPage> {
   }
 }
 
+/// How big the feed's artwork is at the top of its page.
+const _artworkSize = 168.0;
+
 /// An episode row's left edge and the gap after its thumbnail.
 const _rowInset = 16.0;
 
@@ -465,7 +550,7 @@ final class _ArtworkButton extends StatefulWidget {
 }
 
 final class _ArtworkButtonState extends State<_ArtworkButton> {
-  static const _size = 168.0;
+  static const _size = _artworkSize;
   bool _hover = false;
   bool _focused = false;
 

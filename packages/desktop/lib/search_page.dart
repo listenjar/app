@@ -10,12 +10,12 @@ import 'dart:async';
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'backend/api.dart' show Feed, SourceKind;
+import 'backend/api.dart' show Plan, SourceKind;
 import 'directory.dart';
 import 'library.dart' show PodcastEpisode;
 import 'links.dart';
 import 'menu.dart';
-import 'shared_links.dart' show mayAddVideoToCloud, mayFollowInCloud;
+import 'shared_links.dart' show OwnPodcast, addVideoToOwnPodcast, followYouTube, mayAddVideoToCloud, ownPodcast, ownPodcasts;
 import 'plans.dart';
 import 'podcasts.dart' show feedUrl;
 import 'shell.dart';
@@ -62,8 +62,8 @@ final class _SearchPageState extends State<SearchPage> {
   /// while they search for videos to put in it; and what went in this time.
   String? _intoId;
   final _added = <String>{};
-  Feed? get _into => switch (_intoId) {
-    final id? => Services.of(context).feeds.own.where((f) => f.id == id).firstOrNull,
+  OwnPodcast? get _into => switch (_intoId) {
+    final id? => ownPodcast(context, id),
     null => null,
   };
 
@@ -216,30 +216,21 @@ final class _SearchPageState extends State<SearchPage> {
     }
   }, 'Couldn’t play that video');
 
-  /// Playlists and channels follow in ListenJar Cloud: signed in, they're
-  /// added there; signed out, the Cloud section says what that means.
-  Future<void> _followInCloud(String url, String title) async {
-    final s = Services.of(context);
-    if (!await mayFollowInCloud(context, '“$title”')) return;
-    await _run(url, () async {
-      final feed = await s.feeds.add(url, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
-      if (mounted) tell(context, '“${feed.title}” is now a ListenJar feed. Its episodes arrive as this device syncs them.');
-    }, 'Couldn’t follow that');
+  /// Playlists and channels take a plan: followed on this device, where
+  /// they stream, or in ListenJar Cloud, as [cloud] says; null asks.
+  Future<void> _follow(String url, String title, {bool? cloud}) async {
+    final link = parseYouTubeLink(url);
+    if (link == null) return;
+    await _run(url, () => followYouTube(context, link, '“$title”', cloud: cloud), 'Couldn’t follow that');
   }
 
-  /// Adds the video to [feed], a ListenJar Cloud podcast of the
-  /// listener's own, or to a new one they name. Signed out or on Free, says
-  /// what that takes instead.
-  Future<void> _addToPodcast(YouTubeLink link, Feed? feed) async {
-    if (!await mayAddVideoToCloud(context) || !mounted) return;
-    final title = feed == null ? await askPodcastTitle(context) : null;
-    if ((feed == null && title == null) || !mounted) return;
-    final feeds = Services.of(context).feeds;
+  /// Adds the video to [own], a podcast of the listener's own on this
+  /// device or in ListenJar Cloud, or to a new one they make. Signed out or
+  /// on Free, says what that takes instead.
+  Future<void> _addToPodcast(YouTubeLink link, OwnPodcast? own, {String? title}) async {
     await _run(link.url, () async {
-      final target = feed ?? await feeds.create(title!);
-      await feeds.addVideo(target, link.url, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
-      _added.add('${target.id} ${link.url}');
-      if (mounted) tell(context, 'Added to “${target.title}”. It uploads from this device.');
+      final target = await addVideoToOwnPodcast(context, link.url, own, title: title);
+      if (target != null) _added.add('${target.id} ${link.url}');
     }, 'Couldn’t add that video');
   }
 
@@ -363,7 +354,7 @@ final class _SearchPageState extends State<SearchPage> {
 
   /// Search opened from a podcast of the listener's own: the videos found
   /// go into it, until they're done.
-  Widget _intoBar(BuildContext context, Feed feed) {
+  Widget _intoBar(BuildContext context, OwnPodcast own) {
     final text = Theme.of(context).textTheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
@@ -375,7 +366,7 @@ final class _SearchPageState extends State<SearchPage> {
           child: Text.rich(
             TextSpan(children: [
               const TextSpan(text: 'Adding videos to '),
-              TextSpan(text: '“${feed.title}”', style: const TextStyle(fontWeight: FontWeight.w600)),
+              TextSpan(text: '“${own.title}”', style: const TextStyle(fontWeight: FontWeight.w600)),
             ]),
             style: text.bodyMedium!.copyWith(color: brand.fg),
             maxLines: 1,
@@ -474,7 +465,7 @@ final class _SearchPageState extends State<SearchPage> {
       onTap: link == null
         ? null
         : r.kind != SourceRefKind.video
-          ? () => unawaited(_followInCloud(r.url, r.title))
+          ? () => unawaited(_follow(r.url, r.title))
           : episode != null
             ? () => unawaited(Services.of(context).player.playEpisode(episode))
             : () => unawaited(_playVideo(link, result: r)),
@@ -486,7 +477,7 @@ final class _SearchPageState extends State<SearchPage> {
         ? (busy ? const _Spinner() : null)
         : r.kind == SourceRefKind.video
           ? _videoActions(context, link, r, episode)
-          : _cloudFollowButton(context, r.url, r.title),
+          : _followButton(context, r.url, r.title),
     );
   }
 
@@ -503,7 +494,7 @@ final class _SearchPageState extends State<SearchPage> {
   Widget _videoActions(BuildContext context, YouTubeLink link, SearchResult? r, PodcastEpisode? episode) {
     final s = Services.of(context);
     final kept = episode != null && (s.library.podcast(episode.podcastId)?.followed ?? false);
-    final own = s.feeds.own;
+    final own = ownPodcasts(context);
     final into = _into;
     final added = into != null && _added.contains('${into.id} ${link.url}');
     return Row(mainAxisSize: MainAxisSize.min, children: [
@@ -517,9 +508,9 @@ final class _SearchPageState extends State<SearchPage> {
           ),
           const MenuDivider(),
           const MenuHeader('Add to a podcast of yours'),
-          for (final feed in own)
-            MenuEntry(feed.title, icon: Icons.podcasts_rounded, onPressed: () => unawaited(_addToPodcast(link, feed))),
-          MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_addToPodcast(link, null))),
+          for (final o in own)
+            MenuEntry(o.title, icon: o.icon, onPressed: () => unawaited(_addToPodcast(link, o, title: r?.title))),
+          MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_addToPodcast(link, null, title: r?.title))),
           MenuEntry('A podcast of its own', icon: Icons.playlist_play_rounded, onPressed: () => unawaited(_videoPodcast(link))),
         ],
         builder: (context, menu) => IconButton(
@@ -532,7 +523,7 @@ final class _SearchPageState extends State<SearchPage> {
       if (into != null) ...[
         TextButton.icon(
           style: brand.button(added ? brand.Tone.quiet : brand.Tone.accent, brand.ButtonSize.sm),
-          onPressed: added ? null : () => unawaited(_addToPodcast(link, into)),
+          onPressed: added ? null : () => unawaited(_addToPodcast(link, into, title: r?.title)),
           icon: Icon(added ? Icons.check_rounded : Icons.add_rounded, size: 18),
           label: Text(added ? 'Added' : 'Add'),
         ),
@@ -554,12 +545,26 @@ final class _SearchPageState extends State<SearchPage> {
     ]);
   }
 
-  Widget _cloudFollowButton(BuildContext context, String url, String title) => TextButton.icon(
-    style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-    onPressed: () => unawaited(_followInCloud(url, title)),
-    icon: const Icon(Icons.cloud_outlined, size: 18),
-    label: const Text('Follow'),
-  );
+  /// Follow: on a plan, a menu of on this device or in the Cloud; without
+  /// one, what following takes.
+  Widget _followButton(BuildContext context, String url, String title) {
+    final paid = Services.of(context).account.user?.plan == Plan.paid;
+    Widget button(VoidCallback onPressed) => TextButton.icon(
+      style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+      onPressed: onPressed,
+      icon: const Icon(Icons.add_rounded, size: 18),
+      label: const Text('Follow'),
+    );
+    if (!paid) return button(() => unawaited(_follow(url, title)));
+    return Dropdown(
+      align: MenuAlign.end,
+      items: [
+        MenuEntry('On this device', icon: Icons.smart_display_outlined, onPressed: () => unawaited(_follow(url, title, cloud: false))),
+        MenuEntry('In ListenJar Cloud', icon: Icons.cloud_outlined, onPressed: () => unawaited(_follow(url, title, cloud: true))),
+      ],
+      builder: (context, menu) => button(menu.toggle),
+    );
+  }
 
   Widget _linkCard(BuildContext context, YouTubeLink link) {
     final text = Theme.of(context).textTheme;
@@ -579,7 +584,9 @@ final class _SearchPageState extends State<SearchPage> {
             Text(kindLabel(link.kind), style: text.titleMedium),
             const SizedBox(height: 4),
             Text(
-              video ? 'Plays here as an episode of its own. Free, on this device.' : 'Following it makes it a podcast in ListenJar Cloud.',
+              video
+                ? 'Plays here as an episode of its own. Free, on this device.'
+                : 'Follow it on this device, streaming from YouTube, or in ListenJar Cloud for any podcast app.',
               style: text.bodySmall!.copyWith(color: brand.fgSoft),
             ),
           ]),
@@ -590,7 +597,7 @@ final class _SearchPageState extends State<SearchPage> {
         else if (video)
           _videoActions(context, link, null, _videoEpisode(link))
         else
-          _cloudFollowButton(context, link.url, kindLabel(link.kind)),
+          _followButton(context, link.url, kindLabel(link.kind)),
       ]),
     );
   }
@@ -652,7 +659,7 @@ final class _SearchPageState extends State<SearchPage> {
           const SizedBox(height: 20),
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => Navigation.of(context).openCloud(),
+            onPressed: () => Navigation.of(context).openSettings(),
             icon: const Icon(Icons.cloud_outlined, size: 18),
             label: const Text('About ListenJar Cloud'),
           ),

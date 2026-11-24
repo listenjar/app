@@ -24,7 +24,20 @@ enum PodcastKind {
   /// A single YouTube video kept as a show of one episode, on this device
   /// only.
   youtube,
+
+  /// A YouTube playlist or channel followed on this device only: its videos
+  /// stream from YouTube, and refreshing lists the new ones. In ListenJar
+  /// Cloud instead, it is an [rss] show.
+  youtubeFeed,
+
+  /// A podcast of the listener's own on this device only: YouTube videos
+  /// they gathered, which stream from YouTube as they play. In ListenJar
+  /// Cloud instead, it is an [rss] show.
+  own,
 }
+
+/// A video a YouTube playlist or channel lists, as the library keeps it.
+typedef YouTubeVideo = ({String id, String title, int? seconds});
 
 /// A show the listener follows.
 final class Podcast {
@@ -72,7 +85,18 @@ final class Podcast {
   final int unplayed;
   final DateTime? latestAt;
 
+  /// A single YouTube video kept as a show of its own.
   bool get isYouTube => kind == PodcastKind.youtube;
+
+  /// Straight from YouTube, not a podcast feed: a video or a followed
+  /// playlist or channel.
+  bool get fromYouTube => kind != PodcastKind.rss;
+
+  /// A podcast of the listener's own on this device.
+  bool get isOwn => kind == PodcastKind.own;
+
+  /// Gets new episodes by refreshing: a feed, a playlist or a channel.
+  bool get refreshes => kind == PodcastKind.rss || kind == PodcastKind.youtubeFeed;
 }
 
 enum DownloadState { none, queued, downloading, done, failed }
@@ -255,7 +279,7 @@ typedef StoredDownload = ({PodcastEpisode episode, DateTime? playedAt, DateTime 
 /// How a show's episodes are listed.
 enum EpisodeFilter { all, unplayed, downloaded }
 
-const _schema = 3;
+const _schema = 4;
 
 final class Library extends ChangeNotifier {
   Library._(this._db, this.directory) {
@@ -350,6 +374,19 @@ final class Library extends ChangeNotifier {
       db.execute('''
         alter table episodes add column downloaded_at integer;
         update episodes set downloaded_at = added_at where download_state = 'done';
+      ''');
+    }
+    if (version < 4) {
+      // Where the listener was in a YouTube playlist or channel moved to
+      // ListenJar Cloud, by video, until its uploads arrive (carry).
+      db.execute('''
+        create table if not exists carried (
+          feed_id text not null,
+          video_id text not null,
+          position_ms integer not null,
+          played integer not null,
+          primary key (feed_id, video_id)
+        ) strict;
       ''');
     }
     db.execute('pragma user_version = $_schema');
@@ -690,6 +727,160 @@ final class Library extends ChangeNotifier {
     ''', [id, 'yt:$videoId', title, description, publishedAt?.millisecondsSinceEpoch, duration?.inMilliseconds, artworkUrl, url, videoId, now]);
     _changed();
     return podcast(id)!;
+  }
+
+  /// Follows the YouTube playlist or channel at [url] on this device; a
+  /// show already there is followed again.
+  Podcast followYouTubeFeed({required String url, required String title, required String author, required String? artworkUrl}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _db.execute('''
+      insert into podcasts (feed_url, kind, title, author, artwork_url, link, subscribed_at, followed)
+      values (?, 'youtubeFeed', ?, ?, ?, ?, ?, 1)
+      on conflict (feed_url) do update set followed = 1
+    ''', [url, title, author, artworkUrl, url, now]);
+    final id = _db.select('select id from podcasts where feed_url = ?', [url]).first['id'] as int;
+    _changed();
+    return podcast(id)!;
+  }
+
+  /// Stores the videos a YouTube playlist or channel lists now, as
+  /// [YouTubeVideo]s in its order, and returns the episodes new to it. The
+  /// first listing ([dated] false) is the back catalogue, undated, and all
+  /// but its first few count as played, as a feed's do; videos found later
+  /// are dated when they turned up, so they count as new.
+  List<PodcastEpisode> youtubeFeedRefreshed(int podcast, {required String? title, required String? artworkUrl, required List<YouTubeVideo> videos, required bool dated}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final added = <int>[];
+    _db.execute('begin');
+    try {
+      _db.execute(
+        'update podcasts set title = coalesce(?, title), artwork_url = coalesce(?, artwork_url), refreshed_at = ?, refresh_error = null where id = ?',
+        [title, artworkUrl, now, podcast],
+      );
+      // Oldest first, so the newest gets the highest id and lists first.
+      for (final (i, v) in videos.indexed.toList().reversed) {
+        final url = _watchUrl(v.id);
+        final rows = _db.select('''
+          insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict (podcast_id, guid) do nothing
+          returning id
+        ''', [
+          podcast, 'yt:${v.id}', v.title, dated ? now : null, v.seconds == null ? null : v.seconds! * 1000, url, v.id,
+          !dated && i >= _newestCount ? 1 : 0, now,
+        ]);
+        if (rows.isNotEmpty) added.add(rows.first['id'] as int);
+      }
+      _db.execute('commit');
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    }
+    _changed();
+    return [for (final id in added) ?episode(id)];
+  }
+
+  // Podcasts of the listener's own on this device.
+
+  /// Makes a podcast of the listener's own on this device, empty until they
+  /// add videos.
+  Podcast createOwn(String title, {String? artworkUrl}) {
+    final now = DateTime.now();
+    final rows = _db.select('''
+      insert into podcasts (feed_url, kind, title, author, artwork_url, subscribed_at, refreshed_at, followed)
+      values (?, 'own', ?, 'Podcast of your own', ?, ?, ?, 1)
+      returning id
+    ''', ['listenjar:own:${now.microsecondsSinceEpoch}', title, artworkUrl, now.millisecondsSinceEpoch, now.millisecondsSinceEpoch]);
+    _changed();
+    return podcast(rows.first['id'] as int)!;
+  }
+
+  /// Adds the YouTube video [videoId] to [podcast], a podcast of the
+  /// listener's own, dated [addedAt] (now by default), as ListenJar Cloud
+  /// dates what is added to one there. Null when it's already there.
+  PodcastEpisode? addOwnVideo(int podcast, {required String videoId, required String title, Duration? duration, DateTime? addedAt}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final rows = _db.select('''
+      insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, added_at)
+      values (?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict (podcast_id, guid) do nothing
+      returning id
+    ''', [podcast, 'yt:$videoId', title, addedAt?.millisecondsSinceEpoch ?? now, duration?.inMilliseconds, _watchUrl(videoId), videoId, now]);
+    _changed();
+    return rows.isEmpty ? null : episode(rows.first['id'] as int);
+  }
+
+  /// Takes [episode] out of a podcast of the listener's own.
+  void removeEpisode(int episode) {
+    _db.execute('delete from episodes where id = ?', [episode]);
+    _changed();
+  }
+
+  void setArtwork(int podcast, String? artworkUrl) {
+    _db.execute('update podcasts set artwork_url = ? where id = ?', [artworkUrl, podcast]);
+    _changed();
+  }
+
+  // Moving between this device and ListenJar Cloud.
+
+  /// The videos of [podcast] the listener played or started, by video id.
+  Map<String, (Duration, bool)> _listened(int podcast) => {
+    for (final e in episodes(podcast))
+      if (e.videoId case final id? when e.played || e.position > Duration.zero) id: (e.position, e.played),
+  };
+
+  /// Puts [listened] on the episodes of [podcast] that are the same videos;
+  /// returns the video ids it put.
+  Set<String> _listen(int podcast, Map<String, (Duration, bool)> listened) {
+    final put = <String>{};
+    for (final e in episodes(podcast)) {
+      final id = e.videoId;
+      final listening = id == null ? null : listened[id];
+      if (listening == null) continue;
+      final (position, played) = listening;
+      _db.execute('update episodes set position_ms = ?, played = ? where id = ?', [position.inMilliseconds, played ? 1 : 0, e.id]);
+      put.add(id!);
+    }
+    return put;
+  }
+
+  /// Where the listener was in [from], onto [to]: the same YouTube videos,
+  /// one show moving between this device and ListenJar Cloud.
+  void copyListening(int from, int to) {
+    _listen(to, _listened(from));
+    _changed();
+  }
+
+  /// Keeps where the listener was in [podcast] for [feedId], its ListenJar
+  /// Cloud feed now, whose episodes arrive as they upload ([applyCarried]).
+  void carry(int podcast, String feedId) {
+    for (final MapEntry(key: video, value: (position, played)) in _listened(podcast).entries) {
+      _db.execute(
+        'insert or replace into carried (feed_id, video_id, position_ms, played) values (?, ?, ?, ?)',
+        [feedId, video, position.inMilliseconds, played ? 1 : 0],
+      );
+    }
+  }
+
+  /// Puts what [carry] kept on the episodes of [podcast], [feedId]'s show,
+  /// that have arrived, and forgets it for those.
+  void applyCarried(int podcast, String feedId) {
+    final rows = _db.select('select video_id, position_ms, played from carried where feed_id = ?', [feedId]);
+    if (rows.isEmpty) return;
+    final put = _listen(podcast, {
+      for (final r in rows) r['video_id'] as String: (Duration(milliseconds: r['position_ms'] as int), r['played'] == 1),
+    });
+    for (final id in put) {
+      _db.execute('delete from carried where feed_id = ? and video_id = ?', [feedId, id]);
+    }
+    if (put.isNotEmpty) _changed();
+  }
+
+  /// Forgets what was carried for feeds the listener no longer has.
+  void forgetCarried(Set<String> live) {
+    for (final r in _db.select('select distinct feed_id from carried')) {
+      if (!live.contains(r['feed_id'])) _db.execute('delete from carried where feed_id = ?', [r['feed_id']]);
+    }
   }
 
   static String _watchUrl(String videoId) => 'https://www.youtube.com/watch?v=$videoId';

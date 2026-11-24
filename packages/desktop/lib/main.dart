@@ -12,10 +12,13 @@ import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
+import 'backend/api.dart' show Plan;
+import 'cloud.dart' show feedToDevice, ownToCloud, ownToDevice, showToCloud;
 import 'directory.dart';
 import 'downloads.dart';
 import 'feeds.dart';
 import 'library.dart';
+import 'links.dart' show parseYouTubeLink;
 import 'log.dart';
 import 'player.dart';
 import 'podcasts.dart';
@@ -42,7 +45,7 @@ Future<void> main([List<String> arguments = const []]) async {
   unawaited(account.restore());
   final library = await Library.open();
   final downloads = Downloads(library, youtube);
-  final podcasts = Podcasts(library, downloads, youtube);
+  final podcasts = Podcasts(library, downloads, youtube)..paid = () => account.restoring ? null : account.user?.plan == Plan.paid;
   final player = await Player.start(library, youtube, downloads);
   unawaited(downloads.start());
   CloudShows(account, feeds, podcasts);
@@ -72,7 +75,13 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
   return {
     'account': switch (s.account.user) {
       null => 'signed out',
-      final user => {'plan': user.plan, 'feeds': s.feeds.feeds.length},
+      final user => {
+        'plan': user.plan,
+        'feeds': [
+          for (final f in s.feeds.feeds)
+            {'id': f.id, 'kind': f.source?.kind.name ?? 'own', 'sync': s.feeds.statusOf(f)?.phase.name, 'show': s.library.podcasts.where((p) => p.cloudFeedId == f.id).firstOrNull?.id},
+        ],
+      },
     },
     'player': {
       'episode': episode == null ? null : {'id': episode.id, 'title': episode.title, 'show': episode.from, 'audio': episode.audioUrl, 'artwork': episode.artwork, 'cover': episode.cover},
@@ -84,9 +93,13 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
       'sleep': player.sleep?.toString(),
       'problem': player.problem,
       'error': player.error?.toString(),
+      'chapters': [for (final c in player.chapters) '${c.start} ${c.title}'],
     },
     'upNext': [for (final e in library.queue) e.title],
-    'following': library.podcasts.where((p) => p.followed).length,
+    'following': [
+      for (final p in library.podcasts.where((p) => p.followed))
+        {'id': p.id, 'kind': p.kind.name, 'episodes': library.episodes(p.id).length, if (p.refreshError != null) 'error': p.refreshError},
+    ],
     'downloads': [
       for (final e in library.downloads())
         {'title': e.title, 'state': e.downloadState.name, if (e.downloadState == DownloadState.downloading) 'progress': e.downloadProgress},
@@ -114,14 +127,69 @@ void control(AppServices? s, Map<String, String> parameters) {
     case 'refresh':
       unawaited(s.podcasts.refreshAll(force: true));
     case 'add':
-      // A YouTube video (`url`) into the listener's first podcast of their own in the Cloud.
-      final feed = s.feeds.own.firstOrNull ?? (throw StateError('no podcast of your own'));
-      unawaited(s.feeds.addVideo(feed, parameters['url'] ?? '', CancellationToken()));
+      // A YouTube video (`url`) into a podcast of the listener's own:
+      // `into` a Cloud feed id or `local:<show id>`; their first in the
+      // Cloud if not given.
+      final url = parameters['url'] ?? '';
+      switch (parameters['into']) {
+        case final into? when into.startsWith('local:'):
+          final show = s.library.podcast(int.parse(into.substring(6))) ?? (throw ArgumentError('no show $into'));
+          final link = parseYouTubeLink(url) ?? (throw ArgumentError('not a YouTube link'));
+          unawaited(s.podcasts.addToOwn(show, link, CancellationToken()));
+        case final into:
+          final feed = (into == null ? s.feeds.own.firstOrNull : s.feeds.feeds.where((f) => f.id == into).firstOrNull)
+            ?? (throw StateError('no podcast of your own ${into ?? ''}'));
+          unawaited(s.feeds.addVideo(feed, url, CancellationToken()));
+      }
+    case 'create':
+      // A podcast of the listener's own called `title`, in the Cloud if
+      // `cloud` is true, else on this device.
+      final title = parameters['title'] ?? (throw ArgumentError('title?'));
+      if (parameters['cloud'] == 'true') {
+        unawaited(s.feeds.create(title));
+      } else {
+        s.library.createOwn(title);
+      }
+    case 'follow':
+      // A YouTube playlist or channel (`url`) on this device, streaming.
+      final link = parseYouTubeLink(parameters['url'] ?? '') ?? (throw ArgumentError('not a YouTube link'));
+      unawaited(s.podcasts.followYouTube(link, CancellationToken()));
+    case 'unfollow':
+      final show = s.library.podcast(int.tryParse(parameters['show'] ?? '') ?? -1) ?? (throw ArgumentError('no show ${parameters['show']}'));
+      unawaited(s.podcasts.unfollow(show));
+    case 'move':
+      // A YouTube playlist or channel, or a podcast of the listener's own,
+      // between this device (`show`) and ListenJar Cloud (`feed`), as the
+      // show's and the feed's menus do.
+      switch (parameters) {
+        case {'show': final id}:
+          final show = s.library.podcast(int.parse(id)) ?? (throw ArgumentError('no show $id'));
+          unawaited(show.isOwn ? ownToCloud(s.feeds, s.podcasts, show) : showToCloud(s.feeds, s.podcasts, show));
+        case {'feed': final id}:
+          final feed = s.feeds.feeds.where((f) => f.id == id).firstOrNull ?? (throw ArgumentError('no feed $id'));
+          unawaited(feed.source == null ? ownToDevice(s.feeds, s.podcasts, feed) : feedToDevice(s.feeds, s.podcasts, feed));
+        default:
+          throw ArgumentError('move what? show or feed');
+      }
+    case 'open':
+      // A ListenJar `feed` (an id), a `show` (an id) or `settings`.
+      switch (parameters) {
+        case {'feed': final id}:
+          appNavigation.openFeed(id);
+        case {'show': final id}:
+          appNavigation.openShow(int.parse(id));
+        case {'settings': _}:
+          appNavigation.openSettings();
+        case {'nowPlaying': _}:
+          appNavigation.openNowPlaying();
+        default:
+          throw ArgumentError('open what? feed, show, settings or nowPlaying');
+      }
     case 'download':
       final episode = s.library.episode(int.tryParse(parameters['episode'] ?? '') ?? -1);
       unawaited(s.downloads.download(episode ?? (throw ArgumentError('no episode ${parameters['episode']}'))));
     case final action:
-      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add or download');
+      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open or download');
   }
 }
 
@@ -145,8 +213,11 @@ class App extends StatefulWidget {
   State<App> createState() => _AppState();
 }
 
+/// The app's one Navigation, which `ext.listenjar.control` drives too.
+final appNavigation = Navigation();
+
 class _AppState extends State<App> {
-  final _navigation = Navigation();
+  final _navigation = appNavigation;
 
   @override
   Widget build(BuildContext context) {

@@ -20,8 +20,18 @@
 //   ext.listenjar.state    what the app is doing (main.dart's appState)
 //   ext.listenjar.control  drives the app: `action` play (`episode` an
 //                          id), pause, stop, seek (`seconds`), refresh,
-//                          add (a YouTube `url` into the first podcast of
-//                          the listener's own) or download (`episode`)
+//                          add (a YouTube `url` `into` a podcast of the
+//                          listener's own: a Cloud feed id or
+//                          `local:<show>`; the first in the Cloud if
+//                          not given), create (a podcast of their own
+//                          called `title`, in the Cloud if `cloud` is
+//                          true, else on this device), follow (a YouTube
+//                          playlist or channel `url`, on this device),
+//                          unfollow (`show`), move (a `show` on this
+//                          device to the Cloud, or a Cloud `feed` here),
+//                          open (a `feed` or `show`
+//                          id, `settings` or `nowPlaying`) or download
+//                          (`episode`)
 // SEVERE records and uncaught errors are reported as Flutter errors, so
 // they show where runtime errors show (the MCP's `get_runtime_errors`).
 import 'dart:async';

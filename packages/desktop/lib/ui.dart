@@ -4,7 +4,7 @@
 // notes, and how times and dates read. Screens are in shell.dart and the
 // files it names.
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -66,7 +66,8 @@ final class Navigation {
   void openNowPlaying() => target?.openNowPlaying();
   void openSearch({String? query, bool youtube = false, String? into}) =>
     target?.openSearch(query: query, youtube: youtube, into: into);
-  void openCloud() => target?.openCloud();
+  void openFeed(String feedId) => target?.openFeed(feedId);
+  void openSettings() => target?.openSettings();
 
   static Navigation of(BuildContext context) => context.getInheritedWidgetOfExactType<NavigationScope>()!.navigation;
 }
@@ -77,7 +78,10 @@ abstract interface class NavigationTarget {
   /// [into] is a ListenJar Cloud podcast of the listener's own that the
   /// videos found go into, with one click each.
   void openSearch({String? query, bool youtube = false, String? into});
-  void openCloud();
+
+  /// A ListenJar feed of the listener's, in the Library.
+  void openFeed(String feedId);
+  void openSettings();
 }
 
 final class NavigationScope extends InheritedWidget {
@@ -158,16 +162,28 @@ final class Artwork extends StatelessWidget {
         style: TextStyle(color: brand.white, fontWeight: FontWeight.w700, fontSize: size * 0.42, height: 1),
       ),
     );
+    final cacheWidth = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    Widget loading(BuildContext _, Widget child, int? frame, bool sync) => sync || frame != null
+      ? child
+      : const ColoredBox(color: brand.paperDeep);
     Widget picture(String? url, Widget otherwise) => switch (url) {
+      // A podcast of the listener's own on this device keeps its artwork
+      // beside the library.
+      final url? when url.startsWith('file:') => Image.file(
+        File.fromUri(Uri.parse(url)),
+        fit: BoxFit.cover,
+        cacheWidth: cacheWidth,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => otherwise,
+        frameBuilder: loading,
+      ),
       final url? when url.isNotEmpty => Image.network(
         url,
         fit: BoxFit.cover,
-        cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+        cacheWidth: cacheWidth,
         gaplessPlayback: true,
         errorBuilder: (_, _, _) => otherwise,
-        frameBuilder: (_, child, frame, sync) => sync || frame != null
-          ? child
-          : const ColoredBox(color: brand.paperDeep),
+        frameBuilder: loading,
       ),
       _ => otherwise,
     };
@@ -398,11 +414,15 @@ final class EpisodeMenu extends StatelessWidget {
 /// An episode in a list: when and how long, its title, how far the
 /// listener got, and play, download and more. Clicking it opens its notes.
 final class EpisodeRow extends StatefulWidget {
-  const EpisodeRow({super.key, required this.episode, this.withShow = false, this.trailing});
+  const EpisodeRow({super.key, required this.episode, this.withShow = false, this.thumbnail = false, this.trailing});
   final PodcastEpisode episode;
 
   /// Lists across shows put the show's cover and name on each row.
   final bool withShow;
+
+  /// A show of videos puts each one's 16:9 thumbnail on its row, as
+  /// YouTube lists them.
+  final bool thumbnail;
   final Widget? trailing;
 
   @override
@@ -439,6 +459,9 @@ final class _EpisodeRowState extends State<EpisodeRow> {
             child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
               if (widget.withShow) ...[
                 Artwork(url: e.artwork, title: e.podcastTitle, size: narrow ? 48 : 56),
+                const SizedBox(width: 14),
+              ] else if (widget.thumbnail) ...[
+                Artwork(url: e.artwork, title: e.title, size: narrow ? 80 : 96, height: (narrow ? 80 : 96) * 9 / 16, radius: 8),
                 const SizedBox(width: 14),
               ],
               Expanded(
