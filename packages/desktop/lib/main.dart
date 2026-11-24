@@ -7,6 +7,7 @@
 // window, the tray (tray.dart) and the schedule (schedule.dart) share it.
 import 'dart:async';
 
+import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -31,7 +32,7 @@ import 'youtube.dart';
 Future<void> main([List<String> arguments = const []]) async {
   AppServices? services;
   IncomingLinks? links;
-  startLogging(state: () => appState(services, links));
+  startLogging(state: () => appState(services, links), control: (parameters) => control(services, parameters));
   WidgetsFlutterBinding.ensureInitialized();
   links = IncomingLinks(arguments);
   // The YouTube session starts now, so the first search doesn't wait for it.
@@ -74,7 +75,7 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
       final user => {'plan': user.plan, 'feeds': s.feeds.feeds.length},
     },
     'player': {
-      'episode': episode == null ? null : {'id': episode.id, 'title': episode.title, 'show': episode.from, 'audio': episode.audioUrl},
+      'episode': episode == null ? null : {'id': episode.id, 'title': episode.title, 'show': episode.from, 'audio': episode.audioUrl, 'artwork': episode.artwork, 'cover': episode.cover},
       'playing': player.playing,
       'loading': player.loading,
       'position': '${player.position}',
@@ -92,6 +93,36 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
     ],
     'linksWaiting': [for (final link in links?.waiting ?? const <Uri>[]) '$link'],
   };
+}
+
+/// `ext.listenjar.control` (log.dart): drives the player for whoever
+/// debugs it. The command starts; the answer is the state at that moment.
+void control(AppServices? s, Map<String, String> parameters) {
+  if (s == null) throw StateError('starting');
+  final player = s.player;
+  switch (parameters['action']) {
+    case 'play':
+      final id = int.tryParse(parameters['episode'] ?? '');
+      final episode = id == null ? null : s.library.episode(id);
+      unawaited(episode == null ? player.play() : player.playEpisode(episode));
+    case 'pause':
+      unawaited(player.pause());
+    case 'stop':
+      unawaited(player.stop());
+    case 'seek':
+      unawaited(player.seek(Duration(milliseconds: ((double.tryParse(parameters['seconds'] ?? '') ?? 0) * 1000).round())));
+    case 'refresh':
+      unawaited(s.podcasts.refreshAll(force: true));
+    case 'add':
+      // A YouTube video (`url`) into the listener's first podcast of their own in the Cloud.
+      final feed = s.feeds.own.firstOrNull ?? (throw StateError('no podcast of your own'));
+      unawaited(s.feeds.addVideo(feed, parameters['url'] ?? '', CancellationToken()));
+    case 'download':
+      final episode = s.library.episode(int.tryParse(parameters['episode'] ?? '') ?? -1);
+      unawaited(s.downloads.download(episode ?? (throw ArgumentError('no episode ${parameters['episode']}'))));
+    case final action:
+      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add or download');
+  }
 }
 
 typedef AppServices = ({

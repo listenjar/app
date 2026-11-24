@@ -2,9 +2,11 @@
 //
 // Each area logs through a Logger of its own (`Logger('youtube')`). Every
 // record goes to DevTools' Logging view; outside release builds, records of
-// level FINE and up also go to the console that `flutter run` prints, and
-// dart:io HTTP requests show in DevTools' Network view. A release build keeps
-// warnings and up.
+// level FINE and up also go to the console that `flutter run` prints. A
+// release build keeps warnings and up. HTTP requests are logged by their
+// callers (`youtube.http`), not through DevTools' Network view: dart:io's
+// HTTP profiler keeps each response body as a List<int>, 8 bytes per byte,
+// so streaming and downloading media grew the heap by gigabytes.
 //
 // [traced] times async work. The work shows as a task in DevTools'
 // Performance view, and work still waiting after a while says so in the
@@ -16,13 +18,16 @@
 //                          `level` (default FINE), `logger` a name prefix
 //   ext.listenjar.running  traced work not finished yet, oldest first
 //   ext.listenjar.state    what the app is doing (main.dart's appState)
+//   ext.listenjar.control  drives the app: `action` play (`episode` an
+//                          id), pause, stop, seek (`seconds`), refresh,
+//                          add (a YouTube `url` into the first podcast of
+//                          the listener's own) or download (`episode`)
 // SEVERE records and uncaught errors are reported as Flutter errors, so
 // they show where runtime errors show (the MCP's `get_runtime_errors`).
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:developer' as developer;
-import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
@@ -39,12 +44,12 @@ final _running = <int, (Logger, String, Stopwatch)>{};
 var _runs = 0;
 
 /// Called once, first thing in main(). [state] answers
-/// `ext.listenjar.state`.
-void startLogging({required Map<String, Object?> Function() state}) {
+/// `ext.listenjar.state`; [control] takes `ext.listenjar.control`'s
+/// parameters, which then answers with [state].
+void startLogging({required Map<String, Object?> Function() state, required void Function(Map<String, String>) control}) {
   Logger.root.level = kReleaseMode ? Level.WARNING : Level.ALL;
   Logger.root.onRecord.listen(_write);
   if (kReleaseMode) return;
-  HttpClient.enableTimelineLogging = true;
   // Uncaught errors from futures and streams, which otherwise only print.
   PlatformDispatcher.instance.onError = (error, stack) {
     FlutterError.reportError(FlutterErrorDetails(exception: error, stack: stack, library: 'an uncaught async error'));
@@ -57,6 +62,10 @@ void startLogging({required Map<String, Object?> Function() state}) {
     ],
   });
   _extension('state', (_) => state());
+  _extension('control', (parameters) {
+    control(parameters);
+    return state();
+  });
 }
 
 void _extension(String name, Map<String, Object?> Function(Map<String, String> parameters) answer) {
