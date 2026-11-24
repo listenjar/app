@@ -187,7 +187,8 @@ void control(AppServices? s, Map<String, String> parameters) {
           throw ArgumentError('move what? show or feed');
       }
     case 'open':
-      // A ListenJar `feed` (an id), a `show` (an id) or `settings`.
+      // A ListenJar `feed` (an id), a `show` (an id), `settings`,
+      // `nowPlaying` or `plans` (the sheet, titled by its value if any).
       switch (parameters) {
         case {'feed': final id}:
           appNavigation.openFeed(id);
@@ -197,8 +198,10 @@ void control(AppServices? s, Map<String, String> parameters) {
           appNavigation.openSettings();
         case {'nowPlaying': _}:
           appNavigation.openNowPlaying();
+        case {'plans': final title}:
+          appNavigation.openPlans(title: title.isEmpty ? null : title);
         default:
-          throw ArgumentError('open what? feed, show, settings or nowPlaying');
+          throw ArgumentError('open what? feed, show, settings, nowPlaying or plans');
       }
     case 'download':
       final episode = s.library.episode(int.tryParse(parameters['episode'] ?? '') ?? -1);

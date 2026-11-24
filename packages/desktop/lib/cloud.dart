@@ -556,12 +556,12 @@ final class _AccountPanelState extends State<AccountPanel> {
       Text(s.feeds.summary, style: soft),
       const SizedBox(height: 18),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        if (sellsPlans && user.plan == Plan.free)
+        if (user.plan == Plan.free)
           brand.accentShadow(
             enabled: true,
             child: TextButton(style: brand.button(brand.Tone.accent, brand.ButtonSize.sm), onPressed: _plans, child: const Text('See plans')),
           )
-        else if (sellsPlans)
+        else
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: () => openInBrowser(context, billingUrl),
@@ -630,7 +630,7 @@ final class _AccountPanelState extends State<AccountPanel> {
     if (account.restoring) return Text('Signing in…', style: text.titleMedium);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SignInForm(account: account, describe: (error) => failure('Couldn’t sign in', error, other: 'Try again.')),
-      if (account.signingIn == null && sellsPlans) ...[
+      if (account.signingIn == null) ...[
         const SizedBox(height: 20),
         const Divider(color: brand.line, height: 1),
         const SizedBox(height: 16),

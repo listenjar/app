@@ -70,6 +70,7 @@ final class Navigation {
     target?.openSearch(query: query, youtube: youtube, into: into);
   void openFeed(String feedId) => target?.openFeed(feedId);
   void openSettings() => target?.openSettings();
+  void openPlans({String? title}) => target?.openPlans(title: title);
 
   static Navigation of(BuildContext context) => context.getInheritedWidgetOfExactType<NavigationScope>()!.navigation;
 }
@@ -84,6 +85,9 @@ abstract interface class NavigationTarget {
   /// A ListenJar feed of the listener's, in the Library.
   void openFeed(String feedId);
   void openSettings();
+
+  /// The plans sheet (plans.dart), titled [title] or its default.
+  void openPlans({String? title});
 }
 
 final class NavigationScope extends InheritedWidget {

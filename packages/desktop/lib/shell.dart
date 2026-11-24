@@ -17,6 +17,7 @@ import 'home_page.dart';
 import 'library_page.dart';
 import 'marks.dart';
 import 'now_playing.dart';
+import 'plans.dart';
 import 'queue_page.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
@@ -183,6 +184,10 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
 
   @override
   void openNowPlaying() => unawaited(showNowPlaying(context));
+
+  @override
+  void openPlans({String? title}) =>
+    unawaited(title == null ? showPlans(context) : showPlans(context, title: title));
 
   @override
   void openSearch({String? query, bool youtube = false, String? into}) {
