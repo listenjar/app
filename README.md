@@ -143,7 +143,9 @@ changes, and release builds are signed with nothing else: debug builds with the 
 release builds ([build.gradle.kts](packages/desktop/android/app/build.gradle.kts)) with the
 keystore `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` name, or on
 a Mac without them with `~/.secrets/listenjar/desktop-signing/android`'s; with neither, a release
-build fails. `desktop:package-android` also refuses an APK whose certificate isn't the one
+build fails. Where Maven Central turns Gradle away (429 on GitHub's runners, 403 on some
+networks), `cp tool/maven-mirror.gradle ~/.gradle/init.d/` resolves it through Google's mirror,
+as the release workflow does. `desktop:package-android` also refuses an APK whose certificate isn't the one
 [passkeys.ts](passkeys.ts) lists.
 
 This repo builds on its own, without the monorepo: [mise.toml](mise.toml) pins every tool the

@@ -1,0 +1,20 @@
+// Gradle init script: resolves Maven Central through Google's mirror of it,
+// for the app and every plugin's own mavenCentral(). Maven Central rate-limits
+// GitHub's runners (429) and refuses some networks outright (403). The release
+// workflow's android job installs it into ~/.gradle/init.d; do the same on a
+// machine Maven Central turns away.
+def mirror = { RepositoryHandler repositories ->
+    repositories.withType(MavenArtifactRepository).configureEach { repository ->
+        if (repository.url.toString().startsWith("https://repo.maven.apache.org/maven2")) {
+            repository.url = "https://maven-central.storage-download.googleapis.com/maven2/"
+        }
+    }
+}
+beforeSettings { settings ->
+    mirror(settings.pluginManagement.repositories)
+    mirror(settings.dependencyResolutionManagement.repositories)
+}
+allprojects {
+    mirror(repositories)
+    buildscript { mirror(repositories) }
+}

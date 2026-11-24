@@ -248,6 +248,8 @@ jobs:
           version: ${{ env.MISE_VERSION }}
           install_args: flutter node aube github:responsibleapi/oasmith aqua:moonrepo/moon java android-sdk
       - run: flutter pub get --enforce-lockfile
+      - name: Resolve Maven Central through Google's mirror
+        run: install -D -m 644 tool/maven-mirror.gradle ~/.gradle/init.d/maven-mirror.gradle
       - name: Write the release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
