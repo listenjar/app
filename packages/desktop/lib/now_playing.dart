@@ -4,7 +4,8 @@
 // speed, the sleep timer, Up Next, a video's chapters and the show notes.
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, listEquals;
+import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/physics.dart' show Simulation;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -23,7 +24,8 @@ Future<void> showNowPlaying(BuildContext context) => Navigator.of(context, rootN
 
 /// Now Playing's page: it rises from the mini player, and a swipe down
 /// carries it under the finger, back down to the mini player when let go
-/// low enough or flicked down, back up otherwise.
+/// low enough or flicked down, back up otherwise. A swipe up on the mini
+/// player lifts it out the same way.
 final class _NowPlayingRoute extends PageRoute<void> {
   @override
   Color? get barrierColor => null;
@@ -53,23 +55,45 @@ final class _NowPlayingRoute extends PageRoute<void> {
     return SlideTransition(position: Tween(begin: const Offset(0, 1), end: Offset.zero).animate(position), child: child);
   }
 
+  /// Pushes Now Playing at the bottom of the window, held by a swipe up
+  /// out of the mini player; null if another gesture holds the navigator.
+  static _NowPlayingRoute? lift(BuildContext context) {
+    final nav = Navigator.of(context, rootNavigator: true);
+    if (nav.userGestureInProgress) return null;
+    final route = _NowPlayingRoute().._lifted = true;
+    unawaited(nav.push(route));
+    // The finger has it, not the rise push started.
+    route.controller!.value = 0;
+    route._grab();
+    return route;
+  }
+
   bool _swiping = false;
+
+  /// Whether the swipe holding the page started at the mini player.
+  bool _lifted = false;
 
   /// Whether a swipe holds the page.
   bool get swiping => _swiping;
+
+  bool _grab() {
+    final nav = navigator;
+    if (nav == null || !isCurrent || nav.userGestureInProgress) return false;
+    _swiping = true;
+    nav.didStartUserGesture();
+    return true;
+  }
+
+  /// The height the page travels: the window's.
+  double get _height => navigator?.context.size?.height ?? 0;
 
   /// Moves the page down by [dy] logical pixels, up when negative, no higher
   /// than open; returns how much of [dy] it took. A swipe starts only
   /// going down.
   double swipe(double dy) {
-    final nav = navigator;
-    final height = subtreeContext?.size?.height ?? 0;
-    if (nav == null || height <= 0) return 0;
-    if (!_swiping) {
-      if (dy <= 0 || !isCurrent || nav.userGestureInProgress) return 0;
-      _swiping = true;
-      nav.didStartUserGesture();
-    }
+    final height = _height;
+    if (height <= 0) return 0;
+    if (!_swiping && (dy <= 0 || !_grab())) return 0;
     final c = controller!;
     final before = c.value;
     c.value = (before - dy / height).clamp(0.0, 1.0);
@@ -77,16 +101,17 @@ final class _NowPlayingRoute extends PageRoute<void> {
   }
 
   /// Lets the page go with the finger moving down at [velocity] logical
-  /// pixels a second: a flick down or a page let go past a third of the way
-  /// down goes down to the mini player, anything else back up.
+  /// pixels a second: a flick goes the way it points; a page let go a third
+  /// of the way from where the swipe started goes on, anything else back.
   void release(double velocity) {
     if (!_swiping) return;
     _swiping = false;
     final nav = navigator!;
     final c = controller!;
-    final height = subtreeContext?.size?.height ?? 0;
+    final height = _height;
     const flick = 400.0;
-    final down = velocity > flick || (velocity > -flick && c.value < 2 / 3);
+    final down = velocity > flick || (velocity > -flick && c.value < (_lifted ? 1 / 3 : 2 / 3));
+    _lifted = false;
     if (down) {
       nav.pop();
       c.animateBack(0, duration: _settle(c.value * height, velocity), curve: Curves.easeOutCubic);
@@ -151,12 +176,6 @@ final class _SwipePhysics extends ScrollPhysics {
     return super.createBallisticSimulation(position, 0);
   }
 }
-
-/// Where fingers come first, scroll views swipe Now Playing down too.
-bool get _touchFirst => switch (defaultTargetPlatform) {
-  TargetPlatform.android || TargetPlatform.iOS => true,
-  _ => false,
-};
 
 /// The icon for a skip of [d], when Material has one with that number.
 IconData _skipIcon(Duration d, {required bool forward}) => switch ((d.inSeconds, forward)) {
@@ -239,7 +258,7 @@ final class MiniPlayer extends StatelessWidget {
         ]);
     return Padding(
       padding: wide ? const EdgeInsets.fromLTRB(16, 0, 16, 14) : const EdgeInsets.fromLTRB(8, 0, 8, 8),
-      child: DecoratedBox(
+      child: _Lift(child: DecoratedBox(
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), boxShadow: const [brand.shadowFloat]),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(20),
@@ -262,9 +281,42 @@ final class MiniPlayer extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
+}
+
+/// A swipe up on the mini player lifts Now Playing out of it under the
+/// finger, for any pointer: it opens when let go a third of the way up or
+/// flicked up, and goes back down otherwise.
+final class _Lift extends StatefulWidget {
+  const _Lift({required this.child});
+  final Widget child;
+
+  @override
+  State<_Lift> createState() => _LiftState();
+}
+
+final class _LiftState extends State<_Lift> {
+  _NowPlayingRoute? _route;
+
+  void _update(DragUpdateDetails d) {
+    if (_route == null && d.delta.dy < 0) _route = _NowPlayingRoute.lift(context);
+    _route?.swipe(d.delta.dy);
+  }
+
+  void _release(double velocity) {
+    _route?.release(velocity);
+    _route = null;
+  }
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onVerticalDragUpdate: _update,
+    onVerticalDragEnd: (d) => _release(d.primaryVelocity ?? 0),
+    onVerticalDragCancel: () => _release(0),
+    child: widget.child,
+  );
 }
 
 Widget _inkIcon(IconData icon, String tip, Future<void> Function() onPressed, {double size = 24}) => IconButton(
@@ -538,19 +590,32 @@ final class NowPlaying extends StatelessWidget {
     _ => null,
   };
 
-  /// The physics for a scroll view that swipes the page down past its top.
+  /// The physics for a scroll view that swipes the page down past its top,
+  /// under a finger, a pen or two fingers on a trackpad.
   static ScrollPhysics? _physics(BuildContext context) => switch (_route(context)) {
-    final route? when _touchFirst => _SwipePhysics(route),
+    final route? => _SwipePhysics(route),
     _ => null,
   };
 
-  // The top bar is the page's handle, for any pointer.
-  Widget _topBar(BuildContext context, PodcastEpisode e) => GestureDetector(
+  /// Lets a drag of [devices] (any, if null) on [child] carry the page.
+  static Widget _grip(BuildContext context, Widget child, {Set<PointerDeviceKind>? devices}) => GestureDetector(
     behavior: HitTestBehavior.opaque,
+    supportedDevices: devices,
     onVerticalDragUpdate: (d) => _route(context)?.swipe(d.delta.dy),
     onVerticalDragEnd: (d) => _route(context)?.release(d.primaryVelocity ?? 0),
     onVerticalDragCancel: () => _route(context)?.release(0),
-    child: Padding(
+    child: child,
+  );
+
+  /// A mouse doesn't scroll by dragging, so it carries the page from the
+  /// player too: the cover, the title and the controls. Not the show notes,
+  /// where it selects text.
+  static Widget _mouseGrip(BuildContext context, Widget child) => _grip(context, child, devices: const {PointerDeviceKind.mouse});
+
+  // The top bar is the page's handle, for any pointer.
+  Widget _topBar(BuildContext context, PodcastEpisode e) => _grip(
+    context,
+    Padding(
     padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
     child: Row(children: [
       IconButton(
@@ -633,16 +698,16 @@ final class NowPlaying extends StatelessWidget {
       _topBar(context, e),
       Expanded(
         child: ListView(physics: _physics(context), padding: const EdgeInsets.fromLTRB(28, 12, 28, 40), children: [
-          Center(
-            child: DecoratedBox(
+          _mouseGrip(context, Column(children: [
+            DecoratedBox(
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
               child: _cover(e, cover),
             ),
-          ),
-          const SizedBox(height: 28),
-          _identity(context, e, align: TextAlign.center),
-          const SizedBox(height: 22),
-          _controls(context, s),
+            const SizedBox(height: 28),
+            _identity(context, e, align: TextAlign.center),
+            const SizedBox(height: 22),
+            _controls(context, s),
+          ])),
           if (s.player.chapters case final chapters when chapters.isNotEmpty) ...[
             const SizedBox(height: 36),
             Text('Chapters', style: Theme.of(context).textTheme.titleLarge!.copyWith(color: brand.snow)),
@@ -676,7 +741,7 @@ final class NowPlaying extends StatelessWidget {
                     final cover = (column.maxHeight - 390).clamp(140.0, 400.0).toDouble();
                     return SingleChildScrollView(
                       physics: _physics(context),
-                      child: ConstrainedBox(
+                      child: _mouseGrip(context, ConstrainedBox(
                         constraints: BoxConstraints(minHeight: column.maxHeight),
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                           DecoratedBox(
@@ -688,7 +753,7 @@ final class NowPlaying extends StatelessWidget {
                           const SizedBox(height: 20),
                           _controls(context, s),
                         ]),
-                      ),
+                      )),
                     );
                   }),
                 ),

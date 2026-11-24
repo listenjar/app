@@ -9,6 +9,7 @@ import 'dart:async';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
@@ -198,9 +199,42 @@ void control(AppServices? s, Map<String, String> parameters) {
     case 'download':
       final episode = s.library.episode(int.tryParse(parameters['episode'] ?? '') ?? -1);
       unawaited(s.downloads.download(episode ?? (throw ArgumentError('no episode ${parameters['episode']}'))));
+    case 'drag':
+      // A pointer of `kind` (touch, the default, mouse or trackpad) from
+      // `x`,`y` by `dx`,`dy` logical pixels over `ms` (default 300).
+      double at(String key) => double.tryParse(parameters[key] ?? '') ?? (throw ArgumentError('$key?'));
+      final kind = PointerDeviceKind.values.byName(parameters['kind'] ?? 'touch');
+      final ms = int.tryParse(parameters['ms'] ?? '') ?? 300;
+      unawaited(_drag(Offset(at('x'), at('y')), Offset(at('dx'), at('dy')), Duration(milliseconds: ms), kind));
     case final action:
-      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open or download');
+      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open, download or drag');
   }
+}
+
+/// Moves a pointer of [kind] from [from] by [by] over [over], as a hand
+/// would, one event a frame.
+Future<void> _drag(Offset from, Offset by, Duration over, PointerDeviceKind kind) async {
+  const device = 9000;
+  const pointer = 9000;
+  final clock = Stopwatch()..start();
+  void send(PointerEvent event) => GestureBinding.instance.handlePointerEvent(event);
+  final steps = (over.inMilliseconds / 16).ceil().clamp(1, 1000);
+  final step = by / steps.toDouble();
+  final trackpad = kind == PointerDeviceKind.trackpad;
+  if (kind == PointerDeviceKind.mouse) send(PointerAddedEvent(timeStamp: clock.elapsed, kind: kind, device: device, position: from));
+  send(trackpad
+    ? PointerPanZoomStartEvent(timeStamp: clock.elapsed, device: device, pointer: pointer, position: from)
+    : PointerDownEvent(timeStamp: clock.elapsed, kind: kind, device: device, pointer: pointer, position: from));
+  for (var i = 1; i <= steps; i++) {
+    await Future<void>.delayed(Duration(microseconds: over.inMicroseconds ~/ steps));
+    send(trackpad
+      ? PointerPanZoomUpdateEvent(timeStamp: clock.elapsed, device: device, pointer: pointer, position: from, pan: step * i.toDouble(), panDelta: step)
+      : PointerMoveEvent(timeStamp: clock.elapsed, kind: kind, device: device, pointer: pointer, position: from + step * i.toDouble(), delta: step));
+  }
+  send(trackpad
+    ? PointerPanZoomEndEvent(timeStamp: clock.elapsed, device: device, pointer: pointer, position: from)
+    : PointerUpEvent(timeStamp: clock.elapsed, kind: kind, device: device, pointer: pointer, position: from + by));
+  if (kind == PointerDeviceKind.mouse) send(PointerRemovedEvent(timeStamp: clock.elapsed, kind: kind, device: device, position: from + by));
 }
 
 typedef AppServices = ({

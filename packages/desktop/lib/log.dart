@@ -20,6 +20,8 @@
 //   ext.listenjar.state    what the app is doing (main.dart's appState)
 //   ext.listenjar.control  drives the app: `action` play (`episode` an
 //                          id), pause, stop, seek (`seconds`), refresh,
+//                          drag (a pointer `kind` touch, mouse or
+//                          trackpad from `x`,`y` by `dx`,`dy` over `ms`),
 //                          add (a YouTube `url` `into` a podcast of the
 //                          listener's own: a Cloud feed id or
 //                          `local:<show>`; the first in the Cloud if
