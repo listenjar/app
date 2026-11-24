@@ -179,6 +179,10 @@ url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.gz"
 checksum = "sha256:82bb96078a24ca50b9c9a38f2379e6be6d87171fcd400fc14c8934b3bce96e2f"
 url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-x64.tar.gz"
 
+[tools.node."platforms.windows-arm64"]
+checksum = "sha256:181ebe431b90787113a9e4fc80d38ce86d37888a353a0386de44d2872e48cb97"
+url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-win-arm64.zip"
+
 [tools.node."platforms.windows-x64"]
 checksum = "sha256:e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7"
 url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-win-x64.zip"

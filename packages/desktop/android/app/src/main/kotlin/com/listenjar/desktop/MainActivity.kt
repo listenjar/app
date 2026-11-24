@@ -13,8 +13,11 @@ import io.flutter.plugin.common.MethodChannel
 // listenjar/links channel: text from the share sheet, a YouTube link opened
 // with the app, or a <scheme>://open?url=… link. One that arrives before Dart
 // listens waits until Dart asks for `pending`.
+//
+// In-app updates are Updates.kt's, on listenjar/updates.
 class MainActivity : AudioServiceActivity() {
     private var links: MethodChannel? = null
+    private var updates: Updates? = null
     private val pending = mutableListOf<String>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -26,6 +29,18 @@ class MainActivity : AudioServiceActivity() {
                 pending.clear()
             }
         }
+        updates = Updates(this, flutterEngine.dartExecutor.binaryMessenger)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        updates?.dispose()
+        updates = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updates?.resumed()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
