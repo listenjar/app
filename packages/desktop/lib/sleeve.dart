@@ -195,13 +195,9 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
 
   bool get _wide => MediaQuery.sizeOf(context).width >= wideWidth;
 
-  /// On a phone, just under the status bar; on a Mac's narrow window, under
-  /// the window buttons, which float over the page's top left.
-  double _controlsTop() => MediaQuery.paddingOf(context).top + switch (defaultTargetPlatform) {
-    _ when _wide => 16,
-    TargetPlatform.macOS => 40,
-    _ => 6,
-  };
+  /// Just under the status bar, or a Mac's window buttons (shell.dart's
+  /// windowInsets).
+  double _controlsTop() => MediaQuery.paddingOf(context).top + (_wide ? 16 : 6);
 
   /// Where the controls end, from the top of the page.
   double _controlsBottom() => _controlsTop() + 44;

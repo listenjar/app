@@ -4,6 +4,7 @@
 // Now Playing (now_playing.dart). Each section keeps one stack of pages, so
 // a show opened from search comes back with the search behind it.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
@@ -42,6 +43,26 @@ const _phoneSections = [Section.home, Section.library, Section.search, Section.q
 
 /// From this width the sidebar shows.
 const wideWidth = 760.0;
+
+/// How far macOS's titlebar reaches into the window: the window's content
+/// runs under it, its buttons floating over the top left, and an empty
+/// unified toolbar makes it 52pt (macos/Runner/MainFlutterWindow.swift).
+const _macTitlebar = 52.0;
+
+/// Gives macOS's titlebar to everything under [child] as top padding, the way
+/// a phone's status bar is: every page and sheet clears the window buttons as
+/// it clears a status bar, and artwork still runs on under them.
+Widget windowInsets(BuildContext context, Widget child) {
+  if (defaultTargetPlatform != TargetPlatform.macOS) return child;
+  final media = MediaQuery.of(context);
+  return MediaQuery(
+    data: media.copyWith(
+      padding: media.padding.copyWith(top: math.max(media.padding.top, _macTitlebar)),
+      viewPadding: media.viewPadding.copyWith(top: math.max(media.viewPadding.top, _macTitlebar)),
+    ),
+    child: child,
+  );
+}
 
 final class Shell extends StatefulWidget {
   const Shell({super.key, required this.links});
@@ -243,13 +264,15 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
                   // The mini player floats over the page, which pads its
                   // bottom by the player's height (MediaQuery padding), so a
                   // show's sleeve runs on under it instead of stopping at a
-                  // paper strip.
+                  // paper strip. macOS's window buttons float over the
+                  // sidebar, so the page beside it needn't clear them.
                   Expanded(
                     child: Stack(children: [
                       Positioned.fill(
                         child: MediaQuery(
                           data: MediaQuery.of(context).copyWith(
                             padding: MediaQuery.paddingOf(context).copyWith(
+                              top: mac ? 0 : MediaQuery.paddingOf(context).top,
                               bottom: MediaQuery.paddingOf(context).bottom + _miniPlayer,
                             ),
                           ),
@@ -334,7 +357,7 @@ final class _Sidebar extends StatelessWidget {
           behavior: HitTestBehavior.translucent,
           onPanStart: (_) => windowCommand('startDrag'),
           onDoubleTap: () => windowCommand('zoom'),
-          child: SizedBox(height: mac ? 52 : 18),
+          child: SizedBox(height: math.max(MediaQuery.paddingOf(context).top, 18)),
         ),
         Padding(padding: const EdgeInsets.fromLTRB(22, 0, 22, 22), child: Align(alignment: Alignment.centerLeft, child: logo(height: 26))),
         Expanded(

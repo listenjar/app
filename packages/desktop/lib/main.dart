@@ -284,9 +284,11 @@ class _AppState extends State<App> {
         child: MaterialApp(
           title: 'ListenJar',
           debugShowCheckedModeBanner: false,
-          builder: (context, child) => kDebugMode
-            ? Banner(message: 'DEBUG', location: BannerLocation.topEnd, child: child!)
-            : child!,
+          // macOS's window buttons are the status bar (shell.dart).
+          builder: (context, child) => windowInsets(
+            context,
+            kDebugMode ? Banner(message: 'DEBUG', location: BannerLocation.topEnd, child: child!) : child!,
+          ),
           // Light only, like listenjar.com: paper is the ground (DESIGN.md).
           theme: brand.theme(),
           // Android asks about updates over the window (updates.dart).
