@@ -1,0 +1,9 @@
+taskOptions:
+  unixShell: bash
+  # Git for Windows' bash, as on the GitHub Windows runners.
+  windowsShell: bash
+  outputStyle: stream
+implicitInputs:
+  - /mise.toml
+  - /.moon/**/*.yml
+  - moon.yml

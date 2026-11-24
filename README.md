@@ -53,8 +53,8 @@ is compiled by youtubei's build hook. Neither needs a system library.
 
 ## Run
 
-Flutter 3.50 and [oasmith](https://github.com/responsibleapi/oasmith) (the monorepo's mise.toml), and
-[aube](https://aube.dev) for the YouTube.js bundle. Initialize submodules recursively first.
+Flutter 3.50 and [oasmith](https://github.com/responsibleapi/oasmith), and [aube](https://aube.dev)
+for the YouTube.js bundle, all pinned in [mise.toml](mise.toml). Initialize submodules recursively first.
 
 ```sh
 moon run desktop:dev     # macOS against backend:dev on :8787, hot reloads on save (tool/dev.dart)
@@ -62,7 +62,7 @@ moon run desktop:build   # release macOS app in packages/desktop/build/macos
 moon run desktop:check   # flutter analyze
 ```
 
-`desktop:codegen` (public.yaml → `lib/backend`) and `desktop:scripts` (packages/youtubejs →
+`desktop:codegen` (public.yaml → `lib/backend`, [pricing](pricing) → `lib/pricing`) and `desktop:scripts` (packages/youtubejs →
 `packages/youtubei/native/youtubejs.js` → `native/scripts.g.c`) run before each of those, and
 moon caches both on their inputs. For other platforms run `moon run desktop:codegen
 desktop:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `packages/desktop`.
@@ -92,6 +92,43 @@ docker run -itd --rm --privileged --name redroid -p 5555:5555 redroid/redroid:14
 adb connect localhost:5555
 flutter run -d localhost:5555
 ```
+
+## Releases
+
+Every push to master releases the app:
+
+1. [version.yaml](.github/workflows/version.yaml) runs `desktop:release-prepare`
+   ([tool/release.dart](tool/release.dart)), which takes the next version: the next patch above
+   the newest `vX.Y.Z` tag, or the `version:` in [packages/desktop/pubspec.yaml](packages/desktop/pubspec.yaml)
+   when that is newer, with the next build number (Android's versionCode, and what the updaters
+   compare). It commits the bump as `Release vX.Y.Z` on top of the pushed commit, with a
+   `Source-commit:` trailer, and pushes only the tag; master never moves. Raise the pubspec's
+   version for a new minor or major.
+2. It then dispatches [release.yaml](.github/workflows/release.yaml) on that tag, which builds
+   every platform on its own runner into `build/release/`: `desktop:package-macos` (a Developer
+   ID signed, notarized DMG; [tool/package-macos.sh](tool/package-macos.sh)),
+   [tool/package-windows.ps1](tool/package-windows.ps1) (an Inno Setup installer),
+   `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK, signed with the debug
+   key for now).
+3. [tool/release.ts](tool/release.ts) signs the DMG and the installer for the updaters
+   (Ed25519), writes `appcast-macos.xml` and `appcast-windows-x64.xml`, uploads all four with
+   their manifests, and only then makes the release the latest, whose appcasts the apps read.
+
+Secrets live only in GitHub and, on a Mac, in `~/.secrets/listenjar`; never in this repo. On
+GitHub they are in the `desktop-release` environment, which only `v*` tags can use, so the
+macos, windows and publish jobs run only on a release tag; `moon run desktop-signing:restore`
+in the listenjar monorepo fills it from `~/.secrets/listenjar/desktop-signing`.
+
+- Secrets: `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_NOTARY_KEY_P8_BASE64`,
+  `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID` (Developer ID signing and notarization), and
+  `MACOS_UPDATE_SEED_BASE64`, `WINDOWS_UPDATE_SEED_BASE64` (each updater's Ed25519 private seed).
+- Variables: `MACOS_SIGNING_IDENTITY`, `MACOS_TEAM_ID`, and `MACOS_UPDATE_PUBLIC_KEY`,
+  `WINDOWS_UPDATE_PUBLIC_KEY` (the matching public keys, which the builds compile in).
+
+This repo builds on its own, without the monorepo: [mise.toml](mise.toml) pins every tool the
+DMG and the APK need (Flutter, Node, aube, oasmith, moon, Java and the Android SDK; Xcode aside),
+[.moon](.moon) is a workspace of this one project, and the plans and prices come from the
+committed [pricing](pricing) catalog, which `moon run root:pricing-sync` in the monorepo writes.
 
 ## Shared links
 

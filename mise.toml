@@ -1,5 +1,23 @@
-# The desktop app's own tools, on top of the root mise.toml (Flutter is there).
+# The desktop app's tools. The desktop repo builds on its own (its CI has no
+# parent monorepo), so it pins the shared tools here too; these pins agree
+# with the listenjar monorepo's mise.toml.
 [tools]
+# Flutter: the app, on macOS, Windows, Linux and Android.
+flutter = "3.50.1"
+# Node and aube: the YouTube.js fork's bundle (desktop:bundle, desktop:scripts)
+# and the pricing codegen (tool/pricing-dart.ts).
+node = "26"
+aube = "2.10.1"
+# oasmith: the Dart API client from public.yaml (desktop:codegen).
+"github:responsibleapi/oasmith" = "0.1.0"
+# Moon: every task (moon run desktop:<task>), from here or from the monorepo.
+"aqua:moonrepo/moon" = "2.6.5"
+# The APK (desktop:release-android): Gradle runs on Java 21, and the Android
+# SDK's command-line tools (Android CLI) set ANDROID_HOME to their install.
+# Flutter needs platform-tools there to call it an SDK; Gradle then downloads
+# the platform, build tools and NDK the build asks for into it.
+java = { version = "temurin-21.0.13.1+2.0.LTS", os = ["linux", "macos"] }
+android-sdk = { version = "23.0", os = ["linux", "macos"], postinstall = '"$MISE_TOOL_INSTALL_PATH/cmdline-tools/$MISE_TOOL_VERSION/bin/sdkmanager" platform-tools' }
 # Swift, Linux only: type-checks the iOS and macOS runners against stubs
 # (moon run desktop:swift-check). macOS has Xcode's.
 swift = { version = "6.4.3", os = ["linux"] }

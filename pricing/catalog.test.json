@@ -1,0 +1,44 @@
+{
+  "plans": [
+    {
+      "product_id": "prod_VgJSdGSaTq1Zxz",
+      "name": "ListenJar 10 GB",
+      "description": "Playlists, channels and podcasts of your own, up to 10 GB of audio (about 170 hours).",
+      "storage_bytes": 10000000000,
+      "prices": [
+        {
+          "interval": "monthly",
+          "lookup_key": "listenjar_10gb_monthly",
+          "currency": "usd",
+          "amount": 599
+        },
+        {
+          "interval": "yearly",
+          "lookup_key": "listenjar_10gb_yearly",
+          "currency": "usd",
+          "amount": 5900
+        }
+      ]
+    },
+    {
+      "product_id": "prod_VgJScKj2ChFoQQ",
+      "name": "ListenJar 100 GB",
+      "description": "Playlists, channels and podcasts of your own, up to 100 GB of audio (about 1,700 hours).",
+      "storage_bytes": 100000000000,
+      "prices": [
+        {
+          "interval": "monthly",
+          "lookup_key": "listenjar_100gb_monthly",
+          "currency": "usd",
+          "amount": 999
+        },
+        {
+          "interval": "yearly",
+          "lookup_key": "listenjar_100gb_yearly",
+          "currency": "usd",
+          "amount": 9900
+        }
+      ]
+    }
+  ]
+}

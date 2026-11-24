@@ -1,0 +1,245 @@
+# Releases ListenJar from a vX.Y.Z tag whose packages/desktop/pubspec.yaml
+# says X.Y.Z+N: version.yaml reserves one on every push to master and
+# dispatches this on it (a pushed tag starts this too). Each platform builds
+# on its own runner into build/release/ (`moon run desktop:package-<platform>`,
+# tool/package-windows.ps1 on Windows), `node tool/release.ts prepare` signs
+# the macOS and Windows packages for their updaters and writes their appcasts
+# (lib/updates.dart), and publish uploads all four platforms and only then
+# makes the release the latest, which is what the updaters read.
+#
+# The signing secrets and variables live in the desktop-release environment,
+# which only v* tags can use (apps/desktop-signing in listenjar/listenjar
+# fills it from ~/.secrets/listenjar/desktop-signing; README.md's "Releases").
+name: Release
+on:
+  push:
+    tags: [v*]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  MISE_VERSION: '2026.11.11'
+jobs:
+  # Moon runs task scripts with bash here, which Windows lacks: Windows takes
+  # the generated code from this job.
+  generate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: flutter node aube github:responsibleapi/oasmith aqua:moonrepo/moon
+      - name: Check the tag against pubspec.yaml
+        id: identity
+        run: node tool/release.ts identity "${{ github.ref_type == 'tag' && github.ref_name || '' }}"
+      - name: Generate the API client, prices and YouTube.js scripts
+        run: moon run desktop:codegen desktop:scripts
+      - uses: actions/upload-artifact@v7
+        with:
+          name: generated
+          path: |
+            packages/desktop/lib/backend
+            packages/desktop/lib/pricing
+            packages/youtubei/native/scripts.g.c
+            packages/youtubei/native/youtubejs.js
+          if-no-files-found: error
+
+  macos:
+    needs: generate
+    runs-on: macos-26
+    environment: desktop-release
+    env:
+      LISTENJAR_UPDATE_PUBLIC_KEY: ${{ vars.MACOS_UPDATE_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: flutter node aube github:responsibleapi/oasmith aqua:moonrepo/moon
+      - name: Import the Developer ID certificate and notary key
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MACOS_TEAM_ID: ${{ vars.MACOS_TEAM_ID }}
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: bash tool/macos-signing.sh setup
+      # https://github.com/actions/runner-images/issues/14924
+      - name: Fetch notarization tickets over TCP
+        run: |
+          echo 'block return out quick proto udp from any to any port 443' | sudo pfctl -f -
+          sudo pfctl -E
+      - name: Build, sign, notarize and package the DMG
+        run: moon run desktop:package-macos
+      - name: Sign the DMG for Sparkle and write its appcast
+        env:
+          MACOS_UPDATE_PUBLIC_KEY: ${{ vars.MACOS_UPDATE_PUBLIC_KEY }}
+          MACOS_UPDATE_SEED_BASE64: ${{ secrets.MACOS_UPDATE_SEED_BASE64 }}
+        run: >-
+          node tool/release.ts prepare macos
+          "build/release/ListenJar-${{ needs.generate.outputs.version }}-macos.dmg" release-macos
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-macos
+          path: release-macos/*
+          if-no-files-found: error
+      - name: Remove the keychain and credentials
+        if: always()
+        run: bash tool/macos-signing.sh cleanup
+
+  windows:
+    needs: generate
+    runs-on: windows-2025
+    environment: desktop-release
+    env:
+      LISTENJAR_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Keep Unix line endings
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/download-artifact@v8
+        with:
+          name: generated
+          path: packages
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: flutter node
+      # packages/youtubei builds QuickJS with MinGW-w64 GCC at its default path.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          install: mingw-w64-ucrt-x86_64-gcc
+      - name: Install Inno Setup 6.7.3, checked
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download is-6_7_3 --repo jrsoftware/issrc --pattern innosetup-6.7.3.exe --dir $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup download failed.' }
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732') { throw 'Inno Setup checksum mismatch.' }
+          $signature = Get-AuthenticodeSignature $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B.V.') { throw 'Inno Setup is not signed by its publisher.' }
+          $process = Start-Process $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed.' }
+      - name: Build and package the installer
+        run: ./tool/package-windows.ps1
+      - name: Sign the installer for WinSparkle and write its appcast
+        env:
+          WINDOWS_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}
+          WINDOWS_UPDATE_SEED_BASE64: ${{ secrets.WINDOWS_UPDATE_SEED_BASE64 }}
+        run: >-
+          node tool/release.ts prepare windows-x64
+          "build/release/ListenJar-${{ needs.generate.outputs.version }}-windows-x64-setup.exe" release-windows-x64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-x64
+          path: release-windows-x64/*
+          if-no-files-found: error
+
+  linux:
+    needs: generate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Install Flutter's Linux build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+          liblzma-dev libstdc++-12-dev libsecret-1-dev libx11-dev libxi-dev libmpv-dev
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: flutter node aube github:responsibleapi/oasmith aqua:moonrepo/moon
+      - run: flutter pub get --enforce-lockfile
+      - run: moon run desktop:package-linux
+      - name: Write its manifest
+        run: >-
+          node tool/release.ts prepare linux-x64
+          "build/release/ListenJar-${{ needs.generate.outputs.version }}-linux-x64.tar.gz" release-linux-x64
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-x64
+          path: release-linux-x64/*
+          if-no-files-found: error
+
+  android:
+    needs: generate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Install Flutter's Linux build dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+          liblzma-dev libstdc++-12-dev libsecret-1-dev libx11-dev libxi-dev libmpv-dev
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: flutter node aube github:responsibleapi/oasmith aqua:moonrepo/moon java android-sdk
+      - run: flutter pub get --enforce-lockfile
+      - run: moon run desktop:package-android
+      - name: Write its manifest
+        run: >-
+          node tool/release.ts prepare android
+          "build/release/ListenJar-${{ needs.generate.outputs.version }}-android.apk" release-android
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: release-android/*
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [macos, windows, linux, android]
+    runs-on: ubuntu-24.04
+    environment: desktop-release
+    concurrency:
+      group: release-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MACOS_UPDATE_PUBLIC_KEY: ${{ vars.MACOS_UPDATE_PUBLIC_KEY }}
+      WINDOWS_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@v5
+        with:
+          version: ${{ env.MISE_VERSION }}
+          install_args: node
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: artifacts
+      - name: Verify, upload and make it the latest release
+        run: node tool/release.ts publish artifacts

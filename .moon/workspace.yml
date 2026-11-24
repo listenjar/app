@@ -1,0 +1,15 @@
+# The desktop repo on its own (CI, or a checkout outside the monorepo). Inside
+# the listenjar monorepo, its workspace runs these tasks as desktop:<task> too.
+defaultProject: desktop
+projects:
+  desktop: .
+versionConstraint: ">=2.6.5 <3.0.0"
+vcs:
+  client: git
+  defaultBranch: master
+pipeline:
+  installDependencies: false
+  syncProjects: false
+  syncWorkspace: false
+hasher:
+  walkStrategy: glob

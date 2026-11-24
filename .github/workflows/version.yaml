@@ -1,0 +1,51 @@
+# Every push to master: reserve the next version and release it.
+#
+# `dart tool/release.dart prepare` commits the version bump on top of the
+# pushed commit as "Release vX.Y.Z" and pushes only its tag (master never
+# moves), then this dispatches release.yaml on that tag, which builds every
+# platform and publishes the release. A tag pushed with the workflow's token
+# starts no workflow, hence the dispatch.
+name: Version
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# One at a time; a newer push waits rather than cancelling a reservation.
+concurrency:
+  group: version
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Reserve the next version
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/mise/downloads-cas
+          key: mise-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.lock') }}
+      - uses: jdx/mise-action@v5
+        with:
+          version: '2026.11.11'
+          install_args: flutter
+          cache: false
+      - name: Tag the next version
+        id: version
+        run: dart tool/release.dart prepare
+      - name: Release the tag
+        if: steps.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh workflow run release.yaml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

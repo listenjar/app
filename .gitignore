@@ -3,3 +3,5 @@ build/
 # The YouTube.js fork's dependencies (packages/aube-workspace.yaml).
 /packages/node_modules/
 .claude/settings.local.json
+/.moon/cache/
+/.moon/docker/

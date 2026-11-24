@@ -47,6 +47,6 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Generated from public.yaml and pricing/catalog.live.json by `moon run desktop:codegen`.
+# Generated from public.yaml and ../../pricing/catalog.live.json by `moon run desktop:codegen`.
 /lib/backend/
 /lib/pricing/
