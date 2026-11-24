@@ -19,7 +19,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'library.dart';
 import 'menu.dart';
-import 'shell.dart' show wideWidth;
+import 'shell.dart' show Shown, wideWidth;
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -245,7 +245,9 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
   }
 
   @override
-  Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
+  Widget build(BuildContext context) => Shown(
+    onInk: true,
+    child: AnnotatedRegion<SystemUiOverlayStyle>(
     value: SystemUiOverlayStyle.light,
     child: Material(
       color: brand.ink,
@@ -261,6 +263,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
         ),
       ),
     ),
+    ),
   );
 
   /// The artwork's light on the ink, scrolling with the page: one wide
@@ -272,11 +275,13 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
       final offset = _scroll.hasClients ? _scroll.offset : 0.0;
       final light = brand.easeOutExpo.transform(_light.value);
       final size = MediaQuery.sizeOf(context);
-      final width = size.width - (_wide ? _sidebarWidth(context) : 0);
+      // The page runs on under the sidebar's glass, and the glow with it.
+      final left = MediaQuery.paddingOf(context).left;
+      final width = size.width - left;
       // Behind the artwork: the wide header's, or the foot of the hero.
       final (cx, cy, r) = _wide
-        ? (width * 0.3, _controlsBottom() + 140, math.min(width * 0.75, 760.0))
-        : (width / 2, math.min(size.width, size.height * 0.7) + 40, width * 0.95);
+        ? (left + width * 0.3, _controlsBottom() + 140, math.min(width * 0.75, 760.0))
+        : (size.width / 2, math.min(size.width, size.height * 0.7) + 40, size.width * 0.95);
       final height = cy + r + 24;
       return Positioned(
         left: 0,
@@ -287,8 +292,8 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: RadialGradient(
-                center: Alignment(cx / width * 2 - 1, cy / height * 2 - 1),
-                radius: r / math.min(width, height),
+                center: Alignment(cx / size.width * 2 - 1, cy / height * 2 - 1),
+                radius: r / math.min(size.width, height),
                 colors: [
                   _glow.withValues(alpha: brand.glowAlpha * light),
                   _glow.withValues(alpha: brand.glowAlpha * light * 0.35),
@@ -303,15 +308,9 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
     },
   );
 
-  /// The page's own width beside the sidebar, from the stack it fills.
-  double _sidebarWidth(BuildContext context) {
-    final stack = _stackKey.currentContext?.findRenderObject() as RenderBox?;
-    return stack == null || !stack.hasSize ? 0 : MediaQuery.sizeOf(context).width - stack.size.width;
-  }
-
   Widget _page() {
-    final size = MediaQuery.sizeOf(context);
-    final gutter = _wide ? (size.width * 0.04).clamp(16.0, 40.0) : 16.0;
+    final left = MediaQuery.paddingOf(context).left;
+    final gutter = _wide ? ((MediaQuery.sizeOf(context).width - left) * 0.04).clamp(16.0, 40.0) : 16.0;
     final info = KeyedSubtree(key: _infoKey, child: widget.info);
     Widget column(Widget child) => Center(
       child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 960), child: child),
@@ -328,7 +327,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
         children: [
           if (_wide)
             Padding(
-              padding: EdgeInsets.fromLTRB(gutter, _controlsBottom() + 12, gutter, 0),
+              padding: EdgeInsets.fromLTRB(left + gutter, _controlsBottom() + 12, gutter, 0),
               child: column(_header(info)),
             )
           else ...[
@@ -336,7 +335,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
             Padding(padding: const EdgeInsets.fromLTRB(16, 20, 16, 0), child: info),
           ],
           Padding(
-            padding: EdgeInsets.fromLTRB(gutter, _wide ? 40 : 32, gutter, 0),
+            padding: EdgeInsets.fromLTRB(left + gutter, _wide ? 40 : 32, gutter, 0),
             child: column(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: widget.children)),
           ),
         ],
@@ -391,6 +390,8 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
     builder: (context, _) {
       final fold = _fold.value;
       final side = _wide ? 24.0 : 16.0;
+      // Clear of the sidebar floating over the page's left.
+      final left = MediaQuery.paddingOf(context).left + side;
       final top = _controlsTop();
       // Over the phone's hero the controls float on the picture; on a wide
       // window, on ink.
@@ -400,11 +401,16 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
       return SizedBox(
         height: top + 52,
         child: Stack(children: [
+          // From the sidebar's edge: glass never sits on glass.
           if (fold > 0)
-            Positioned.fill(
+            Positioned(
+              left: MediaQuery.paddingOf(context).left,
+              top: 0,
+              right: 0,
+              bottom: 0,
               child: Opacity(
                 opacity: fold,
-                child: _Glass(
+                child: Glass(
                   tint: brand.glassDark,
                   bottom: BorderSide(color: brand.inkLine.withValues(alpha: brand.inkLine.a * ((fold - 0.75) * 4).clamp(0, 1))),
                 ),
@@ -412,7 +418,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
             ),
           if (fold > 0)
             Positioned(
-              left: side + 60,
+              left: left + 60,
               right: side + 60 + 44.0 * math.max(0, widget.actions.length - 1),
               top: top,
               height: 44,
@@ -430,7 +436,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
             ),
           if (canPop)
             Positioned(
-              left: side,
+              left: left,
               top: top,
               child: _GlassControl(
                 glass: 1 - fold,
@@ -494,8 +500,8 @@ final class _Picture extends StatelessWidget {
 
 /// A glass surface (DESIGN.md "Glass Vocabulary"): [tint] over a 16px
 /// blur at saturation 150%, with a hairline.
-final class _Glass extends StatelessWidget {
-  const _Glass({required this.tint, this.shape, this.bottom});
+final class Glass extends StatelessWidget {
+  const Glass({super.key, required this.tint, this.shape, this.bottom});
   final Color tint;
 
   /// A control's outline; null for a bar, which spans the page.
@@ -545,7 +551,7 @@ final class _GlassControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Stack(children: [
     if (glass > 0)
-      Positioned.fill(child: Opacity(opacity: glass, child: _Glass(tint: tint, shape: shape))),
+      Positioned.fill(child: Opacity(opacity: glass, child: Glass(tint: tint, shape: shape))),
     child,
   ]);
 }

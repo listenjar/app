@@ -184,7 +184,7 @@ Two widths, split at 760px (`wideWidth` in shell.dart).
 
 **Phones and narrow windows (below 760px).** Edge to edge. The sleeve hero is a square as wide as the screen, capped at 70% of the screen's height (taller screens crop the square's centre), starting at the very top of the screen, behind the status bar. Floating controls sit inside the safe area: 16px from the sides, 6px below the top inset. Below the hero, content runs in a 16px gutter. The tab pill floats 16px from the sides and 8px above the bottom inset; the mini player accessory floats 8px above the pill. Pages pad their bottom by the height of everything floating there, so the last row can scroll clear of it.
 
-**Wide windows (760px and up).** The sidebar stays and there is no tab pill. The sleeve becomes a header in the content column: the artwork as a square with 18px corners on the left (240px with room, down to 160px, so the title and actions never wrap first), with a long dark shadow, kicker, title and actions to its right, top-aligned with it. No box and no blurred copy behind it: the glow is the only backdrop. The floating controls sit over ink here, so their glass is a white lift (12%) instead of a dark tint. The glass title bar and its scroll behaviour are the same, across the top of the content column. The mini player is the core's ink bar, floating at the bottom of the column over the page, which pads its end by the bar's height so the last row scrolls clear.
+**Wide windows (760px and up).** The sidebar floats as a glass panel over the page's left (see Sidebar), and there is no tab pill. Pages fill the window and run on under it, padding their content past its edge, so a sleeve's ink and glow carry on behind the glass. The sleeve becomes a header in the content column: the artwork as a square with 18px corners on the left (240px with room, down to 160px, so the title and actions never wrap first), with a long dark shadow, kicker, title and actions to its right, top-aligned with it. No box and no blurred copy behind it: the glow is the only backdrop. The floating controls sit over ink here, so their glass is a white lift (12%) instead of a dark tint. The glass title bar and its scroll behaviour are the same, from the sidebar's edge across the top of the page. The mini player is the core's ink bar, floating at the bottom of the column over the page, which pads its end by the bar's height so the last row scrolls clear.
 
 **Shelves and rows.** Artwork is the main image wherever a show appears: 160px squares with 18px corners in horizontal shelves (Home, search results for shows), 56px with 12px corners in episode and show rows. Nothing that shows a podcast is drawn without its artwork.
 
@@ -253,6 +253,14 @@ The mini player becomes Now Playing, not a sheet that covers it. On opening, the
 ### Artwork flight (morph)
 When a show or episode opens from a list or a shelf, its artwork flies from there into the sleeve hero, its corners easing to none, while the page arrives under it; going back flies it home. 420ms, ease-out-expo, and on an edge-swipe back it follows the finger (`Hero` with `transitionOnUserGestures`). Every section's navigator gets its own hero controller for this; the shell currently turns heroes off.
 
+### Sidebar (glass)
+Wide windows only. A glass panel 216px wide, inset 10px from the window's top, left and bottom edges, with 18px corners and a hairline; it floats over the page rather than standing beside it, so there is no seam between two grounds.
+- **Tone follows the page.** Light glass (white at 72%, the paper hairline, a faint shadow) over paper; dark glass (ink at 45%, the ink hairline, a deeper shadow) over a sleeve, so its glow shows through. Pages say which they are while in front (`Shown` in shell.dart); the panel crossfades over 300ms (instantly with reduced motion).
+- **Top.** On macOS the window buttons sit in the panel's top, which is also the window's handle; elsewhere a 20px mark. No large logo.
+- **Rows.** 34px rows with 10px corners: an 18px icon (or the show's artwork at 22px with 5px corners) and a 13.5px label in the primary colour, weight 500. The row in front gets a soft held pill (ink at 7% on paper, white at 12% on ink), weight 600 and a periwinkle icon; hover is half that pill. No white tile, no shadow. Counts (Up Next, Downloads) are plain tabular numbers in the faint colour, never a chip.
+- **Following.** Under the sections, a quiet "Following" label and every followed show by its artwork, which opens the show. The show in front takes the pill, and its section keeps only its periwinkle icon, so one row is ever held.
+- **Settings** is the panel's last row.
+
 ### Paper pages
 Home, Library, Search, Up Next, Downloads and Settings keep the core's paper surfaces, panels and rows, with two changes: artwork leads wherever a show appears (shelves of 160px squares; 56px in rows), and a page's large title at the top folds into the light-glass title bar on scroll, the same way a sleeve does.
 
@@ -268,6 +276,7 @@ Home, Library, Search, Up Next, Downloads and Settings keep the core's paper sur
 - **Do** turn flights into a 150ms crossfade when the system's reduce-motion setting is on, and let folds settle without overshoot; folds still follow the finger, since the listener is moving them.
 
 ### Don't:
+- **Don't** stand the sidebar beside the page as a slab of its own ground, or mark its selection with a white tile and shadow: it floats over the page as glass, and selection is a held pill.
 - **Don't** put glass on glass, or blur anything that isn't floating chrome.
 - **Don't** tint the ground, panels, buttons, chips, progress or text with a show's colour; it's light, not paint.
 - **Don't** put a box, a frosted panel or a blurred copy of the artwork behind the header; the glow is the backdrop.

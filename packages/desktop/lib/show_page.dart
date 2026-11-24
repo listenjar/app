@@ -69,7 +69,7 @@ final class _ShowPageState extends State<ShowPage> {
         final query = _query.text.trim();
         final videos = show.fromYouTube || episodes.any((e) => e.videoId != null);
         const p = brand.Palette.ink;
-        return SleevePage(
+        return Shown(show: show.id, child: SleevePage(
           artwork: show.artworkUrl,
           title: show.title,
           info: _info(context, show),
@@ -140,7 +140,7 @@ final class _ShowPageState extends State<ShowPage> {
                 ),
             ],
           ],
-        );
+        ));
       },
     );
   }

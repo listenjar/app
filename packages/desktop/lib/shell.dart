@@ -23,6 +23,7 @@ import 'search_page.dart';
 import 'settings_page.dart';
 import 'show_page.dart';
 import 'shared_links.dart';
+import 'sleeve.dart' show Glass;
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -82,6 +83,9 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   /// scroll their last rows clear of it.
   double _miniPlayer = 0;
   final _navigators = {for (final s in Section.values) s: GlobalKey<NavigatorState>()};
+
+  /// What the page in front is, for the sidebar's glass.
+  final _showing = Showing();
 
   /// Search asked for from elsewhere, for the search page to pick up.
   final search = SearchRequest();
@@ -146,6 +150,7 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     if (_navigation.target == this) _navigation.target = null;
     _lifecycle.dispose();
     search.dispose();
+    _showing.dispose();
     super.dispose();
   }
 
@@ -266,41 +271,45 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
           },
           child: Scaffold(
             body: wide
-              ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  _Sidebar(section: _section, onGo: _go),
-                  // The mini player floats over the page, which pads its
-                  // bottom by the player's height (MediaQuery padding), so a
-                  // show's sleeve runs on under it instead of stopping at a
-                  // paper strip. macOS's window buttons float over the
-                  // sidebar, so the page beside it needn't clear them.
-                  Expanded(
-                    child: Stack(children: [
-                      Positioned.fill(
-                        child: MediaQuery(
-                          data: MediaQuery.of(context).copyWith(
-                            padding: MediaQuery.paddingOf(context).copyWith(
-                              top: mac ? 0 : MediaQuery.paddingOf(context).top,
-                              bottom: MediaQuery.paddingOf(context).bottom + _miniPlayer,
-                            ),
-                          ),
-                          child: _stacks(),
+              ? Stack(children: [
+                  // The page fills the window and runs on under the
+                  // sidebar's glass; it pads its left by the sidebar and its
+                  // bottom by the mini player floating over it (MediaQuery
+                  // padding), so a show's sleeve and glow carry on under
+                  // both. macOS's window buttons sit in the sidebar, so the
+                  // page needn't clear them.
+                  Positioned.fill(
+                    child: MediaQuery(
+                      data: MediaQuery.of(context).copyWith(
+                        padding: MediaQuery.paddingOf(context).copyWith(
+                          left: _railEdge,
+                          top: mac ? 0 : MediaQuery.paddingOf(context).top,
+                          bottom: MediaQuery.paddingOf(context).bottom + _miniPlayer,
                         ),
                       ),
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: _OnHeight(
-                          onHeight: (h) => setState(() => _miniPlayer = h),
-                          child: const MiniPlayer(wide: true),
-                        ),
-                      ),
-                    ]),
+                      child: _ShowingScope(showing: _showing, child: _stacks()),
+                    ),
+                  ),
+                  Positioned(
+                    left: _railEdge,
+                    right: 0,
+                    bottom: 0,
+                    child: _OnHeight(
+                      onHeight: (h) => setState(() => _miniPlayer = h),
+                      child: const MiniPlayer(wide: true),
+                    ),
+                  ),
+                  Positioned(
+                    left: _railInset,
+                    top: _railInset,
+                    bottom: _railInset,
+                    width: _railWidth,
+                    child: _Sidebar(section: _section, showing: _showing, onGo: _go),
                   ),
                 ])
               // No top inset here: a show's artwork runs under the status
               // bar; pages pad themselves by it (PageBody, SleevePage).
-              : SafeArea(top: false, bottom: false, child: _stacks()),
+              : SafeArea(top: false, bottom: false, child: _ShowingScope(showing: _showing, child: _stacks())),
             // The page runs on under the mini player and the tab bar, and
             // pads its end by their height (Scaffold's MediaQuery padding).
             extendBody: !wide,
@@ -342,125 +351,266 @@ final class SearchRequest extends ChangeNotifier {
   void focus() => notifyListeners();
 }
 
-// Opaque, so AnimatedContainer lerps between real colours: Color.lerp doesn't
-// premultiply, and from transparent black every hover and selection change
-// passed through a dark grey frame. Hover is the sidebar under fg at 6%.
-const _sidebar = Color(0xFFEFEDE8);
-const _sidebarHover = Color(0xFFE3E1DC);
+// The sidebar: a glass panel floating over the page's left, inset from the
+// window's edges (DESIGN.md "Sidebar"). It takes the page's tone: light
+// glass over paper, dark over a sleeve's ink, crossfading as pages change.
+const _railInset = 10.0;
+const _railWidth = 216.0;
 
-final class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.section, required this.onGo});
-  final Section section;
-  final void Function(Section) onGo;
+/// Where the sidebar ends: pages pad their left by this.
+const _railEdge = _railInset + _railWidth;
+const _railRadius = 18.0;
+
+/// What the page in front is, for the chrome floating over it: whether it's
+/// on ink, and which show it's of. Pages say so with [Shown].
+final class Showing extends ChangeNotifier {
+  final _pages = <State, ({bool onInk, int? show})>{};
+
+  bool get onInk => _pages.values.any((p) => p.onInk);
+  int? get show => _pages.values.map((p) => p.show).nonNulls.firstOrNull;
+
+  void _set(State page, ({bool onInk, int? show})? what) {
+    final before = (onInk, show);
+    if (what == null) {
+      _pages.remove(page);
+    } else {
+      _pages[page] = what;
+    }
+    if ((onInk, show) != before) notifyListeners();
+  }
+}
+
+final class _ShowingScope extends InheritedWidget {
+  const _ShowingScope({required this.showing, required super.child});
+  final Showing showing;
+
+  @override
+  bool updateShouldNotify(_ShowingScope old) => showing != old.showing;
+}
+
+/// Tells the window's chrome what [child] is while it's in front: its
+/// route on top, in the section showing.
+final class Shown extends StatefulWidget {
+  const Shown({super.key, this.onInk = false, this.show, required this.child});
+  final bool onInk;
+
+  /// The show the page is of.
+  final int? show;
+  final Widget child;
+
+  @override
+  State<Shown> createState() => _ShownState();
+}
+
+final class _ShownState extends State<Shown> {
+  Showing? _showing;
 
   @override
   Widget build(BuildContext context) {
+    _showing = context.getInheritedWidgetOfExactType<_ShowingScope>()?.showing;
+    final front = (ModalRoute.isCurrentOf(context) ?? true) && Visibility.of(context);
+    final what = front ? (onInk: widget.onInk, show: widget.show) : null;
+    // After the frame: the sidebar may have built already.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showing?._set(this, what);
+    });
+    return widget.child;
+  }
+
+  @override
+  void dispose() {
+    final showing = _showing;
+    WidgetsBinding.instance.addPostFrameCallback((_) => showing?._set(this, null));
+    super.dispose();
+  }
+}
+
+/// The sidebar's colours on paper ([t] 0) or ink ([t] 1).
+final class _RailTone {
+  _RailTone(double t)
+    : tint = Color.lerp(const Color(0xB8FFFFFF), const Color(0x73121319), t)!,
+      edge = Color.lerp(brand.line, brand.inkLine, t)!,
+      shadow = Color.lerp(const Color(0x14171A38), const Color(0x59000000), t)!,
+      fg = Color.lerp(brand.fg, brand.snow, t)!,
+      soft = Color.lerp(brand.fgSoft, brand.snowSoft, t)!,
+      faint = Color.lerp(brand.fgFaint, brand.snowFaint, t)!,
+      accent = Color.lerp(brand.accent, brand.accentLight, t)!,
+      held = Color.lerp(const Color(0x121C1D20), const Color(0x1FFFFFFF), t)!,
+      hover = Color.lerp(const Color(0x091C1D20), const Color(0x0FFFFFFF), t)!;
+  final Color tint, edge, shadow, fg, soft, faint, accent, held, hover;
+}
+
+final class _Sidebar extends StatelessWidget {
+  const _Sidebar({required this.section, required this.showing, required this.onGo});
+  final Section section;
+  final Showing showing;
+  final void Function(Section) onGo;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: showing,
+    builder: (context, _) => TweenAnimationBuilder<double>(
+      tween: Tween(end: showing.onInk ? 1 : 0),
+      duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : brand.toneSpeed,
+      curve: brand.easeOutExpo,
+      builder: (context, t, _) => _panel(context, _RailTone(t)),
+    ),
+  );
+
+  Widget _panel(BuildContext context, _RailTone tone) {
     final s = Services.of(context);
     final mac = defaultTargetPlatform == TargetPlatform.macOS;
-    return Container(
-      width: 236,
-      decoration: const BoxDecoration(
-        color: _sidebar,
-        border: Border(right: BorderSide(color: brand.line)),
+    const shape = RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(_railRadius)));
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(_railRadius),
+        boxShadow: [BoxShadow(color: tone.shadow, offset: const Offset(0, 8), blurRadius: 28, spreadRadius: -10)],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // Clear of macOS's window buttons, and the window's handle.
-        GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onPanStart: (_) => windowCommand('startDrag'),
-          onDoubleTap: () => windowCommand('zoom'),
-          child: SizedBox(height: math.max(MediaQuery.paddingOf(context).top, 18)),
-        ),
-        Padding(padding: const EdgeInsets.fromLTRB(22, 0, 22, 22), child: Align(alignment: Alignment.centerLeft, child: logo(height: 26))),
-        Expanded(
-          child: ListenableBuilder(
-            listenable: s.library,
-            builder: (context, _) {
-              final queued = s.library.queue.length;
-              final downloading = s.library.unfinishedDownloads().length;
-              return ListView(padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-                for (final item in [Section.home, Section.library, Section.search, Section.queue, Section.downloads])
-                  _NavItem(
-                    section: item,
-                    selected: item == section,
-                    badge: switch (item) {
-                      Section.queue when queued > 0 => '$queued',
-                      Section.downloads when downloading > 0 => '$downloading',
-                      _ => null,
-                    },
-                    onTap: () => onGo(item),
-                  ),
-              ]);
-            },
+      child: Stack(children: [
+        Positioned.fill(
+          child: Glass(
+            tint: tone.tint,
+            shape: shape.copyWith(side: BorderSide(color: tone.edge)),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-          child: _NavItem(section: Section.settings, selected: section == Section.settings, onTap: () => onGo(Section.settings)),
-        ),
+        Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          // macOS's window buttons sit in the panel's top; elsewhere the
+          // mark does. Either way it's the window's handle.
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onPanStart: (_) => windowCommand('startDrag'),
+            onDoubleTap: () => windowCommand('zoom'),
+            child: mac
+              ? SizedBox(height: math.max(MediaQuery.paddingOf(context).top - _railInset, 18))
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+                  child: Align(alignment: Alignment.centerLeft, child: logo(height: 20)),
+                ),
+          ),
+          Expanded(
+            child: ListenableBuilder(
+              listenable: Listenable.merge([s.library, s.feeds]),
+              builder: (context, _) {
+                final queued = s.library.queue.length;
+                final downloading = s.library.unfinishedDownloads().length;
+                final shows = s.library.podcasts;
+                final feeds = {for (final f in s.feeds.feeds) f.id};
+                return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 8), children: [
+                  for (final item in [Section.home, Section.library, Section.search, Section.queue, Section.downloads])
+                    _RailItem(
+                      tone: tone,
+                      // A show in front takes the pill; its section keeps
+                      // its accent.
+                      selected: item == section && !shows.any((p) => p.id == showing.show),
+                      icon: Icon(item.icon, size: 18, color: item == section ? tone.accent : tone.soft),
+                      label: item.label,
+                      count: switch (item) {
+                        Section.queue when queued > 0 => '$queued',
+                        Section.downloads when downloading > 0 => '$downloading',
+                        _ => null,
+                      },
+                      onTap: () => onGo(item),
+                    ),
+                  if (shows.isNotEmpty) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 20, 10, 6),
+                      child: Text(
+                        'Following',
+                        style: Theme.of(context).textTheme.labelSmall!.copyWith(color: tone.faint, fontSize: 11.5, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    for (final show in shows)
+                      _RailItem(
+                        tone: tone,
+                        selected: show.id == showing.show,
+                        icon: Artwork(url: show.artworkUrl, title: show.title, size: 22, radius: 5),
+                        label: show.title,
+                        onTap: () => switch (show.cloudFeedId) {
+                          final feed? when feeds.contains(feed) => Navigation.of(context).openFeed(feed),
+                          _ when show.id == showing.show => null,
+                          _ => Navigation.of(context).openShow(show.id),
+                        },
+                      ),
+                  ],
+                ]);
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: _RailItem(
+              tone: tone,
+              selected: section == Section.settings,
+              icon: Icon(Section.settings.icon, size: 18, color: section == Section.settings ? tone.accent : tone.soft),
+              label: Section.settings.label,
+              onTap: () => onGo(Section.settings),
+            ),
+          ),
+        ]),
       ]),
     );
   }
 }
 
-final class _NavItem extends StatefulWidget {
-  const _NavItem({required this.section, required this.selected, required this.onTap, this.badge});
-  final Section section;
+/// A row of the sidebar: a section, or a show by its artwork.
+final class _RailItem extends StatefulWidget {
+  const _RailItem({required this.tone, required this.selected, required this.icon, required this.label, required this.onTap, this.count});
+  final _RailTone tone;
   final bool selected;
+  final Widget icon;
+  final String label;
   final VoidCallback onTap;
-  final String? badge;
+
+  /// A plain number at the row's end: what's queued or downloading.
+  final String? count;
 
   @override
-  State<_NavItem> createState() => _NavItemState();
+  State<_RailItem> createState() => _RailItemState();
 }
 
-final class _NavItemState extends State<_NavItem> {
+final class _RailItemState extends State<_RailItem> {
   bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final tone = widget.tone;
     final selected = widget.selected;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Semantics(
-        selected: selected,
-        button: true,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: brand.quick,
-              curve: brand.easeOutExpo,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(
-                color: selected ? brand.white : (_hover ? _sidebarHover : _sidebar),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: selected ? const [BoxShadow(color: Color(0x14171A38), offset: Offset(0, 4), blurRadius: 12, spreadRadius: -6)] : null,
-              ),
-              child: Row(children: [
-                Icon(widget.section.icon, size: 20, color: selected ? brand.accent : brand.fgSoft),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.section.label,
-                    style: text.labelLarge!.copyWith(fontSize: 14.5, color: brand.fg, fontWeight: selected ? FontWeight.w700 : FontWeight.w600),
-                  ),
-                ),
-                if (widget.badge case final badge?)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(99)),
-                    child: Text(
-                      badge,
-                      style: text.labelSmall!.copyWith(color: brand.accentHover, fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()]),
-                    ),
-                  ),
-              ]),
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: widget.label,
+      excludeSemantics: true,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            height: 34,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: selected ? tone.held : _hover ? tone.hover : null,
+              borderRadius: BorderRadius.circular(10),
             ),
+            child: Row(children: [
+              SizedBox(width: 22, child: Center(child: widget.icon)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  widget.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.labelLarge!.copyWith(fontSize: 13.5, color: tone.fg, fontWeight: selected ? FontWeight.w600 : FontWeight.w500),
+                ),
+              ),
+              if (widget.count case final count?)
+                Text(
+                  count,
+                  style: text.labelSmall!.copyWith(color: tone.faint, fontSize: 12, fontFeatures: const [FontFeature.tabularFigures()]),
+                ),
+            ]),
           ),
         ),
       ),
@@ -515,7 +665,9 @@ final class PageBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final gutter = (width * 0.04).clamp(16.0, 40.0);
+    // The sidebar floats over the page's left (MediaQuery padding).
+    final left = MediaQuery.paddingOf(context).left;
+    final gutter = ((width - left) * 0.04).clamp(16.0, 40.0);
     final mac = defaultTargetPlatform == TargetPlatform.macOS;
     return Scrollbar(
       controller: controller,
@@ -530,7 +682,7 @@ final class PageBody extends StatelessWidget {
           _ => ScrollViewKeyboardDismissBehavior.manual,
         },
         padding: EdgeInsets.fromLTRB(
-          gutter,
+          left + gutter,
           MediaQuery.paddingOf(context).top + (mac && width >= wideWidth ? 40 : 24),
           gutter,
           MediaQuery.paddingOf(context).bottom + 40,
