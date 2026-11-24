@@ -131,7 +131,9 @@ Every push to master releases the app:
    Connect to process it, adds it to the external **Public** group and submits it to Beta App
    Review. Anyone joins with the group's public link, up to 10,000 testers:
    <https://testflight.apple.com/join/HHHDHV2a>; each build reaches them once Apple approves it,
-   and expires after 90 days. The GitHub release doesn't wait for the ios job. macOS stays on
+   and expires after 90 days. The internal **Internal** group, for App Store Connect users, gets
+   every build as soon as it's processed, with no review: add a team member to it in App Store
+   Connect's TestFlight tab. The GitHub release doesn't wait for the ios job. macOS stays on
    the DMG above, one download link and Sparkle updates.
 
 Secrets live only in GitHub and, on a Mac, in `~/.secrets/listenjar`; never in this repo. On
