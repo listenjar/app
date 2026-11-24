@@ -66,7 +66,7 @@ final class Account extends ChangeNotifier {
   }
 
   /// Asks the API for the listener again: their plan and storage change
-  /// on the website (checkout) and as uploads land. At most every few
+  /// on Stripe (checkout, the billing portal) and as uploads land. At most every few
   /// seconds unless [force]d; failures keep what is shown.
   Future<void> refresh({bool force = false}) async {
     final now = DateTime.now();

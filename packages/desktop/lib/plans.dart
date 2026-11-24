@@ -1,6 +1,7 @@
 // Plans in the window: which plan the listener is on and how much of its
-// storage they use, the sheet that sends them to checkout on the website
-// (prices from lib/pricing, `moon run desktop:codegen`), the sheet that makes
+// storage they use, the sheet that sends them to Stripe Checkout, which the
+// API makes for the signed-in listener (prices from lib/pricing, `moon run
+// desktop:codegen`), the sheet that makes
 // room when the storage is full, and naming a podcast of their own. The
 // backend decides what a plan allows (public.yaml); this only shows it.
 //
@@ -10,16 +11,19 @@
 // podcast app.
 import 'dart:async';
 
+import 'package:cancellation_token/cancellation_token.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'account.dart';
 import 'backend/api.dart';
+import 'cloud.dart' show failure;
 import 'config.dart';
 import 'feeds.dart';
 import 'links.dart';
 import 'marks.dart';
 import 'pricing/catalog.dart' as pricing;
+import 'sign_in_form.dart';
 import 'theme.dart' as brand;
 import 'ui.dart' show Services;
 
@@ -76,24 +80,49 @@ String _money(int cents, String currency) {
 /// "about 170 hours", from the plan's description.
 String? _hours(pricing.Plan plan) => RegExp(r'\((about [^)]+)\)').firstMatch(plan.description)?.group(1);
 
-Uri _web(String path, [Map<String, String>? query]) =>
-  currentConfig().web.replace(path: path, queryParameters: query);
+/// Where Stripe sends the browser back, whether the listener paid, left or
+/// changed their plan: this app's own address, which brings it to the front,
+/// and coming back refreshes the plan (shell.dart).
+String get _stripeReturn => Uri(scheme: appScheme, host: 'plans').toString();
 
-/// The website's checkout for [price]; someone who pays already lands in
-/// the billing portal.
-Uri checkoutUrl(pricing.PlanPrice price) => _web('/checkout', {'price': price.lookupKey});
+/// Stripe Checkout for [price], made by the API for the signed-in listener.
+Future<Uri> _checkoutUrl(Account account, pricing.PlanPrice price) async {
+  final checkout = await account.api
+    .createCheckout(body: CheckoutRequest(price: price.lookupKey, returnUrl: _stripeReturn))
+    .asCancellable(account.timeout());
+  return Uri.parse(checkout.url);
+}
 
-/// The billing portal: change or cancel the plan.
-Uri get billingUrl => _web('/billing');
+/// Stripe's billing portal, where the signed-in listener changes or cancels
+/// their plan.
+Future<Uri> _portalUrl(Account account) async {
+  final portal = await account.api
+    .createBillingPortal(body: BillingPortalRequest(returnUrl: _stripeReturn))
+    .asCancellable(account.timeout());
+  return Uri.parse(portal.url);
+}
 
-Future<void> openInBrowser(BuildContext context, Uri url) async {
-  final messenger = ScaffoldMessenger.of(context);
-  if (await launchUrl(url, mode: LaunchMode.externalApplication)) {
-    messenger.showSnackBar(const SnackBar(
-      content: Text('Finish in your browser. Your plan shows here once it’s done.'),
+/// Opens [url], one of Stripe's pages, in the browser.
+Future<void> _openStripe(ScaffoldMessengerState? messenger, Uri url) async {
+  final opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+  messenger
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+      content: Text(opened
+        ? 'Finish in your browser. Your plan shows here once it’s done.'
+        : 'Couldn’t open your browser. Try again.'),
     ));
-  } else {
-    messenger.showSnackBar(SnackBar(content: Text('Couldn’t open your browser. Go to $url')));
+}
+
+/// Opens the billing portal in the browser, to change or cancel the plan.
+Future<void> manageBilling(BuildContext context) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  try {
+    await _openStripe(messenger, await _portalUrl(Services.of(context).account));
+  } catch (e) {
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(failure('Couldn’t open your plan', e, other: 'Try again.'))));
   }
 }
 
@@ -264,34 +293,44 @@ final class Notice extends StatelessWidget {
   }
 }
 
-Widget _sheet({required BuildContext context, required Widget child, double width = 520}) => Dialog(
-  backgroundColor: brand.white,
-  surfaceTintColor: brand.white,
-  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-  insetPadding: const EdgeInsets.all(24),
-  child: ConstrainedBox(
-    constraints: BoxConstraints(maxWidth: width),
-    child: Padding(padding: const EdgeInsets.fromLTRB(28, 26, 28, 24), child: child),
-  ),
-);
+/// Whether the window is phone-narrow: sheets hug its edges closer.
+bool _narrow(BuildContext context) => MediaQuery.sizeOf(context).width < 480;
 
-/// The sheet of plans: pick one and how often to pay, then check out on the
-/// website. [title] says why it opened; [cloud] when it's for something
-/// only ListenJar Cloud does, which leaves Local out. Someone who pays
-/// already (on Local) changes plans in the billing portal instead.
+Widget _sheet({required BuildContext context, required Widget child, double width = 520}) {
+  final narrow = _narrow(context);
+  return Dialog(
+    backgroundColor: brand.white,
+    surfaceTintColor: brand.white,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
+    insetPadding: EdgeInsets.all(narrow ? 16 : 24),
+    child: ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: width),
+      child: Padding(
+        padding: narrow ? const EdgeInsets.fromLTRB(20, 20, 20, 20) : const EdgeInsets.fromLTRB(28, 26, 28, 24),
+        child: child,
+      ),
+    ),
+  );
+}
+
+/// The sheet of plans: pick one and how often to pay, then pay on Stripe
+/// Checkout in the browser, signing in here first if need be. [title] says
+/// why it opened; [cloud] when it's for something only ListenJar Cloud does,
+/// which leaves Local out. Someone who pays already (on Local) changes plans
+/// in the billing portal instead.
 Future<void> showPlans(BuildContext context, {String title = 'Keep what you add', bool cloud = false}) => showDialog<void>(
   context: context,
-  builder: (_) => _PlansSheet(title: title, cloud: cloud, paid: isPaid(Services.of(context).account.user)),
+  builder: (_) => _PlansSheet(title: title, cloud: cloud, account: Services.of(context).account),
 );
 
 /// What ListenJar Cloud adds to every plan's perks, as the pricing page puts it.
 const _cloudPerk = 'ListenJar Cloud: they play in any podcast app';
 
 final class _PlansSheet extends StatefulWidget {
-  const _PlansSheet({required this.title, required this.cloud, required this.paid});
+  const _PlansSheet({required this.title, required this.cloud, required this.account});
   final String title;
   final bool cloud;
-  final bool paid;
+  final Account account;
 
   @override
   State<_PlansSheet> createState() => _PlansSheetState();
@@ -302,17 +341,185 @@ final class _PlansSheetState extends State<_PlansSheet> {
   var _interval = pricing.PlanInterval.monthly;
   late var _plan = _plans.first;
 
+  /// Signing in first, to go on to checkout once that's done.
+  var _signingIn = false;
+
+  /// Waiting on the API for Stripe's page.
+  var _opening = false;
+
+  /// Why the last try didn't open Stripe's page.
+  String? _problem;
+
+  Account get _account => widget.account;
+  bool get _paid => isPaid(_account.user);
+
+  // Local is yearly only: picked on Monthly, it checks out yearly.
+  pricing.PlanPrice get _price => _plan.price(_interval) ?? _plan.price(pricing.PlanInterval.yearly)!;
+
+  @override
+  void initState() {
+    super.initState();
+    _account.addListener(_accountChanged);
+  }
+
+  @override
+  void dispose() {
+    _account.removeListener(_accountChanged);
+    super.dispose();
+  }
+
+  void _accountChanged() {
+    if (_signingIn && _account.user != null) {
+      _signingIn = false;
+      unawaited(_go());
+    }
+    setState(() {});
+  }
+
+  /// Stripe Checkout for the plan, or the billing portal for someone who
+  /// pays already, in the browser; signed out, the sign-in comes first.
+  Future<void> _go() async {
+    if (_account.user == null) {
+      setState(() {
+        _signingIn = true;
+        _problem = null;
+      });
+      return;
+    }
+    setState(() {
+      _opening = true;
+      _problem = null;
+    });
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      final url = _paid
+        ? await _portalUrl(_account)
+        : await _checkoutUrl(_account, _price).catchError(
+            // They pay already, as of a moment ago: the portal changes it.
+            (_) => _portalUrl(_account),
+            test: (e) => e is ApiStatusException && e.statusCode == 409,
+          );
+      if (!mounted) return;
+      Navigator.pop(context);
+      await _openStripe(messenger, url);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _opening = false;
+          _problem = failure('Couldn’t open checkout', e, other: 'Try again.');
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    // Local is yearly only: picked on Monthly, it checks out yearly.
-    final price = _plan.price(_interval) ?? _plan.price(pricing.PlanInterval.yearly)!;
+    if (_signingIn) return _signIn();
+    final narrow = _narrow(context);
+    final note = Text(
+      _paid ? 'Your plan changes in your browser.' : 'Checkout opens in your browser.',
+      style: text.bodySmall!.copyWith(color: brand.fgSoft),
+      textAlign: narrow ? TextAlign.center : null,
+    );
+    final go = brand.accentShadow(
+      enabled: !_opening,
+      child: TextButton.icon(
+        style: brand.button(brand.Tone.accent),
+        autofocus: true,
+        onPressed: _opening ? null : () => unawaited(_go()),
+        iconAlignment: IconAlignment.end,
+        icon: const Arrow(),
+        label: Text(switch (_opening) {
+          true => 'Opening…',
+          false when _paid => 'Move to ${_size(_plan)}',
+          false => 'Get ${_size(_plan)}',
+        }),
+      ),
+    );
+    Widget tile(pricing.Plan plan, {required bool row}) => _PlanTile(
+      plan: plan,
+      interval: _interval,
+      selected: plan == _plan,
+      row: row,
+      onTap: () => setState(() => _plan = plan),
+    );
     return _sheet(
       context: context,
       width: _plans.length > 2 ? 620 : 520,
+      // A short window scrolls the sheet rather than clipping the plans.
+      child: SingleChildScrollView(
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Text(widget.title, style: text.titleLarge)),
+            IconButton(
+              tooltip: 'Close',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close_rounded, size: 18, color: brand.fgSoft),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          for (final perk in [..._planPerks, if (widget.cloud) _cloudPerk])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Padding(padding: EdgeInsets.only(top: 1), child: Icon(Icons.check_rounded, size: 17, color: brand.accent)),
+                const SizedBox(width: 10),
+                Expanded(child: Text(perk, style: text.bodySmall!.copyWith(color: brand.fg))),
+              ]),
+            ),
+          const SizedBox(height: 18),
+          _IntervalSwitch(value: _interval, onChanged: (v) => setState(() => _interval = v)),
+          const SizedBox(height: 14),
+          // Side by side while each plan has room for its price on a line;
+          // narrower, one plan to a row.
+          LayoutBuilder(builder: (context, box) {
+            const gap = 12.0;
+            if (box.maxWidth >= 170 * _plans.length + gap * (_plans.length - 1)) {
+              return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                for (final (i, plan) in _plans.indexed) ...[
+                  if (i > 0) const SizedBox(width: gap),
+                  Expanded(child: tile(plan, row: false)),
+                ],
+              ]);
+            }
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final (i, plan) in _plans.indexed) ...[
+                if (i > 0) const SizedBox(height: 8),
+                tile(plan, row: true),
+              ],
+            ]);
+          }),
+          const SizedBox(height: 22),
+          if (narrow)
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [go, const SizedBox(height: 10), note])
+          else
+            Row(children: [Expanded(child: note), const SizedBox(width: 16), go]),
+          if (_problem case final problem?) ...[
+            const SizedBox(height: 12),
+            Text(problem, style: text.bodySmall!.copyWith(color: brand.danger)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  /// Signed out: the plan goes with an account, so signing in comes first;
+  /// checkout opens by itself once it's done.
+  Widget _signIn() => _sheet(
+    context: context,
+    width: 480,
+    child: SingleChildScrollView(
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(child: Text(widget.title, style: text.titleLarge)),
+        Row(children: [
+          TextButton.icon(
+            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+            onPressed: () => setState(() => _signingIn = false),
+            icon: const Icon(Icons.arrow_back_rounded, size: 16),
+            label: const Text('Plans'),
+          ),
+          const Spacer(),
           IconButton(
             tooltip: 'Close',
             visualDensity: VisualDensity.compact,
@@ -320,59 +527,18 @@ final class _PlansSheetState extends State<_PlansSheet> {
             icon: const Icon(Icons.close_rounded, size: 18, color: brand.fgSoft),
           ),
         ]),
-        const SizedBox(height: 12),
-        for (final perk in [..._planPerks, if (widget.cloud) _cloudPerk])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(children: [
-              const Icon(Icons.check_rounded, size: 17, color: brand.accent),
-              const SizedBox(width: 10),
-              Expanded(child: Text(perk, style: text.bodySmall!.copyWith(color: brand.fg))),
-            ]),
-          ),
-        const SizedBox(height: 18),
-        _IntervalSwitch(value: _interval, onChanged: (v) => setState(() => _interval = v)),
         const SizedBox(height: 14),
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          for (final (i, plan) in _plans.indexed) ...[
-            if (i > 0) const SizedBox(width: 12),
-            Expanded(
-              child: _PlanTile(
-                plan: plan,
-                interval: _interval,
-                selected: plan == _plan,
-                onTap: () => setState(() => _plan = plan),
-              ),
-            ),
-          ],
-        ]),
-        const SizedBox(height: 22),
-        Row(children: [
-          Expanded(
-            child: Text(
-              widget.paid ? 'Your plan changes in your browser.' : 'Checkout opens in your browser.',
-              style: text.bodySmall!.copyWith(color: brand.fgSoft),
-            ),
+        SignInForm(
+          account: _account,
+          describe: (error) => failure('Couldn’t sign in', error, other: 'Try again.'),
+          why: (
+            'Sign in to get ${_size(_plan)}',
+            'Your plan goes with your ListenJar account. Checkout opens in your browser once you’re in.',
           ),
-          const SizedBox(width: 16),
-          brand.accentShadow(
-            enabled: true,
-            child: TextButton.icon(
-              style: brand.button(brand.Tone.accent),
-              autofocus: true,
-              onPressed: () {
-                Navigator.pop(context);
-                unawaited(openInBrowser(context, widget.paid ? billingUrl : checkoutUrl(price)));
-              },
-              iconAlignment: IconAlignment.end,
-              icon: const Arrow(),
-              label: Text(widget.paid ? 'Move to ${_size(_plan)}' : 'Get ${_size(_plan)}'),
-            ),
-          ),
-        ]),
+        ),
       ]),
-    );
-  }
+    ),
+  );
 }
 
 /// Monthly or yearly: two speed-chip pills.
@@ -420,10 +586,14 @@ final class _IntervalSwitch extends StatelessWidget {
 /// One plan: its size and hours, its price for the interval. Selected, it
 /// takes mist and the accent ring.
 final class _PlanTile extends StatefulWidget {
-  const _PlanTile({required this.plan, required this.interval, required this.selected, required this.onTap});
+  const _PlanTile({required this.plan, required this.interval, required this.selected, required this.row, required this.onTap});
   final pricing.Plan plan;
   final pricing.PlanInterval interval;
   final bool selected;
+
+  /// Laid out as a row, for a narrow sheet: what it is on the left, its
+  /// price on the right.
+  final bool row;
   final VoidCallback onTap;
 
   @override
@@ -445,6 +615,22 @@ final class _PlanTileState extends State<_PlanTile> {
       pricing.PlanInterval.monthly => 'Billed every month',
       pricing.PlanInterval.yearly => '${_money((price.amount / 12).round(), price.currency)} a month, billed yearly',
     };
+    final period = switch (price.interval) {
+      pricing.PlanInterval.monthly => '/ month',
+      pricing.PlanInterval.yearly => '/ year',
+    };
+    final what = switch (_hours(plan)) {
+      _ when !plan.cloud => 'On your device, no Cloud',
+      final hours? => '$hours in the Cloud',
+      null => 'In the Cloud',
+    };
+    final soft = text.bodySmall!.copyWith(color: brand.fgSoft);
+    final small = soft.copyWith(fontSize: 12.5, fontFeatures: tabular);
+    final check = AnimatedOpacity(
+      opacity: widget.selected ? 1 : 0,
+      duration: brand.quick,
+      child: const Icon(Icons.check_circle_rounded, size: 20, color: brand.accent),
+    );
     return Semantics(
       selected: widget.selected,
       button: true,
@@ -457,49 +643,52 @@ final class _PlanTileState extends State<_PlanTile> {
           child: AnimatedContainer(
             duration: brand.quick,
             curve: brand.easeOutExpo,
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+            padding: widget.row ? const EdgeInsets.fromLTRB(16, 14, 16, 14) : const EdgeInsets.fromLTRB(18, 16, 18, 18),
             decoration: BoxDecoration(
               color: widget.selected || _hover ? brand.mist : brand.paper,
               borderRadius: BorderRadius.circular(brand.radiusTile),
               border: Border.all(color: widget.selected ? brand.accent : brand.accent.withValues(alpha: 0), width: 2),
             ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Expanded(child: Text(_size(plan), style: text.titleLarge)),
-                AnimatedOpacity(
-                  opacity: widget.selected ? 1 : 0,
-                  duration: brand.quick,
-                  child: const Icon(Icons.check_circle_rounded, size: 20, color: brand.accent),
-                ),
-              ]),
-              const SizedBox(height: 2),
-              Text(
-                switch (_hours(plan)) {
-                  _ when !plan.cloud => 'On your device, no Cloud',
-                  final hours? => '$hours in the Cloud',
-                  null => 'In the Cloud',
-                },
-                style: text.bodySmall!.copyWith(color: brand.fgSoft),
-              ),
-              const SizedBox(height: 14),
-              Text.rich(
-                TextSpan(children: [
-                  TextSpan(
-                    text: _money(price.amount, price.currency),
-                    style: text.titleLarge!.copyWith(fontFeatures: tabular),
+            child: widget.row
+              ? Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        Flexible(child: Text(_size(plan), style: text.titleMedium)),
+                        const SizedBox(width: 6),
+                        check,
+                      ]),
+                      const SizedBox(height: 2),
+                      Text(what, style: soft),
+                      Text(per, style: small),
+                    ]),
                   ),
-                  TextSpan(
-                    text: switch (price.interval) {
-                      pricing.PlanInterval.monthly => ' / month',
-                      pricing.PlanInterval.yearly => ' / year',
-                    },
-                    style: text.bodySmall!.copyWith(color: brand.fgSoft),
+                  const SizedBox(width: 12),
+                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text(_money(price.amount, price.currency), style: text.titleLarge!.copyWith(fontFeatures: tabular)),
+                    Text(period, style: soft),
+                  ]),
+                ])
+              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text(_size(plan), style: text.titleLarge)),
+                    check,
+                  ]),
+                  const SizedBox(height: 2),
+                  Text(what, style: soft),
+                  const SizedBox(height: 14),
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(
+                        text: _money(price.amount, price.currency),
+                        style: text.titleLarge!.copyWith(fontFeatures: tabular),
+                      ),
+                      TextSpan(text: ' $period', style: soft),
+                    ]),
                   ),
+                  const SizedBox(height: 2),
+                  Text(per, style: small),
                 ]),
-              ),
-              const SizedBox(height: 2),
-              Text(per, style: text.bodySmall!.copyWith(color: brand.fgSoft, fontSize: 12.5, fontFeatures: tabular)),
-            ]),
           ),
         ),
       ),
@@ -849,7 +1038,7 @@ final class _MakeRoomSheetState extends State<_MakeRoomSheet> {
                 style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
                 onPressed: () {
                   Navigator.pop(context);
-                  unawaited(openInBrowser(context, billingUrl));
+                  unawaited(manageBilling(context));
                 },
                 iconAlignment: IconAlignment.end,
                 icon: const Arrow(size: 16),

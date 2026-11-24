@@ -627,6 +627,58 @@ paths:
                 $ref: "#/components/schemas/Session"
         "400":
           description: The code is unknown, used, expired, or does not match the verifier or redirect URI.
+  /billing/checkout:
+    post:
+      operationId: createCheckout
+      summary: Start subscribing the signed-in user to a plan
+      description: >-
+        A Stripe Checkout Session for the plan's price, linked to the user
+        (its `client_reference_id` is their id). The app opens `url` in the
+        browser; Stripe sends it back to `returnUrl`, which brings the app to
+        the front, whether they paid or left. The webhook makes them paid, and
+        `getMe` says so from then on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutRequest"
+      responses:
+        "201":
+          description: Where to pay.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripeRedirect"
+        "400":
+          description: Not a plan's price, or a `returnUrl` that isn't the app's.
+        "401":
+          description: The token is missing, revoked or expired.
+        "409":
+          description: The user pays already (Local included); they change plans in the billing portal.
+  /billing/portal:
+    post:
+      operationId: createBillingPortal
+      summary: Let the signed-in user change or cancel their plan
+      description: A Stripe billing portal session; Stripe sends the browser back to `returnUrl`.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BillingPortalRequest"
+      responses:
+        "201":
+          description: Where to manage the plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StripeRedirect"
+        "400":
+          description: A `returnUrl` that isn't the app's.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The user never subscribed.
   /me:
     get:
       operationId: getMe
@@ -685,6 +737,37 @@ components:
       scheme: bearer
       description: The token from `createDesktopToken`.
   schemas:
+    CheckoutRequest:
+      type: object
+      required: [price]
+      properties:
+        price:
+          type: string
+          description: >-
+            A plan price's Stripe lookup key from the pricing catalog
+            (pricing/catalog.live.json), such as `listenjar_10gb_yearly`.
+        returnUrl:
+          $ref: "#/components/schemas/AppReturnUrl"
+    BillingPortalRequest:
+      type: object
+      properties:
+        returnUrl:
+          $ref: "#/components/schemas/AppReturnUrl"
+    AppReturnUrl:
+      type: string
+      format: uri
+      description: >-
+        Where Stripe sends the browser back: an address of the app's
+        `listenjar:` scheme (`listenjar-dev:` for debug builds), such as
+        `listenjar://plans`, which brings the app to the front. Without it,
+        the website.
+    StripeRedirect:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
     Feed:
       type: object
       required: [id, title, createdAt]

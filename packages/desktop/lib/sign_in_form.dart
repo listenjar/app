@@ -22,8 +22,12 @@ enum _Mode { signIn, signUp, forgot }
 typedef _Sent = ({String email, _Mode mode});
 
 final class SignInForm extends StatefulWidget {
-  const SignInForm({super.key, required this.account, required this.describe});
+  const SignInForm({super.key, required this.account, required this.describe, this.why});
   final Account account;
+
+  /// What signing in is for, as a heading and a line under it, in place of
+  /// ListenJar Cloud's: the plans sheet's "Sign in to get 10 GB".
+  final (String, String)? why;
 
   /// Says what went wrong when it isn't one of the refusals this form
   /// explains itself (cloud.dart's `failure`).
@@ -203,7 +207,7 @@ final class _SignInFormState extends State<SignInForm> {
       final error => _explain(error),
     };
     final (title, lede) = switch (_mode) {
-      _Mode.signIn => (
+      _Mode.signIn => widget.why ?? (
         'Sign in to ListenJar Cloud',
         'Follow YouTube playlists and channels, or gather any videos into a podcast of your own. '
           'ListenJar keeps them as podcast feeds, so new episodes reach your Library and any podcast app you use.',

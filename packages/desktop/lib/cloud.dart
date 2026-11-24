@@ -472,7 +472,7 @@ final class StorageFullNotice extends StatelessWidget {
         if (bigger != null)
           TextButton(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => openInBrowser(context, billingUrl),
+            onPressed: () => manageBilling(context),
             child: Text('Move to ${bigger.name.replaceFirst('ListenJar ', '')}'),
           ),
         TextButton(
@@ -564,7 +564,7 @@ final class _AccountPanelState extends State<AccountPanel> {
         else
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => openInBrowser(context, billingUrl),
+            onPressed: () => manageBilling(context),
             icon: const Icon(Icons.open_in_new_rounded, size: 16),
             label: const Text('Manage plan'),
           ),
