@@ -247,6 +247,12 @@ final class SearchRequest extends ChangeNotifier {
   }
 }
 
+// Opaque, so AnimatedContainer lerps between real colours: from transparent
+// black it passed through a grey flash. Hover is the sidebar under fg at 6%;
+// paperDeep sat 4 steps off the sidebar and didn't show.
+const _sidebar = Color(0xFFEFEDE8);
+const _sidebarHover = Color(0xFFE3E1DC);
+
 final class _Sidebar extends StatelessWidget {
   const _Sidebar({required this.section, required this.onGo});
   final Section section;
@@ -259,7 +265,7 @@ final class _Sidebar extends StatelessWidget {
     return Container(
       width: 236,
       decoration: const BoxDecoration(
-        color: Color(0xFFEFEDE8),
+        color: _sidebar,
         border: Border(right: BorderSide(color: brand.line)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -344,7 +350,7 @@ final class _NavItemState extends State<_NavItem> {
               curve: brand.easeOutExpo,
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.subtitle == null ? 9 : 8),
               decoration: BoxDecoration(
-                color: selected ? brand.white : (_hover ? brand.paperDeep : const Color(0x00000000)),
+                color: selected ? brand.white : (_hover ? _sidebarHover : _sidebar),
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: selected ? const [BoxShadow(color: Color(0x14171A38), offset: Offset(0, 4), blurRadius: 12, spreadRadius: -6)] : null,
               ),
