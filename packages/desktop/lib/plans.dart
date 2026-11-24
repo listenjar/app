@@ -9,6 +9,7 @@
 // there; 10 GB and 100 GB add ListenJar Cloud, which hosts them for any
 // podcast app.
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -43,9 +44,17 @@ pricing.Plan? catalogPlan(User user) => switch (user.plan) {
   Plan.paid => pricing.plans.where((p) => p.storageBytes == (user.storageLimitBytes ?? 0)).firstOrNull,
 };
 
-/// A bigger Cloud plan than the listener's, if there is one.
-pricing.Plan? biggerPlan(User user) =>
-  pricing.plans.where((p) => p.cloud && p.storageBytes > (user.storageLimitBytes ?? 0)).firstOrNull;
+/// Whether this app may show prices and send people to checkout or the
+/// billing portal. Not on iOS: the TestFlight beta can't be sold (App Review
+/// guideline 2.2) and, outside the US, the App Store allows no purchase but
+/// Apple's (3.1.1). A plan bought on the web or desktop still unlocks there.
+/// docs/payments-decision.md in the monorepo has the reasoning.
+final sellsPlans = !Platform.isIOS;
+
+/// A bigger Cloud plan than the listener's, if there is one and [sellsPlans].
+pricing.Plan? biggerPlan(User user) => !sellsPlans
+  ? null
+  : pricing.plans.where((p) => p.cloud && p.storageBytes > (user.storageLimitBytes ?? 0)).firstOrNull;
 
 /// "10 GB" out of "ListenJar 10 GB", "Local" out of "ListenJar Local".
 String _size(pricing.Plan plan) => plan.name.replaceFirst(RegExp(r'^ListenJar\s+'), '');
@@ -279,14 +288,46 @@ Widget _sheet({required BuildContext context, required Widget child, double widt
 /// The sheet of plans: pick one and how often to pay, then check out on the
 /// website. [title] says why it opened; [cloud] when it's for something
 /// only ListenJar Cloud does, which leaves Local out. Someone who pays
-/// already (on Local) changes plans in the billing portal instead.
+/// already (on Local) changes plans in the billing portal instead. Without
+/// [sellsPlans], only that the plan doesn't include it: no prices, no link.
 Future<void> showPlans(BuildContext context, {String title = 'Keep what you add', bool cloud = false}) => showDialog<void>(
   context: context,
-  builder: (_) => _PlansSheet(title: title, cloud: cloud, paid: isPaid(Services.of(context).account.user)),
+  builder: (_) => sellsPlans
+    ? _PlansSheet(title: title, cloud: cloud, paid: isPaid(Services.of(context).account.user))
+    : _NotInPlanSheet(title: title),
 );
 
 /// What ListenJar Cloud adds to every plan's perks, as the pricing page puts it.
 const _cloudPerk = 'ListenJar Cloud: they play in any podcast app';
+
+final class _NotInPlanSheet extends StatelessWidget {
+  const _NotInPlanSheet({required this.title});
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return _sheet(
+      context: context,
+      width: 420,
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: text.titleLarge),
+        const SizedBox(height: 10),
+        Text('Your plan doesn’t include this.', style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
+        const SizedBox(height: 22),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            style: brand.button(brand.Tone.ink),
+            autofocus: true,
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ),
+      ]),
+    );
+  }
+}
 
 final class _PlansSheet extends StatefulWidget {
   const _PlansSheet({required this.title, required this.cloud, required this.paid});
