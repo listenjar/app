@@ -38,9 +38,14 @@ Uri? feedUrl(String input) {
   if (text.contains(' ')) return null;
   final uri = Uri.tryParse(text);
   if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https') || uri.host.isEmpty) return null;
-  if (!RegExp(r'^[\w-]+(\.[\w-]+)+$').hasMatch(uri.host) && uri.host != 'localhost') return null;
+  if (!_host.hasMatch(uri.host) && !_ipv4.hasMatch(uri.host) && uri.host != 'localhost') return null;
   return uri;
 }
+
+/// A name ending in a top-level domain: two letters or more, or an
+/// internationalized one, so words like `f.e.a.r` or `1.5` stay a search.
+final _host = RegExp(r'^[\w-]+(\.[\w-]+)*\.([a-z]{2,}|xn--[a-z0-9-]+)$', caseSensitive: false);
+final _ipv4 = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
 
 String _prepare(String url) {
   final lower = url.toLowerCase();
