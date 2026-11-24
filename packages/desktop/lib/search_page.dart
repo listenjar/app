@@ -56,6 +56,12 @@ final class _SearchPageState extends State<SearchPage> {
   final _podcastCache = <String, List<DirectoryPodcast>>{};
   final _youtubeCache = <String, List<SearchResult>>{};
 
+  /// Pasted YouTube links looked up, by link: as search would list them, or
+  /// why YouTube couldn't say.
+  final _linked = <String, SearchResult>{};
+  final _linkFailed = <String, Object>{};
+  final _lookingUp = <String>{};
+
   /// Something being opened or added: its feed or video link.
   final _busy = <String>{};
 
@@ -132,6 +138,29 @@ final class _SearchPageState extends State<SearchPage> {
     if (_youtubeLink != null && _mode != _Mode.youtube) _mode = _Mode.youtube;
     setState(() {});
     unawaited(_search());
+  }
+
+  /// What a pasted link is: its title, thumbnail and channel, once.
+  Future<void> _lookUp(YouTubeLink link) async {
+    if (!mounted || _linked.containsKey(link.url) || _linkFailed.containsKey(link.url) || !_lookingUp.add(link.url)) return;
+    setState(() {});
+    final s = Services.of(context);
+    final token = _life.merge(TimeoutCancellationToken(const Duration(seconds: 30)));
+    try {
+      final source = SourceRef(switch (link.kind) {
+        SourceKind.video => SourceRefKind.video,
+        SourceKind.playlist => SourceRefKind.playlist,
+        SourceKind.channel => SourceRefKind.channel,
+      }, link.id, link.url);
+      final found = await (await s.youtube.session(token)).lookup(source, token);
+      _linked[link.url] = found;
+    } catch (e) {
+      if (_life.isCancelled) return;
+      _linkFailed[link.url] = e;
+    } finally {
+      _lookingUp.remove(link.url);
+      if (mounted) setState(() {});
+    }
   }
 
   void _setMode(_Mode mode) {
@@ -299,7 +328,7 @@ final class _SearchPageState extends State<SearchPage> {
         child: Row(children: [
           SizedBox.square(
             dimension: 20,
-            child: _searching != null
+            child: _searching != null || _lookingUp.isNotEmpty
               ? const Padding(padding: EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 2, color: brand.accent))
               : Icon(
                   _youtubeLink != null || _feed != null ? Icons.link_rounded : Icons.search_rounded,
@@ -401,7 +430,13 @@ final class _SearchPageState extends State<SearchPage> {
 
   List<Widget> _results(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    if (_youtubeLink case final link?) return [_linkCard(context, link)];
+    if (_youtubeLink case final link?) {
+      if (_linked[link.url] case final r?) return [rowsPanel([_youtubeRow(context, r)])];
+      // Should YouTube not say, the link still plays or follows as it is.
+      if (_linkFailed.containsKey(link.url)) return [_linkCard(context, link)];
+      WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_lookUp(link)));
+      return [const _ResultsSkeleton(rows: 1)];
+    }
     if (_feed case final url?) return [_feedCard(context, url)];
     final key = '${_mode.name}:$_query';
     if (_query.isEmpty) return _mode == _Mode.podcasts ? _chartsList(context) : [_youtubeIntro(context)];
@@ -789,11 +824,12 @@ final class _Spinner extends StatelessWidget {
 
 /// Rows of grey while results come, the shape of what's coming.
 final class _ResultsSkeleton extends StatelessWidget {
-  const _ResultsSkeleton();
+  const _ResultsSkeleton({this.rows = 5});
+  final int rows;
 
   @override
   Widget build(BuildContext context) => rowsPanel([
-    for (var i = 0; i < 5; i++)
+    for (var i = 0; i < rows; i++)
       Padding(
         padding: const EdgeInsets.all(10),
         child: Row(children: [

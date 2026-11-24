@@ -283,6 +283,35 @@ final class YouTube {
     }
   }
 
+  /// A pasted link as search would list it: its title, thumbnail and, for a
+  /// video, the channel, length and views.
+  Future<SearchResult> lookup(SourceRef source, CancellationToken token) async {
+    if (source.kind != SourceRefKind.video) {
+      final resolved = await resolve(source, token);
+      final id = source.kind == SourceRefKind.channel ? Uri.parse(resolved.url).pathSegments.last : source.id;
+      return SearchResult(kind: source.kind, id: id, url: resolved.url, title: resolved.title, details: const [], thumbnailUrl: resolved.artworkUrl);
+    }
+    final (info, reason) = await traced(_log, 'lookup video ${source.id}', () => _playerInfo(source.id, InnerTubeClient.WEB, token));
+    if (info == null) throw StateError(reason ?? 'YouTube returned nothing for ${source.id}');
+    final basic = info.basic_info;
+    final title = basic.title?.trim() ?? '';
+    final author = basic.author?.trim() ?? '';
+    final seconds = _seconds(basic.duration);
+    return SearchResult(
+      kind: SourceRefKind.video,
+      id: source.id,
+      url: 'https://www.youtube.com/watch?v=${source.id}',
+      title: title.isEmpty ? 'YouTube video ${source.id}' : title,
+      details: [
+        if (author.isNotEmpty) author,
+        if (seconds != null && seconds > 0) _clock(seconds),
+        if (basic.view_count case final views?) '${_compact(views)} views',
+        ?reason,
+      ],
+      thumbnailUrl: _thumbnail(basic.thumbnail),
+    );
+  }
+
   /// What YouTube's search finds for [query] that can become a feed, in
   /// YouTube's order: no Shorts shelves, live streams or mixes.
   Future<List<SearchResult>> search(String query, CancellationToken token) async {
@@ -739,6 +768,25 @@ String _reasonText(YT.IPlayabilityStatus status) {
   };
   if (detail.isNotEmpty && detail != reason) return reason.isEmpty ? detail : '$reason: $detail';
   return reason.isEmpty ? 'YouTube playback unavailable' : reason;
+}
+
+/// `1:02:03`, `4:05`, as search shows a video's length.
+String _clock(int seconds) {
+  final h = seconds ~/ 3600;
+  final m = (seconds % 3600) ~/ 60;
+  final s = (seconds % 60).toString().padLeft(2, '0');
+  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:$s' : '$m:$s';
+}
+
+/// `950`, `12K`, `1.2M`, `3B`, as search shows a count of views.
+String _compact(int n) {
+  for (final (size, suffix) in const [(1000000000, 'B'), (1000000, 'M'), (1000, 'K')]) {
+    if (n >= size) {
+      final v = n / size;
+      return '${v >= 10 ? v.floor() : (v * 10).floor() / 10}$suffix'.replaceFirst('.0$suffix', suffix);
+    }
+  }
+  return '$n';
 }
 
 /// The largest thumbnail, as an https URL.
