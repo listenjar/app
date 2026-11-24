@@ -178,7 +178,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: Only paying listeners add playlists, channels and podcasts of their own.
+          description: Only listeners with ListenJar Cloud (10 GB, 100 GB) add playlists, channels and podcasts of their own; not Free or Local.
   /me/feeds/events:
     get:
       operationId: watchMyFeeds
@@ -251,7 +251,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: Podcasts of the listener's own take artwork while the listener pays.
+          description: Podcasts of the listener's own take artwork while the listener has ListenJar Cloud (10 GB, 100 GB).
         "404":
           description: The listener has no feed with that id.
   /me/feeds/{feedId}/image/complete:
@@ -338,7 +338,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: The feed is a playlist, channel or podcast of the listener's own, and the listener no longer pays.
+          description: The feed is a playlist, channel or podcast of the listener's own, and the listener no longer has ListenJar Cloud (10 GB, 100 GB).
         "404":
           description: The listener has no feed with that id.
         "507":
@@ -839,9 +839,13 @@ components:
       type: string
       enum: [free, paid]
       description: >-
-        `paid` while a 10 GB or 100 GB subscription bought by this account
-        (or with its email) is live. Free listeners add videos only, each its
-        own podcast for a day.
+        `paid` while a Local, 10 GB or 100 GB subscription bought by this
+        account (or with its email) is live: the app's paid features, such as
+        following YouTube playlists and channels and podcasts of the
+        listener's own on their device. `User.storageLimitBytes` says whether
+        it also has ListenJar Cloud; Local doesn't. Without the Cloud (Free,
+        Local), listeners add videos to it only, each its own podcast for a
+        day.
     User:
       type: object
       required: [id, email, name, plan]
@@ -863,7 +867,10 @@ components:
         storageLimitBytes:
           type: integer
           minimum: 1
-          description: What the listener's plan stores, in bytes (10 or 100 GB). Absent on the free plan.
+          description: >-
+            What the listener's plan stores in ListenJar Cloud, in bytes (10
+            or 100 GB). Absent without the Cloud: on the free plan and on
+            Local, whose plan is still `paid`.
         storageUsedBytes:
           type: integer
           minimum: 0

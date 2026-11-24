@@ -12,7 +12,8 @@
 // picks. A YouTube video becomes a podcast of a single episode in the
 // library, free; on a paid plan the listener may add it to a podcast of
 // their own instead, on this device or in the Cloud. Any other link goes to search, which knows
-// podcast feeds.
+// podcast feeds. Local pays for everything on this device; what goes to the
+// Cloud takes 10 GB or 100 GB (mayUseCloud).
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
@@ -23,12 +24,12 @@ import 'package:jni/jni.dart';
 import 'package:objective_c/objective_c.dart' as objc;
 import 'package:material_ui/material_ui.dart';
 
-import 'backend/api.dart' show Feed, Plan, SourceKind;
+import 'backend/api.dart' show Feed, SourceKind;
 import 'library.dart' show Podcast;
 import 'config.dart' show appScheme;
 import 'links.dart';
 import 'log.dart';
-import 'plans.dart' show askNewPodcast, showPlans;
+import 'plans.dart' show askNewPodcast, cloudPlanHint, hasCloud, isPaid, showPlans;
 import 'shared_links.g.dart' as android;
 import 'shared_links_ios.g.dart' as ios;
 import 'sync.dart' show PlanLimit;
@@ -142,8 +143,7 @@ Future<void> openLink(BuildContext context, Uri link) async {
     await followYouTube(context, youtube, 'this ${kindLabel(youtube.kind)}');
     return;
   }
-  final user = s.account.user;
-  if (user != null && user.plan != Plan.free) {
+  if (isPaid(s.account.user)) {
     final choice = await _askWhere(context);
     if (choice == null || !context.mounted) return;
     await switch (choice) {
@@ -210,7 +210,12 @@ Future<bool?> _askHowToFollow(BuildContext context, String what) {
         constraints: const BoxConstraints(maxWidth: 440),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           option(Icons.smart_display_outlined, 'On this device', followLocalHint, false),
-          option(Icons.cloud_outlined, 'In ListenJar Cloud', followCloudHint, true),
+          option(
+            Icons.cloud_outlined,
+            'In ListenJar Cloud',
+            hasCloud(Services.of(context).account.user) ? followCloudHint : cloudPlanHint,
+            true,
+          ),
         ]),
       ),
       actions: [
@@ -227,15 +232,28 @@ const followLocalHint = 'Streams each video from YouTube when you play it. Nothi
 const followCloudHint = 'This device uploads every video, for any podcast app. Uses your storage.';
 
 /// Adds [url] to ListenJar Cloud as a feed of its own, and opens it in the
-/// Library.
-Future<void> addToCloud(BuildContext context, String url) => _guard(context, () async {
+/// Library. Without the Cloud, offers the plans that have it.
+Future<void> addToCloud(BuildContext context, String url) async {
+  if (!await mayUseCloud(context, 'Follow it in ListenJar Cloud') || !context.mounted) return;
+  await _guard(context, () async {
   final s = Services.of(context);
   final navigation = Navigation.of(context);
   tell(context, 'Adding it to ListenJar Cloud…');
   final feed = await s.feeds.add(url, CancellationToken().merge(TimeoutCancellationToken(const Duration(minutes: 2))));
   navigation.openFeed(feed.id);
   if (context.mounted) tell(context, '“${feed.title}” is now a ListenJar feed. Its episodes arrive as this device syncs them.');
-});
+  });
+}
+
+/// Whether the listener's plan has ListenJar Cloud (10 GB, 100 GB). On
+/// Local it doesn't: offers the plans that have it, under [title]. Signed
+/// out or free, callers have asked [mayFollowInCloud] and the like first.
+Future<bool> mayUseCloud(BuildContext context, String title) async {
+  final user = Services.of(context).account.user;
+  if (hasCloud(user)) return true;
+  await showPlans(context, title: title, cloud: true);
+  return false;
+}
 
 /// Whether the listener may follow [what] (“Lex Fridman”, this YouTube
 /// channel), on this device or in ListenJar Cloud: both take a plan. If they
@@ -253,7 +271,7 @@ Future<bool> mayFollowInCloud(BuildContext context, String what) async {
     );
     return false;
   }
-  if (user.plan == Plan.free) {
+  if (!isPaid(user)) {
     await showPlans(context, title: 'Follow playlists and channels');
     return false;
   }
@@ -275,11 +293,7 @@ Future<bool> mayAddVideoToCloud(BuildContext context) async {
     );
     return false;
   }
-  if (user.plan == Plan.free) {
-    await showPlans(context, title: 'Podcasts of your own');
-    return false;
-  }
-  return true;
+  return mayUseCloud(context, 'Make it a podcast with ListenJar Cloud');
 }
 
 /// Whether the listener may make a podcast of their own. If they can't,
@@ -296,7 +310,7 @@ Future<bool> mayMakePodcast(BuildContext context) async {
     );
     return false;
   }
-  if (user.plan == Plan.free) {
+  if (!isPaid(user)) {
     await showPlans(context, title: 'Podcasts of your own');
     return false;
   }
@@ -370,6 +384,8 @@ Future<OwnPodcast?> newOwnPodcast(BuildContext context) async {
   final asked = await askNewPodcast(context);
   if (asked == null || !context.mounted) return null;
   final s = Services.of(context);
+  if (asked.cloud && !await mayUseCloud(context, 'Podcasts of your own in ListenJar Cloud')) return null;
+  if (!context.mounted) return null;
   OwnPodcast? made;
   await _guard(context, () async {
     made = asked.cloud ? CloudOwn(await s.feeds.create(asked.title)) : LocalOwn(s.library.createOwn(asked.title));
@@ -388,6 +404,9 @@ Future<OwnPodcast?> addVideoToOwnPodcast(BuildContext context, String url, OwnPo
   if (!context.mounted) return null;
   final target = own ?? await newOwnPodcast(context);
   if (target == null || !context.mounted) return null;
+  // One of theirs in the Cloud from when the plan had it.
+  if (target is CloudOwn && !await mayUseCloud(context, 'Add to “${target.title}” in ListenJar Cloud')) return null;
+  if (!context.mounted) return null;
   final s = Services.of(context);
   final token = TimeoutCancellationToken(const Duration(minutes: 2));
   var added = false;
@@ -409,7 +428,7 @@ Future<void> _guard(BuildContext context, Future<void> Function() action) async 
   try {
     await action();
   } on PlanLimit {
-    if (context.mounted) await showPlans(context, title: 'Your storage is full');
+    if (context.mounted) await showPlans(context, title: 'Your storage is full', cloud: true);
   } catch (e, stack) {
     _log.warning('Couldn’t add a shared link', e, stack);
     if (context.mounted) tell(context, 'Couldn’t add that: $e');

@@ -46,15 +46,17 @@ final class PlanLimit implements Exception {
   const PlanLimit(this.message, {this.storageFull = false});
   final String message;
 
-  /// 507: the plan's storage is full. Otherwise 402: the free plan doesn't
-  /// take it.
+  /// 507: the plan's storage is full. Otherwise 402: the plan has no
+  /// ListenJar Cloud (Free, Local), which this takes.
   final bool storageFull;
 
   static const pricing = 'listenjar.com/pricing';
 
   /// 402 and 507 from the API, as the listener reads them.
   static PlanLimit? of(Object e) => switch (e) {
-    ApiStatusException(statusCode: 402) => const PlanLimit('Playlists, channels and podcasts of your own need a plan: $pricing'),
+    ApiStatusException(statusCode: 402) => const PlanLimit(
+      'Playlists, channels and podcasts of your own in ListenJar Cloud need a 10 GB or 100 GB plan: $pricing',
+    ),
     ApiStatusException(statusCode: 507) => const PlanLimit(
       'Your plan’s storage is full. Remove episodes or pick a bigger plan: $pricing',
       storageFull: true,

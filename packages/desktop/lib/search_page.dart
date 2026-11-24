@@ -179,7 +179,13 @@ final class _SearchPageState extends State<SearchPage> {
     try {
       await action();
     } on PlanLimit catch (e) {
-      if (mounted) await showPlans(context, title: e.storageFull ? 'Your storage is full' : 'Follow playlists and channels');
+      if (mounted) {
+        await showPlans(
+          context,
+          title: e.storageFull ? 'Your storage is full' : 'Follow playlists and channels',
+          cloud: e.storageFull || isPaid(Services.of(context).account.user),
+        );
+      }
     } catch (e) {
       if (mounted) tell(context, '$failed: $e');
     } finally {

@@ -85,6 +85,7 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
       null => 'signed out',
       final user => {
         'plan': user.plan,
+        'cloud': user.storageLimitBytes != null,
         'feeds': [
           for (final f in s.feeds.feeds)
             {'id': f.id, 'kind': f.source?.kind.name ?? 'own', 'sync': s.feeds.statusOf(f)?.phase.name, 'show': s.library.podcasts.where((p) => p.cloudFeedId == f.id).firstOrNull?.id},

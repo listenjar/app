@@ -3,6 +3,11 @@
 // (prices from lib/pricing, `moon run desktop:codegen`), the sheet that makes
 // room when the storage is full, and naming a podcast of their own. The
 // backend decides what a plan allows (public.yaml); this only shows it.
+//
+// Every plan unlocks the paid features on this device: following YouTube
+// playlists and channels, and podcasts of the listener's own. Local stops
+// there; 10 GB and 100 GB add ListenJar Cloud, which hosts them for any
+// podcast app.
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
@@ -16,6 +21,7 @@ import 'links.dart';
 import 'marks.dart';
 import 'pricing/catalog.dart' as pricing;
 import 'theme.dart' as brand;
+import 'ui.dart' show Services;
 
 /// What every plan adds to Free, as the pricing page puts it.
 const _planPerks = [
@@ -23,15 +29,25 @@ const _planPerks = [
   'Podcasts of your own: any videos, one feed',
 ];
 
-/// The catalog plan the listener pays for, by its storage.
-pricing.Plan? catalogPlan(User user) =>
-  pricing.plans.where((p) => p.storageBytes == user.storageLimitBytes).firstOrNull;
+/// Whether the listener's plan unlocks the paid features on this device:
+/// any plan, Local included.
+bool isPaid(User? user) => user?.plan == Plan.paid;
 
-/// A bigger plan than the listener's, if there is one.
+/// Whether the listener's plan has ListenJar Cloud: 10 GB or 100 GB. Local
+/// pays without it.
+bool hasCloud(User? user) => user?.plan == Plan.paid && user?.storageLimitBytes != null;
+
+/// The catalog plan the listener pays for, by its storage (none for Local).
+pricing.Plan? catalogPlan(User user) => switch (user.plan) {
+  Plan.free => null,
+  Plan.paid => pricing.plans.where((p) => p.storageBytes == (user.storageLimitBytes ?? 0)).firstOrNull,
+};
+
+/// A bigger Cloud plan than the listener's, if there is one.
 pricing.Plan? biggerPlan(User user) =>
-  pricing.plans.where((p) => p.storageBytes > (user.storageLimitBytes ?? 0)).firstOrNull;
+  pricing.plans.where((p) => p.cloud && p.storageBytes > (user.storageLimitBytes ?? 0)).firstOrNull;
 
-/// "10 GB" out of "ListenJar 10 GB".
+/// "10 GB" out of "ListenJar 10 GB", "Local" out of "ListenJar Local".
 String _size(pricing.Plan plan) => plan.name.replaceFirst(RegExp(r'^ListenJar\s+'), '');
 
 /// "10 GB plan", or "Free plan".
@@ -260,31 +276,41 @@ Widget _sheet({required BuildContext context, required Widget child, double widt
   ),
 );
 
-/// The sheet of plans: pick a size and how often to pay, then check out on
-/// the website. [title] says why it opened.
-Future<void> showPlans(BuildContext context, {String title = 'Keep what you add'}) => showDialog<void>(
+/// The sheet of plans: pick one and how often to pay, then check out on the
+/// website. [title] says why it opened; [cloud] when it's for something
+/// only ListenJar Cloud does, which leaves Local out. Someone who pays
+/// already (on Local) changes plans in the billing portal instead.
+Future<void> showPlans(BuildContext context, {String title = 'Keep what you add', bool cloud = false}) => showDialog<void>(
   context: context,
-  builder: (context) => _PlansSheet(title: title),
+  builder: (_) => _PlansSheet(title: title, cloud: cloud, paid: isPaid(Services.of(context).account.user)),
 );
 
+/// What ListenJar Cloud adds to every plan's perks, as the pricing page puts it.
+const _cloudPerk = 'ListenJar Cloud: they play in any podcast app';
+
 final class _PlansSheet extends StatefulWidget {
-  const _PlansSheet({required this.title});
+  const _PlansSheet({required this.title, required this.cloud, required this.paid});
   final String title;
+  final bool cloud;
+  final bool paid;
 
   @override
   State<_PlansSheet> createState() => _PlansSheetState();
 }
 
 final class _PlansSheetState extends State<_PlansSheet> {
+  late final _plans = [for (final p in pricing.plans) if (p.cloud || !widget.cloud) p];
   var _interval = pricing.PlanInterval.monthly;
-  var _plan = pricing.plans.first;
+  late var _plan = _plans.first;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final price = _plan.price(_interval);
+    // Local is yearly only: picked on Monthly, it checks out yearly.
+    final price = _plan.price(_interval) ?? _plan.price(pricing.PlanInterval.yearly)!;
     return _sheet(
       context: context,
+      width: _plans.length > 2 ? 620 : 520,
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Expanded(child: Text(widget.title, style: text.titleLarge)),
@@ -296,7 +322,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
           ),
         ]),
         const SizedBox(height: 12),
-        for (final perk in _planPerks)
+        for (final perk in [..._planPerks, if (widget.cloud) _cloudPerk])
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Row(children: [
@@ -309,7 +335,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
         _IntervalSwitch(value: _interval, onChanged: (v) => setState(() => _interval = v)),
         const SizedBox(height: 14),
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          for (final (i, plan) in pricing.plans.indexed) ...[
+          for (final (i, plan) in _plans.indexed) ...[
             if (i > 0) const SizedBox(width: 12),
             Expanded(
               child: _PlanTile(
@@ -325,7 +351,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
         Row(children: [
           Expanded(
             child: Text(
-              'Checkout opens in your browser.',
+              widget.paid ? 'Your plan changes in your browser.' : 'Checkout opens in your browser.',
               style: text.bodySmall!.copyWith(color: brand.fgSoft),
             ),
           ),
@@ -337,11 +363,11 @@ final class _PlansSheetState extends State<_PlansSheet> {
               autofocus: true,
               onPressed: () {
                 Navigator.pop(context);
-                unawaited(openInBrowser(context, checkoutUrl(price)));
+                unawaited(openInBrowser(context, widget.paid ? billingUrl : checkoutUrl(price)));
               },
               iconAlignment: IconAlignment.end,
               icon: const Arrow(),
-              label: Text('Get ${_size(_plan)}'),
+              label: Text(widget.paid ? 'Move to ${_size(_plan)}' : 'Get ${_size(_plan)}'),
             ),
           ),
         ]),
@@ -412,9 +438,11 @@ final class _PlanTileState extends State<_PlanTile> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final plan = widget.plan;
-    final price = plan.price(widget.interval);
+    // Local sells only yearly.
+    final price = plan.price(widget.interval) ?? plan.price(pricing.PlanInterval.yearly)!;
     final tabular = const [FontFeature.tabularFigures()];
-    final per = switch (widget.interval) {
+    final per = switch (price.interval) {
+      _ when price.interval != widget.interval => 'Yearly only',
       pricing.PlanInterval.monthly => 'Billed every month',
       pricing.PlanInterval.yearly => '${_money((price.amount / 12).round(), price.currency)} a month, billed yearly',
     };
@@ -445,10 +473,15 @@ final class _PlanTileState extends State<_PlanTile> {
                   child: const Icon(Icons.check_circle_rounded, size: 20, color: brand.accent),
                 ),
               ]),
-              if (_hours(plan) case final hours?) ...[
-                const SizedBox(height: 2),
-                Text('$hours of audio', style: text.bodySmall!.copyWith(color: brand.fgSoft)),
-              ],
+              const SizedBox(height: 2),
+              Text(
+                switch (_hours(plan)) {
+                  _ when !plan.cloud => 'On your device, no Cloud',
+                  final hours? => '$hours in the Cloud',
+                  null => 'In the Cloud',
+                },
+                style: text.bodySmall!.copyWith(color: brand.fgSoft),
+              ),
               const SizedBox(height: 14),
               Text.rich(
                 TextSpan(children: [
@@ -457,7 +490,7 @@ final class _PlanTileState extends State<_PlanTile> {
                     style: text.titleLarge!.copyWith(fontFeatures: tabular),
                   ),
                   TextSpan(
-                    text: switch (widget.interval) {
+                    text: switch (price.interval) {
                       pricing.PlanInterval.monthly => ' / month',
                       pricing.PlanInterval.yearly => ' / year',
                     },
@@ -480,14 +513,23 @@ final class _PlanTileState extends State<_PlanTile> {
 /// in ListenJar Cloud or on this device.
 typedef NewPodcast = ({String title, bool cloud});
 
-/// Asks what to call a new podcast of the listener's own and where to keep it.
-Future<NewPodcast?> askNewPodcast(BuildContext context) => showDialog<NewPodcast>(
-  context: context,
-  builder: (context) => const _NewPodcastSheet(),
-);
+/// Asks what to call a new podcast of the listener's own and where to keep
+/// it: in the Cloud by default on a plan that has it, on this device on
+/// Local.
+Future<NewPodcast?> askNewPodcast(BuildContext context) {
+  final cloud = hasCloud(Services.of(context).account.user);
+  return showDialog<NewPodcast>(
+    context: context,
+    builder: (context) => _NewPodcastSheet(hasCloud: cloud),
+  );
+}
 
 final class _NewPodcastSheet extends StatefulWidget {
-  const _NewPodcastSheet();
+  const _NewPodcastSheet({required this.hasCloud});
+
+  /// Whether the plan has ListenJar Cloud; on Local, picking it leads to
+  /// the plans that do.
+  final bool hasCloud;
 
   @override
   State<_NewPodcastSheet> createState() => _NewPodcastSheetState();
@@ -495,7 +537,7 @@ final class _NewPodcastSheet extends StatefulWidget {
 
 final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
   final _title = TextEditingController();
-  bool _cloud = true;
+  late bool _cloud = widget.hasCloud;
 
   @override
   void initState() {
@@ -587,7 +629,7 @@ final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
         const SizedBox(height: 14),
         _where(text, cloud: false, icon: Icons.laptop_mac_rounded, title: 'On this device', body: ownLocalHint),
         const SizedBox(height: 8),
-        _where(text, cloud: true, icon: Icons.cloud_outlined, title: 'In ListenJar Cloud', body: ownCloudHint),
+        _where(text, cloud: true, icon: Icons.cloud_outlined, title: 'In ListenJar Cloud', body: widget.hasCloud ? ownCloudHint : cloudPlanHint),
         const SizedBox(height: 22),
         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
           TextButton(
@@ -615,6 +657,9 @@ const ownLocalHint = 'Its videos stream from YouTube when you play them. Only th
 
 /// What keeping it in ListenJar Cloud means, in a line.
 const ownCloudHint = 'This device uploads each video you add, for any podcast app. Uses your storage.';
+
+/// What the Cloud takes, for a listener on Local.
+const cloudPlanHint = 'For any podcast app. Takes a 10 GB or 100 GB plan.';
 
 /// Making room in a full plan: the listener's podcasts by how much they
 /// store, each removable; the episodes of their own podcasts one by one. A

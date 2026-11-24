@@ -62,14 +62,26 @@ class Plan {
 
   final String name;
   final String description;
+
+  /// What it stores in ListenJar Cloud; 0 for Local, which has no Cloud.
   final int storageBytes;
+
+  /// A yearly price, and maybe a monthly one; cheapest first.
   final List<PlanPrice> prices;
 
-  PlanPrice price(PlanInterval interval) =>
-      prices.firstWhere((price) => price.interval == interval);
+  /// Whether it has ListenJar Cloud: 10 GB and 100 GB do, Local doesn't.
+  bool get cloud => storageBytes > 0;
+
+  /// Its price for [interval], if it sells one (Local is yearly only).
+  PlanPrice? price(PlanInterval interval) {
+    for (final price in prices) {
+      if (price.interval == interval) return price;
+    }
+    return null;
+  }
 }
 
-/// The paid plans, smallest first.
+/// The paid plans, smallest first: Local, then the Cloud ones.
 const plans = <Plan>[
 ${plans}
 ];

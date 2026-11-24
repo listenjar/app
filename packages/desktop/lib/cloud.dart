@@ -28,7 +28,7 @@ import 'podcast_apps.dart';
 import 'podcasts.dart' show Podcasts;
 import 'library.dart' show Podcast;
 import 'links.dart' show parseYouTubeLink;
-import 'shared_links.dart' show CloudOwn, LocalOwn, mayFollowInCloud, mayMakePodcast, newOwnPodcast;
+import 'shared_links.dart' show CloudOwn, LocalOwn, mayFollowInCloud, mayMakePodcast, mayUseCloud, newOwnPodcast;
 import 'shell.dart' show PageBody, backButton;
 import 'sign_in_form.dart';
 import 'sync.dart';
@@ -149,6 +149,7 @@ Future<void> moveToCloud(BuildContext context, Podcast show) async {
   if (!own && parseYouTubeLink(show.feedUrl) == null) return;
   final may = own ? await mayMakePodcast(context) : await mayFollowInCloud(context, '“${show.title}”');
   if (!may || !context.mounted) return;
+  if (!await mayUseCloud(context, 'Move “${show.title}” to ListenJar Cloud') || !context.mounted) return;
   final sure = await _confirm(
     context,
     title: 'Move “${show.title}” to ListenJar Cloud?',
@@ -170,7 +171,7 @@ Future<void> moveToCloud(BuildContext context, Podcast show) async {
     if (navigator.canPop()) navigator.pop();
     navigation.openFeed(feed.id);
   } on PlanLimit {
-    if (context.mounted) await showPlans(context, title: 'Your storage is full');
+    if (context.mounted) await showPlans(context, title: 'Your storage is full', cloud: true);
   } catch (e) {
     if (context.mounted) tell(context, failure('Couldn’t move it', e, other: 'Try again.'));
   }
@@ -404,7 +405,7 @@ final class _ListenInState extends State<ListenIn> {
     case FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true), :final waiting):
       return (waiting > 0 ? 'Storage full · $waiting waiting to upload' : 'Storage full', true);
     case FeedSync(phase: FeedPhase.failed, error: PlanLimit()):
-      return ('Paused until you have a plan', true);
+      return ('Paused: takes a 10 GB or 100 GB plan', true);
     case FeedSync(phase: FeedPhase.upToDate, episodes: 0) when feed.source == null:
       return ('No episodes yet', false);
   }
@@ -435,7 +436,7 @@ final class _ListenInState extends State<ListenIn> {
 /// nothing to say, so the tile says who makes the show.
 (String, bool)? feedTileStatus(Feed feed, FeedSync? sync, {required bool playable}) => switch (sync) {
   FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true)) => ('Storage full', true),
-  FeedSync(phase: FeedPhase.failed, error: PlanLimit()) => ('Paused until you have a plan', true),
+  FeedSync(phase: FeedPhase.failed, error: PlanLimit()) => ('Paused: takes a 10 GB or 100 GB plan', true),
   FeedSync(phase: FeedPhase.failed) => ('Couldn’t sync', true),
   FeedSync(phase: FeedPhase.scanning) => ('Checking YouTube…', false),
   FeedSync(phase: FeedPhase.syncing, :final stage?, :final fraction?) => ('$stage ${(fraction * 100).floor()}%', false),
@@ -542,7 +543,7 @@ final class _AccountPanelState extends State<AccountPanel> {
           if (limit != null) ...[StorageMeter(used: used, limit: limit), const SizedBox(width: 10)],
           Flexible(
             child: Text(
-              limit == null ? 'Playlists, channels and podcasts of your own' : '${formatBytes(used)} of ${formatBytes(limit)} used',
+              limit == null ? 'Playlists, channels and podcasts of your own, on this device' : '${formatBytes(used)} of ${formatBytes(limit)} used',
               style: soft.copyWith(
                 color: used >= (limit ?? 1 << 62) ? brand.danger : brand.fgSoft,
                 fontFeatures: const [FontFeature.tabularFigures()],

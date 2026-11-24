@@ -3,6 +3,10 @@
 // (`moon run root:pricing-sync`) and committed here. Only what the apps read:
 // the backend maps product ids to storage and checks lookup keys, the web
 // pricing page and the desktop app (tool/pricing-dart.ts) show the rest.
+//
+// Every plan unlocks the paid features. Local (storage_bytes 0) keeps them on
+// the listener's device; 10 GB and 100 GB add ListenJar Cloud, which hosts
+// that much audio.
 // Every app reads the live catalog. The sandbox's (catalog.test.json) must
 // match it, which `root:pricing-check` enforces, so dev checks out in the
 // sandbox exactly what production sells.
@@ -24,7 +28,9 @@ export interface Plan {
   product_id: string
   name: string
   description: string
+  /** What it stores in ListenJar Cloud; 0 for Local, which has no Cloud. */
   storage_bytes: number
+  /** A yearly price, and maybe a monthly one; cheapest first. */
   prices: PlanPrice[]
 }
 
@@ -34,12 +40,17 @@ export interface PricingCatalog {
 
 export const CATALOG: PricingCatalog = live as PricingCatalog
 
-/** The paid plans, smallest first. */
+/** The paid plans, smallest first: Local, then the Cloud ones. */
 export const PLANS: readonly Plan[] = CATALOG.plans
 
-/** A plan's price for the interval. */
-export const planPrice = (plan: Plan, interval: Interval): PlanPrice =>
-  plan.prices.find(price => price.interval === interval)!
+/** Whether the plan has ListenJar Cloud: 10 GB and 100 GB do, Local doesn't. */
+export const hasCloud = (plan: Plan): boolean => plan.storage_bytes > 0
+
+/** A plan's price for the interval, if it sells one (Local is yearly only). */
+export const planPrice = (
+  plan: Plan,
+  interval: Interval,
+): PlanPrice | undefined => plan.prices.find(price => price.interval === interval)
 
 /** The plan selling this lookup key, if any. */
 export const planByLookupKey = (key: string): Plan | undefined =>
