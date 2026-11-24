@@ -235,7 +235,11 @@ final class PlayButton extends StatelessWidget {
                 hoverColor: onInk ? brand.paperDeep : const Color(0xFF23252D),
                 shape: const CircleBorder(),
               ),
-              onPressed: () => playing ? player.pause() : player.playEpisode(episode),
+              onPressed: () {
+                if (playing) return unawaited(player.pause());
+                doneTyping();
+                unawaited(player.playEpisode(episode));
+              },
               icon: loading
                 ? SizedBox.square(
                     dimension: size * 0.4,
@@ -250,16 +254,26 @@ final class PlayButton extends StatelessWidget {
   }
 }
 
+/// Whether focus is in a text field.
+bool get _typing {
+  final focus = FocusManager.instance.primaryFocus?.context;
+  return focus != null && (focus.widget is EditableText || focus.findAncestorWidgetOfExactType<EditableText>() != null);
+}
+
+/// Takes focus out of a text field, which hides the software keyboard, as
+/// pressing play does: the listener is done typing and wants to listen.
+/// Focus anywhere else stays, so keyboard navigation keeps its place.
+void doneTyping() {
+  if (_typing) FocusManager.instance.primaryFocus?.unfocus();
+}
+
 /// Space plays and pauses and [back] and [forward] skip, wherever focus
 /// is, except in a text field: there those keys type and move the cursor.
 Widget playerKeys({required Player player, required SingleActivator back, required SingleActivator forward, required Widget child}) => Focus(
   canRequestFocus: false,
   skipTraversal: true,
   onKeyEvent: (node, event) {
-    final focus = FocusManager.instance.primaryFocus?.context;
-    if (focus != null && (focus.widget is EditableText || focus.findAncestorWidgetOfExactType<EditableText>() != null)) {
-      return KeyEventResult.ignored;
-    }
+    if (_typing) return KeyEventResult.ignored;
     final keys = HardwareKeyboard.instance;
     if (const SingleActivator(LogicalKeyboardKey.space, includeRepeats: false).accepts(event, keys)) {
       unawaited(player.toggle());

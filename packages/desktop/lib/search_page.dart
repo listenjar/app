@@ -473,8 +473,14 @@ final class _SearchPageState extends State<SearchPage> {
         : r.kind != SourceRefKind.video
           ? () => unawaited(_follow(r.url, r.title))
           : episode != null
-            ? () => unawaited(Services.of(context).player.playEpisode(episode))
-            : () => unawaited(_playVideo(link, result: r)),
+            ? () {
+                doneTyping();
+                unawaited(Services.of(context).player.playEpisode(episode));
+              }
+            : () {
+                doneTyping();
+                unawaited(_playVideo(link, result: r));
+              },
       leading: _Thumbnail(result: r),
       title: r.title,
       subtitle: [?kind, ...r.details].join(' · '),
@@ -544,7 +550,10 @@ final class _SearchPageState extends State<SearchPage> {
             tooltip: 'Play',
             padding: EdgeInsets.zero,
             style: IconButton.styleFrom(backgroundColor: brand.ink, foregroundColor: brand.white, hoverColor: const Color(0xFF23252D)),
-            onPressed: () => unawaited(_playVideo(link, result: r)),
+            onPressed: () {
+              doneTyping();
+              unawaited(_playVideo(link, result: r));
+            },
             icon: const Icon(Icons.play_arrow_rounded, size: 22),
           ),
         ),
