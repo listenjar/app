@@ -105,6 +105,22 @@ const submitted = (await api("GET", `/v1/builds/${buildId}/betaAppReviewSubmissi
 if (submitted) {
   console.log(`${version} (${build}) is already in Beta App Review: ${submitted.attributes.betaReviewState}`)
 } else {
+  // Apple takes only a few builds into Beta App Review at once
+  // (SUBMISSION_LIMIT_REACHED), and a release goes out on every push. So only
+  // the newest build waits: expiring an older one that's still waiting is the
+  // API's only way to take it out of the queue. One Apple is reviewing, or has
+  // approved, stays.
+  const document = (await api("GET", `/v1/builds?filter[app]=${app.id}&filter[expired]=false`
+    + `&fields[builds]=version,betaAppReviewSubmission&include=betaAppReviewSubmission`
+    + `&fields[betaAppReviewSubmissions]=betaReviewState&limit=200`))! as Document & { included?: Resource[] }
+  const states = new Map((document.included ?? []).map(each => [each.id, each.attributes.betaReviewState]))
+  for (const older of document.data as (Resource & { relationships?: { betaAppReviewSubmission?: { data?: { id: string } | null } } })[]) {
+    const submission = older.relationships?.betaAppReviewSubmission?.data?.id
+    if (Number(older.attributes.version) >= Number(build) || !submission) continue
+    if (states.get(submission) !== "WAITING_FOR_REVIEW") continue
+    await api("PATCH", `/v1/builds/${older.id}`, { data: { type: "builds", id: older.id, attributes: { expired: true } } })
+    console.log(`Expired build ${older.attributes.version}, which was still waiting for Beta App Review`)
+  }
   await api("POST", "/v1/betaAppReviewSubmissions",
     { data: { type: "betaAppReviewSubmissions", relationships: { build: { data: { type: "builds", id: buildId } } } } })
   console.log(`Submitted ${version} (${build}) to Beta App Review`)

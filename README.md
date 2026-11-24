@@ -130,7 +130,8 @@ Every push to master releases the app:
    `desktop:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for
    the App Store, and [tool/testflight.ts](tool/testflight.ts) uploads it, waits for App Store
    Connect to process it, adds it to the external **Public** group and submits it to Beta App
-   Review. Anyone joins with the group's public link, up to 10,000 testers:
+   Review. Apple queues only a few builds for review, so older builds still waiting are expired
+   first: only the newest waits. Anyone joins with the group's public link, up to 10,000 testers:
    <https://testflight.apple.com/join/HHHDHV2a>; each build reaches them once Apple approves it,
    and expires after 90 days. The internal **Internal** group, for App Store Connect users, gets
    every build as soon as it's processed, with no review: add a team member to it in App Store
