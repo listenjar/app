@@ -6,6 +6,12 @@ class MainFlutterWindow: NSWindow {
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    // Flutter's view is black until Dart draws its first frame, which waits
+    // for the library, the player and the media controls (lib/main.dart), so
+    // the window opened black. It opens on paper, lib/theme.dart's ground.
+    let paper = NSColor(srgbRed: 0xF5 / 255, green: 0xF4 / 255, blue: 0xF0 / 255, alpha: 1)
+    flutterViewController.backgroundColor = paper
+    backgroundColor = paper
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)

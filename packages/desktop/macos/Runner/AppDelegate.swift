@@ -6,8 +6,7 @@ import Sparkle
 class AppDelegate: FlutterAppDelegate {
   // No super: Swift sees NSApplicationDelegate's optional method on
   // FlutterAppDelegate, but FlutterAppDelegate.mm doesn't implement it, so
-  // calling it throws "unrecognized selector" in the middle of launching,
-  // which leaves the window black.
+  // calling it throws "unrecognized selector" in the middle of launching.
   override func applicationDidFinishLaunching(_ notification: Notification) {
     Updates.shared?.addMenuItem()
   }
