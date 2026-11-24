@@ -15,7 +15,7 @@ import 'directory.dart';
 import 'library.dart' show PodcastEpisode;
 import 'links.dart';
 import 'menu.dart';
-import 'shared_links.dart' show OwnPodcast, addVideoToOwnPodcast, followYouTube, ownPodcast, ownPodcasts;
+import 'shared_links.dart' show OwnPodcast, addVideoToOwnPodcast, followYouTube, openApplePodcasts, ownPodcast, ownPodcasts;
 import 'plans.dart';
 import 'podcasts.dart' show feedUrl;
 import 'shell.dart';
@@ -195,6 +195,7 @@ final class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _openFeed(String url, {bool follow = false}) => _run(url, () async {
+    if (parseApplePodcastsLink(url) case final apple?) return openApplePodcasts(context, apple, Uri.parse(url), follow: follow);
     final s = Services.of(context);
     final navigator = Navigator.of(context);
     final show = await s.podcasts.open(Uri.parse(url), _life, follow: follow);
@@ -599,6 +600,7 @@ final class _SearchPageState extends State<SearchPage> {
 
   Widget _feedCard(BuildContext context, Uri url) {
     final text = Theme.of(context).textTheme;
+    final apple = parseApplePodcastsLink('$url') != null;
     return brand.panel(
       padding: 24,
       child: Row(children: [
@@ -606,12 +608,12 @@ final class _SearchPageState extends State<SearchPage> {
           width: 52,
           height: 52,
           decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(14)),
-          child: const Icon(Icons.rss_feed_rounded, color: brand.accent),
+          child: Icon(apple ? Icons.podcasts_rounded : Icons.rss_feed_rounded, color: brand.accent),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Podcast feed', style: text.titleMedium),
+            Text(apple ? 'Apple Podcasts link' : 'Podcast feed', style: text.titleMedium),
             const SizedBox(height: 4),
             Text('$url', maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall!.copyWith(color: brand.fgSoft)),
           ]),

@@ -57,3 +57,27 @@ String kindLabel(SourceKind kind) => switch (kind) {
   SourceKind.playlist => 'YouTube playlist',
   SourceKind.channel => 'YouTube channel',
 };
+
+/// An Apple Podcasts link: a show, and the episode when it names one
+/// (`podcasts.apple.com/us/podcast/name/id1200361736?i=1000803767035`).
+final class ApplePodcastsLink {
+  const ApplePodcastsLink(this.showId, this.episodeId);
+
+  /// Apple's id for the show, its `collectionId`.
+  final String showId;
+
+  /// Apple's id for the episode, its `trackId`.
+  final String? episodeId;
+}
+
+const _appleHosts = {'podcasts.apple.com', 'itunes.apple.com'};
+
+ApplePodcastsLink? parseApplePodcastsLink(String input) {
+  final text = input.trim();
+  final url = Uri.tryParse(RegExp(r'^https?://', caseSensitive: false).hasMatch(text) ? text : 'https://$text');
+  if (url == null || !_appleHosts.contains(url.host.toLowerCase())) return null;
+  final show = url.pathSegments.map(RegExp(r'^id(\d+)$').firstMatch).nonNulls.lastOrNull?.group(1);
+  if (show == null) return null;
+  final episode = url.queryParameters['i'];
+  return ApplePodcastsLink(show, episode != null && RegExp(r'^\d+$').hasMatch(episode) ? episode : null);
+}

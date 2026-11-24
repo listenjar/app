@@ -13,7 +13,10 @@
 // library, free; on a paid plan the listener may add it to a podcast of
 // their own instead, on this device or in the Cloud. Any other link goes to search, which knows
 // podcast feeds. Local pays for everything on this device; what goes to the
-// Cloud takes 10 GB or 100 GB (mayUseCloud).
+// Cloud takes 10 GB or 100 GB (mayUseCloud). An Apple Podcasts link opens
+// its show, and the episode it names, through Apple's directory. Links in
+// show notes open here too (openWebLink): a YouTube video to play, without
+// a question, and the rest as above, or in the browser.
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
@@ -23,6 +26,7 @@ import 'package:flutter/services.dart';
 import 'package:jni/jni.dart';
 import 'package:objective_c/objective_c.dart' as objc;
 import 'package:material_ui/material_ui.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'backend/api.dart' show Feed, SourceKind;
 import 'library.dart' show Podcast;
@@ -133,6 +137,10 @@ Uri? linkIn(String text) {
 Future<void> openLink(BuildContext context, Uri link) async {
   final s = Services.of(context);
   final navigation = Navigation.of(context);
+  if (parseApplePodcastsLink(link.toString()) case final apple?) {
+    await openApplePodcasts(context, apple, link);
+    return;
+  }
   final youtube = parseYouTubeLink(link.toString());
   _log.info('Opening $link as ${youtube?.kind.name ?? 'a search'}');
   if (youtube == null) {
@@ -156,6 +164,79 @@ Future<void> openLink(BuildContext context, Uri link) async {
     final episode = await s.podcasts.youtubeVideo(youtube, CancellationToken(), follow: true);
     navigation.openShow(episode.podcastId);
     if (context.mounted) tell(context, 'Added “${episode.title}” to your library.');
+  });
+}
+
+/// A link tapped in show notes. An Apple Podcasts show or episode opens
+/// here, as does a YouTube video, as a show of one, to play; a YouTube
+/// channel or playlist is followed, which takes a plan. Anything else
+/// opens in the browser.
+Future<void> openWebLink(BuildContext context, Uri url) async {
+  if (parseApplePodcastsLink(url.toString()) case final apple?) return openApplePodcasts(context, apple, url);
+  final youtube = parseYouTubeLink(url.toString());
+  if (youtube == null) {
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+    return;
+  }
+  _log.info('Opening $url from show notes as a ${youtube.kind.name}');
+  // Whatever it opens, opens in the window, under Now Playing or an
+  // episode sheet: those close first, and the root's context carries on.
+  final root = Navigator.of(context, rootNavigator: true);
+  root.popUntil((r) => r.isFirst);
+  final here = root.context;
+  if (youtube.kind != SourceKind.video) {
+    await followYouTube(here, youtube, 'this ${kindLabel(youtube.kind)}');
+    return;
+  }
+  final s = Services.of(here);
+  final navigation = Navigation.of(here);
+  await _guard(here, () async {
+    tell(here, 'Opening the video…');
+    final episode = await s.podcasts.youtubeVideo(youtube, TimeoutCancellationToken(const Duration(minutes: 1)));
+    if (!root.mounted) return;
+    ScaffoldMessenger.maybeOf(here)?.hideCurrentSnackBar();
+    navigation.openShow(episode.podcastId);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (root.mounted) unawaited(showEpisode(here, episode));
+    });
+  });
+}
+
+/// Opens the show an Apple Podcasts [link] names, and over it the episode
+/// when the link names one; closes Now Playing or an episode sheet first,
+/// as the show opens under them. Apple shares no feed for the shows it
+/// hosts itself: those open at [url], in the browser.
+Future<void> openApplePodcasts(BuildContext context, ApplePodcastsLink link, Uri url, {bool follow = false}) async {
+  final s = Services.of(context);
+  final navigation = Navigation.of(context);
+  final root = Navigator.of(context, rootNavigator: true);
+  _log.info('Opening $url as Apple Podcasts show ${link.showId}, episode ${link.episodeId}');
+  await _guard(context, () async {
+    tell(context, 'Opening it…');
+    final token = CancellationToken().merge(TimeoutCancellationToken(const Duration(minutes: 1)));
+    final found = await s.directory.applePodcast(link, token);
+    if (found == null) {
+      if (context.mounted) tell(context, 'Apple doesn’t share this show’s feed, so it opens in the browser.');
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+      return;
+    }
+    final show = await s.podcasts.open(Uri.parse(found.feedUrl), token, follow: follow);
+    final episode = switch (found.episodeGuid) {
+      final guid? => s.library.episodes(show.id).where((e) => e.guid == guid).firstOrNull,
+      null => null,
+    };
+    if (!root.mounted) return;
+    ScaffoldMessenger.maybeOf(root.context)?.hideCurrentSnackBar();
+    root.popUntil((r) => r.isFirst);
+    navigation.openShow(show.id);
+    if (episode != null) {
+      // Over the show page, once it's pushed.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (root.mounted) unawaited(showEpisode(root.context, episode));
+      });
+    } else if (link.episodeId != null) {
+      tell(root.context, 'Couldn’t find that episode in “${show.title}”.');
+    }
   });
 }
 

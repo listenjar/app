@@ -21,6 +21,7 @@ import 'feeds.dart';
 import 'library.dart';
 import 'menu.dart';
 import 'player.dart';
+import 'shared_links.dart' show openWebLink;
 import 'podcasts.dart';
 import 'theme.dart' as brand;
 import 'youtube.dart';
@@ -717,9 +718,12 @@ final class EpisodeSheet extends StatelessWidget {
 
 final _timestamp = RegExp(r'\b(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\b');
 
+/// `https://…`, `http://…` or `www.…`, up to the next space.
+final _webAddress = RegExp(r'\b(?:https?://|www\.)[^\s<>"]+', caseSensitive: false);
+
 /// An episode's notes as the feed wrote them: paragraphs, lists, bold and
-/// links kept; scripts, styles and images dropped. A timestamp plays the
-/// episode from there.
+/// links kept; scripts, styles and images dropped. Web addresses written
+/// as plain text are links too. A timestamp plays the episode from there.
 final class ShowNotes extends StatefulWidget {
   const ShowNotes({super.key, required this.html, this.episode, this.onInk = false});
   final String html;
@@ -788,20 +792,10 @@ final class _ShowNotesState extends State<ShowNotes> {
           if (name == 'i' || name == 'em') child = child.copyWith(fontStyle: FontStyle.italic);
           final href = name == 'a' ? node.attributes['href'] : null;
           if (href != null) {
-            final url = Uri.tryParse(href);
+            final url = Uri.tryParse(href.trim());
             if (url != null && url.hasScheme) {
-              final r = TapGestureRecognizer()..onTap = () => unawaited(launchUrl(url, mode: LaunchMode.externalApplication));
-              _recognizers.add(r);
-              out.add(TextSpan(
-                text: node.text.replaceAll(RegExp(r'\s+'), ' '),
-                style: child.copyWith(
-                  color: widget.onInk ? brand.accentLight : brand.accent,
-                  decoration: TextDecoration.underline,
-                  decorationColor: (widget.onInk ? brand.accentLight : brand.accent).withValues(alpha: 0.4),
-                ),
-                recognizer: r,
-                mouseCursor: SystemMouseCursors.click,
-              ));
+              final label = node.text.replaceAll(RegExp(r'\s+'), ' ');
+              out.add(_link(label.trim().isEmpty ? href : label, url, child));
               continue;
             }
           }
@@ -816,8 +810,44 @@ final class _ShowNotesState extends State<ShowNotes> {
 
   bool _endsWithBreak(List<InlineSpan> out) => out.last is TextSpan && ((out.last as TextSpan).text?.endsWith('\n') ?? false);
 
-  /// Plain text, with timestamps made into seek links.
+  /// A link: Apple Podcasts ones open here, the rest in the browser.
+  TextSpan _link(String label, Uri url, TextStyle style) {
+    final color = widget.onInk ? brand.accentLight : brand.accent;
+    final r = TapGestureRecognizer()..onTap = () => unawaited(openWebLink(context, url));
+    _recognizers.add(r);
+    return TextSpan(
+      text: label,
+      style: style.copyWith(color: color, decoration: TextDecoration.underline, decorationColor: color.withValues(alpha: 0.4)),
+      recognizer: r,
+      mouseCursor: SystemMouseCursors.click,
+    );
+  }
+
+  /// Plain text, with web addresses made into links and timestamps into
+  /// seek links.
   void _inline(String value, TextStyle style, List<InlineSpan> out) {
+    var at = 0;
+    for (final m in _webAddress.allMatches(value)) {
+      var address = m[0]!;
+      // Sentence punctuation after an address isn't part of it; a closing
+      // bracket is only when the address opened one.
+      while (address.isNotEmpty) {
+        final last = address[address.length - 1];
+        final unopened = last == ')' && '('.allMatches(address).length < ')'.allMatches(address).length;
+        if (!(unopened || '.,;:!?\'"’”»>'.contains(last))) break;
+        address = address.substring(0, address.length - 1);
+      }
+      final url = Uri.tryParse(address.startsWith(RegExp('https?://', caseSensitive: false)) ? address : 'https://$address');
+      if (url == null || url.host.isEmpty) continue;
+      if (m.start > at) _timestamps(value.substring(at, m.start), style, out);
+      out.add(_link(address, url, style));
+      at = m.start + address.length;
+    }
+    if (at < value.length) _timestamps(value.substring(at), style, out);
+  }
+
+  /// Plain text, with timestamps made into seek links.
+  void _timestamps(String value, TextStyle style, List<InlineSpan> out) {
     final episode = widget.episode;
     if (episode == null) {
       out.add(TextSpan(text: value, style: style));

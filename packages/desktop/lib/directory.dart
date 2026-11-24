@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
 
+import 'links.dart' show ApplePodcastsLink;
 import 'rss.dart' show userAgent;
 
 const _timeout = Duration(seconds: 20);
@@ -75,6 +76,25 @@ final class PodcastDirectory {
     final rank = {for (final (i, id) in ids.indexed) id: i};
     found.sort((a, b) => (rank[a._id] ?? 999).compareTo(rank[b._id] ?? 999));
     return _charts = found;
+  }
+
+  /// The feed behind an Apple Podcasts [link], and the episode's guid in it
+  /// when the link names one Apple still lists among the show's latest 200.
+  /// Null when Apple shares no feed for the show: one it hosts itself, or
+  /// gone from the directory.
+  Future<({String feedUrl, String? episodeGuid})?> applePodcast(ApplePodcastsLink link, CancellationToken token) async {
+    final json = await _get(
+      Uri.https('itunes.apple.com', '/lookup', {
+        'id': link.showId,
+        if (link.episodeId != null) ...{'entity': 'podcastEpisode', 'limit': '200'},
+      }),
+      token,
+    );
+    final results = (json['results'] as List?)?.cast<Map<String, Object?>>() ?? const [];
+    final feed = results.map((r) => r['feedUrl']).whereType<String>().where((f) => f.isNotEmpty).firstOrNull;
+    if (feed == null) return null;
+    final episode = results.where((r) => '${r['trackId']}' == link.episodeId).firstOrNull;
+    return (feedUrl: feed, episodeGuid: episode?['episodeGuid'] as String?);
   }
 
   Future<Map<String, Object?>> _get(Uri url, CancellationToken token) async {
