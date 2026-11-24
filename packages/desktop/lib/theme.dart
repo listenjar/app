@@ -7,6 +7,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'menu.dart';
+
 // Colours (DESIGN.md "Colors").
 const paper = Color(0xFFF5F4F0);
 const paperDeep = Color(0xFFEBE9E3);
@@ -27,6 +29,10 @@ const white = Color(0xFFFFFFFF);
 // The ink side (DESIGN.md "Neutral", "The Two-Tone Rule"): the player's own
 // surfaces, where listening happens.
 const inkRaised = Color(0xFF15161C);
+
+/// What floats over ink: menus opened from the player, a step above
+/// [inkRaised] so they read over the glows without a shadow.
+const inkFloat = Color(0xFF1D1E27);
 const inkLine = Color(0x17FFFFFF);
 const inkTile = Color(0x0DFFFFFF);
 const snow = Color(0xFFF3F4F7);
@@ -90,6 +96,13 @@ const easeOutExpo = Cubic(0.16, 1, 0.3, 1);
 /// The global focus ring: 2px periwinkle outside the control.
 const focusSide = BorderSide(color: accent, width: 2, strokeAlign: BorderSide.strokeAlignOutside);
 
+/// [focusSide] while unfocused: the same ring at alpha 0. Flutter's lerps
+/// don't premultiply alpha, so a fade from BorderSide.none (transparent
+/// black) or `Color(0x00000000)` passes through dark grey; animate between
+/// opaque colours, or from the target colour at alpha 0 (DESIGN.md, "The
+/// Opaque Fade Rule").
+const focusSideOff = BorderSide(color: Color(0x005165EE), width: 2, strokeAlign: BorderSide.strokeAlignOutside);
+
 /// A heading in the display voice: weight 700, tracked tight.
 TextStyle _display(double size, double height, [double tracking = -0.03]) => TextStyle(
   fontSize: size,
@@ -101,7 +114,9 @@ TextStyle _display(double size, double height, [double tracking = -0.03]) => Tex
 /// The platform's own face (SF Pro, Segoe UI, Roboto): no font ships.
 TextTheme _face() => Typography.material2021(platform: defaultTargetPlatform).black;
 
-ThemeData theme() {
+ThemeData theme() => menuTheme(_theme(), MenuTone.paper);
+
+ThemeData _theme() {
   final text = _face()
     .merge(TextTheme(
       headlineMedium: _display(36, 1.1),
@@ -178,7 +193,7 @@ ButtonStyle button(Tone tone, [ButtonSize size = ButtonSize.md]) {
     elevation: const WidgetStatePropertyAll(0),
     shape: WidgetStateProperty.resolveWith((states) => RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(radius),
-      side: states.contains(WidgetState.focused) ? focusSide : BorderSide.none,
+      side: states.contains(WidgetState.focused) ? focusSide : focusSideOff,
     )),
     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     animationDuration: quick,

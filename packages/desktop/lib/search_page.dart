@@ -10,10 +10,12 @@ import 'dart:async';
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'backend/api.dart' show SourceKind;
+import 'backend/api.dart' show Feed, SourceKind;
 import 'directory.dart';
+import 'library.dart' show PodcastEpisode;
 import 'links.dart';
-import 'shared_links.dart' show mayFollowInCloud;
+import 'menu.dart';
+import 'shared_links.dart' show mayAddVideoToCloud, mayFollowInCloud;
 import 'plans.dart';
 import 'podcasts.dart' show feedUrl;
 import 'shell.dart';
@@ -56,6 +58,15 @@ final class _SearchPageState extends State<SearchPage> {
   /// Something being opened or added: its feed or video link.
   final _busy = <String>{};
 
+  /// The podcast of the listener's own that search was opened from, by id,
+  /// while they search for videos to put in it; and what went in this time.
+  String? _intoId;
+  final _added = <String>{};
+  Feed? get _into => switch (_intoId) {
+    final id? => Services.of(context).feeds.own.where((f) => f.id == id).firstOrNull,
+    null => null,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -75,8 +86,13 @@ final class _SearchPageState extends State<SearchPage> {
 
   void _asked() {
     final r = widget.request;
-    setState(() => _mode = r.youtube ? _Mode.youtube : _Mode.podcasts);
-    if (r.query != null) _field.text = r.query!;
+    setState(() {
+      _mode = r.youtube ? _Mode.youtube : _Mode.podcasts;
+      _intoId = r.into;
+    });
+    // The caret at the end, so typing carries on where another screen's
+    // field left off.
+    if (r.query case final q?) _field.value = TextEditingValue(text: q, selection: TextSelection.collapsed(offset: q.length));
     _focus.requestFocus();
   }
 
@@ -211,19 +227,46 @@ final class _SearchPageState extends State<SearchPage> {
     }, 'Couldn’t follow that');
   }
 
+  /// Adds the video to [feed], a ListenJar Cloud podcast of the
+  /// listener's own, or to a new one they name. Signed out or on Free, says
+  /// what that takes instead.
+  Future<void> _addToPodcast(YouTubeLink link, Feed? feed) async {
+    if (!await mayAddVideoToCloud(context) || !mounted) return;
+    final title = feed == null ? await askPodcastTitle(context) : null;
+    if ((feed == null && title == null) || !mounted) return;
+    final feeds = Services.of(context).feeds;
+    await _run(link.url, () async {
+      final target = feed ?? await feeds.create(title!);
+      await feeds.addVideo(target, link.url, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
+      _added.add('${target.id} ${link.url}');
+      if (mounted) tell(context, 'Added to “${target.title}”. It uploads from this device.');
+    }, 'Couldn’t add that video');
+  }
+
+  /// Makes the video a ListenJar Cloud podcast of a single episode.
+  Future<void> _videoPodcast(YouTubeLink link) async {
+    if (!await mayAddVideoToCloud(context) || !mounted) return;
+    final feeds = Services.of(context).feeds;
+    await _run(link.url, () async {
+      final feed = await feeds.add(link.url, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
+      if (mounted) tell(context, '“${feed.title}” is now a ListenJar podcast. It uploads from this device.');
+    }, 'Couldn’t add that video');
+  }
+
   // Building.
 
   @override
   Widget build(BuildContext context) {
     final s = Services.of(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([s.library, s.account]),
+      listenable: Listenable.merge([s.library, s.account, s.feeds]),
       builder: (context, _) => PageBody(children: [
         pageTitle(context, 'Search'),
         const SizedBox(height: 12),
         _searchField(context),
         const SizedBox(height: 12),
         _modes(context),
+        if (_mode == _Mode.youtube && _into != null) ...[const SizedBox(height: 16), _intoBar(context, _into!)],
         const SizedBox(height: 24),
         ..._results(context),
       ]),
@@ -318,6 +361,37 @@ final class _SearchPageState extends State<SearchPage> {
     ]);
   }
 
+  /// Search opened from a podcast of the listener's own: the videos found
+  /// go into it, until they're done.
+  Widget _intoBar(BuildContext context, Feed feed) {
+    final text = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        const Icon(Icons.podcasts_rounded, size: 18, color: brand.accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text.rich(
+            TextSpan(children: [
+              const TextSpan(text: 'Adding videos to '),
+              TextSpan(text: '“${feed.title}”', style: const TextStyle(fontWeight: FontWeight.w600)),
+            ]),
+            style: text.bodyMedium!.copyWith(color: brand.fg),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 12),
+        TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: () => setState(() => _intoId = null),
+          child: const Text('Done'),
+        ),
+      ]),
+    );
+  }
+
   List<Widget> _results(BuildContext context) {
     final text = Theme.of(context).textTheme;
     if (_youtubeLink case final link?) return [_linkCard(context, link)];
@@ -382,47 +456,103 @@ final class _SearchPageState extends State<SearchPage> {
     );
   }
 
+  /// The video as the episode it became when it was played or kept, if it
+  /// was: the player knows it by that, as it knows any other episode.
+  PodcastEpisode? _videoEpisode(YouTubeLink? link) =>
+    link == null || link.kind != SourceKind.video ? null : Services.of(context).library.youtubeVideo(link.id);
+
   Widget _youtubeRow(BuildContext context, SearchResult r) {
     final link = parseYouTubeLink(r.url);
     final busy = _busy.contains(link?.url ?? r.url);
+    final episode = _videoEpisode(link);
     final kind = switch (r.kind) {
       SourceRefKind.video => null,
       SourceRefKind.playlist => 'Playlist',
       SourceRefKind.channel => 'Channel',
     };
     return _ResultRow(
-      onTap: link == null ? null : () => r.kind == SourceRefKind.video ? unawaited(_playVideo(link, result: r)) : unawaited(_followInCloud(r.url, r.title)),
+      onTap: link == null
+        ? null
+        : r.kind != SourceRefKind.video
+          ? () => unawaited(_followInCloud(r.url, r.title))
+          : episode != null
+            ? () => unawaited(Services.of(context).player.playEpisode(episode))
+            : () => unawaited(_playVideo(link, result: r)),
       leading: _Thumbnail(result: r),
       title: r.title,
       subtitle: [?kind, ...r.details].join(' · '),
+      progress: episode == null ? null : _progress(episode),
       trailing: busy || link == null
         ? (busy ? const _Spinner() : null)
         : r.kind == SourceRefKind.video
-          ? _videoActions(context, link, r)
+          ? _videoActions(context, link, r, episode)
           : _cloudFollowButton(context, r.url, r.title),
     );
   }
 
-  Widget _videoActions(BuildContext context, YouTubeLink link, SearchResult? r) => Row(mainAxisSize: MainAxisSize.min, children: [
-    Tooltip(
-      message: 'Add to Library',
-      child: IconButton(
-        onPressed: () => unawaited(_playVideo(link, result: r, keep: true)),
-        icon: const Icon(Icons.library_add_outlined, color: brand.fgSoft),
+  /// How far the listener got in [e], once they started it.
+  static double? _progress(PodcastEpisode e) => switch (e.duration) {
+    final d? when e.started && d > Duration.zero => (e.position.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0),
+    _ => null,
+  };
+
+  /// Add and play. Add keeps the video in the Library, or puts it in a
+  /// ListenJar Cloud podcast of the listener's own. Once the video is an
+  /// episode, play is the same button every episode has: it pauses while
+  /// this one plays and resumes it.
+  Widget _videoActions(BuildContext context, YouTubeLink link, SearchResult? r, PodcastEpisode? episode) {
+    final s = Services.of(context);
+    final kept = episode != null && (s.library.podcast(episode.podcastId)?.followed ?? false);
+    final own = s.feeds.own;
+    final into = _into;
+    final added = into != null && _added.contains('${into.id} ${link.url}');
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Dropdown(
+        align: MenuAlign.end,
+        items: [
+          MenuEntry(
+            kept ? 'In your Library' : 'Add to Library',
+            icon: kept ? Icons.library_add_check_rounded : Icons.library_add_outlined,
+            onPressed: kept ? null : () => unawaited(_playVideo(link, result: r, keep: true)),
+          ),
+          const MenuDivider(),
+          const MenuHeader('Add to a podcast of yours'),
+          for (final feed in own)
+            MenuEntry(feed.title, icon: Icons.podcasts_rounded, onPressed: () => unawaited(_addToPodcast(link, feed))),
+          MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_addToPodcast(link, null))),
+          MenuEntry('A podcast of its own', icon: Icons.playlist_play_rounded, onPressed: () => unawaited(_videoPodcast(link))),
+        ],
+        builder: (context, menu) => IconButton(
+          tooltip: 'Add to Library or a podcast',
+          onPressed: menu.toggle,
+          icon: Icon(kept ? Icons.library_add_check_rounded : Icons.library_add_outlined, color: kept ? brand.accent : brand.fgSoft),
+        ),
       ),
-    ),
-    const SizedBox(width: 4),
-    SizedBox.square(
-      dimension: 40,
-      child: IconButton(
-        tooltip: 'Play',
-        padding: EdgeInsets.zero,
-        style: IconButton.styleFrom(backgroundColor: brand.ink, foregroundColor: brand.white, hoverColor: const Color(0xFF23252D)),
-        onPressed: () => unawaited(_playVideo(link, result: r)),
-        icon: const Icon(Icons.play_arrow_rounded, size: 22),
-      ),
-    ),
-  ]);
+      const SizedBox(width: 4),
+      if (into != null) ...[
+        TextButton.icon(
+          style: brand.button(added ? brand.Tone.quiet : brand.Tone.accent, brand.ButtonSize.sm),
+          onPressed: added ? null : () => unawaited(_addToPodcast(link, into)),
+          icon: Icon(added ? Icons.check_rounded : Icons.add_rounded, size: 18),
+          label: Text(added ? 'Added' : 'Add'),
+        ),
+        const SizedBox(width: 8),
+      ],
+      if (episode != null)
+        PlayButton(episode: episode)
+      else
+        SizedBox.square(
+          dimension: 40,
+          child: IconButton(
+            tooltip: 'Play',
+            padding: EdgeInsets.zero,
+            style: IconButton.styleFrom(backgroundColor: brand.ink, foregroundColor: brand.white, hoverColor: const Color(0xFF23252D)),
+            onPressed: () => unawaited(_playVideo(link, result: r)),
+            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+          ),
+        ),
+    ]);
+  }
 
   Widget _cloudFollowButton(BuildContext context, String url, String title) => TextButton.icon(
     style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
@@ -458,7 +588,7 @@ final class _SearchPageState extends State<SearchPage> {
         if (_busy.contains(link.url))
           const _Spinner()
         else if (video)
-          _videoActions(context, link, null)
+          _videoActions(context, link, null, _videoEpisode(link))
         else
           _cloudFollowButton(context, link.url, kindLabel(link.kind)),
       ]),
@@ -533,10 +663,13 @@ final class _SearchPageState extends State<SearchPage> {
 }
 
 final class _ResultRow extends StatefulWidget {
-  const _ResultRow({required this.leading, required this.title, required this.subtitle, required this.trailing, required this.onTap});
+  const _ResultRow({required this.leading, required this.title, required this.subtitle, required this.trailing, required this.onTap, this.progress});
   final Widget leading;
   final String title;
   final String subtitle;
+
+  /// How far the listener got, for a video they started.
+  final double? progress;
   final Widget? trailing;
   final VoidCallback? onTap;
 
@@ -555,7 +688,7 @@ final class _ResultRowState extends State<_ResultRow> {
       onExit: (_) => setState(() => _hover = false),
       child: AnimatedContainer(
         duration: brand.quick,
-        decoration: BoxDecoration(color: _hover ? brand.mist : const Color(0x00FFFFFF), borderRadius: BorderRadius.circular(14)),
+        decoration: BoxDecoration(color: _hover ? brand.mist : brand.mist.withValues(alpha: 0), borderRadius: BorderRadius.circular(14)),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: widget.onTap,
@@ -570,6 +703,17 @@ final class _ResultRowState extends State<_ResultRow> {
                   if (widget.subtitle.isNotEmpty) ...[
                     const SizedBox(height: 3),
                     Text(widget.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall!.copyWith(color: brand.fgSoft, fontSize: 13)),
+                  ],
+                  if (widget.progress case final progress?) ...[
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: SizedBox(
+                        width: 120,
+                        height: 3,
+                        child: LinearProgressIndicator(value: progress, color: brand.accent, backgroundColor: brand.paperDeep),
+                      ),
+                    ),
                   ],
                 ]),
               ),

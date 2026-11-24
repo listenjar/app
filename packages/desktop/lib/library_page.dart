@@ -12,6 +12,7 @@ import 'package:share_plus/share_plus.dart';
 import 'downloads_page.dart';
 import 'home_page.dart' show unplayedLabel;
 import 'library.dart';
+import 'menu.dart';
 import 'settings_page.dart';
 import 'shell.dart';
 import 'theme.dart' as brand;
@@ -181,18 +182,13 @@ final class OpmlMenu extends StatelessWidget {
   const OpmlMenu({super.key});
 
   @override
-  Widget build(BuildContext context) => MenuAnchor(
-    style: menuStyle,
-    alignmentOffset: const Offset(-200, 0),
-    menuChildren: [
-      menuItem(context, Icons.file_upload_outlined, 'Import OPML…', () => unawaited(importOpml(context))),
-      menuItem(context, Icons.file_download_outlined, 'Export OPML…', () => unawaited(exportOpml(context))),
+  Widget build(BuildContext context) => Dropdown(
+    align: MenuAlign.end,
+    items: [
+      MenuEntry('Import OPML…', icon: Icons.file_upload_outlined, onPressed: () => unawaited(importOpml(context))),
+      MenuEntry('Export OPML…', icon: Icons.file_download_outlined, onPressed: () => unawaited(exportOpml(context))),
     ],
-    builder: (context, menu, _) => IconButton(
-      tooltip: 'Import or export',
-      onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-      icon: const Icon(Icons.more_horiz_rounded, color: brand.fgSoft),
-    ),
+    builder: (context, menu) => MoreButton(menu: menu, tooltip: 'Import or export'),
   );
 }
 

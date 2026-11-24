@@ -1,10 +1,11 @@
 // The ListenJar section of the app: the signed-in listener's own ListenJar
-// feeds (account.dart), what they add to them from YouTube links and
-// search, and how each feed syncs from this device (feeds.dart, sync.dart)
+// feeds (account.dart), what they add to them from YouTube links, and how each feed syncs from this device (feeds.dart, sync.dart)
 // through the ListenJar API (public.yaml) and its oasmith client in
 // lib/backend (`moon run desktop:codegen`). A podcast of the listener's own
 // opens in place of the list (podcast.dart): its episodes and artwork, with
-// the link field adding videos to it. Signed out, it says what an account
+// the link field adding videos to it. Words typed in the link field search
+// on the Search page (search_page.dart), the app's one search, which adds
+// results to the Cloud as well as playing them. Signed out, it says what an account
 // adds to the free player. The shell (shell.dart) shows it beside the
 // player's own sections.
 import 'dart:async';
@@ -23,17 +24,16 @@ import 'backend/api.dart';
 import 'feeds.dart';
 import 'links.dart';
 import 'marks.dart';
+import 'menu.dart';
 import 'plans.dart';
 import 'podcast.dart';
 import 'podcast_apps.dart';
 import 'shell.dart' show PageBody, windowCommand;
+import 'ui.dart' show Navigation;
 import 'ui.dart' show Services, pageTitle;
 import 'sync.dart';
 import 'theme.dart' as brand;
-import 'youtube.dart' show SearchResult, SourceRefKind, YouTubeService;
-
-/// How long typing pauses before the link field searches YouTube.
-const _searchDelay = Duration(milliseconds: 300);
+import 'youtube.dart' show YouTubeService;
 
 class CloudPage extends StatefulWidget {
   const CloudPage({super.key, required this.youtube, required this.account, required this.feeds});
@@ -90,20 +90,14 @@ class _CloudPageState extends State<CloudPage> {
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
-  /// Anything else typed there searches YouTube: the search waiting or in
-  /// flight, then the query last answered, what it found or why it failed.
-  /// Answers are kept, so editing back to a query asks YouTube once.
-  CancellationToken? _searching;
-  String? _answered;
-  int _found = 0;
-  Object? _searchError;
-  final _searches = <String, List<SearchResult>>{};
-
   @override
   void initState() {
     super.initState();
     _shown.addListener(_rebuild);
-    _link.addListener(() => setState(() => _addError = null));
+    _link.addListener(() {
+      setState(() => _addError = null);
+      _searchInstead();
+    });
     _linkFocus.addListener(_rebuild);
     _lifecycle;
   }
@@ -127,12 +121,22 @@ class _CloudPageState extends State<CloudPage> {
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw StateError('open the browser');
   });
 
-  /// Looks the pasted link, or the search result's, up on YouTube and adds
+  /// Words typed in the link field search on the Search page, the app's one
+  /// search: it carries on there with what was typed, caret and all, and
+  /// this field stays for links. From an open podcast, search adds what it
+  /// finds to that podcast.
+  void _searchInstead() {
+    final typed = _link.text;
+    if (!_isQuery(typed.trim())) return;
+    _link.clear();
+    Navigation.of(context).openSearch(query: typed, youtube: true, into: _openId);
+  }
+
+  /// Looks the pasted link up on YouTube and adds
   /// it; the sync takes it from there.
   Future<void> _add([String? input]) async {
     final link = input ?? _link.text;
     if (_account.user == null || _adding != null || parseYouTubeLink(link) == null) return;
-    _searching?.cancel();
     final token = CancellationToken();
     setState(() {
       _adding = token;
@@ -224,48 +228,6 @@ class _CloudPageState extends State<CloudPage> {
   void _plans([String title = 'Keep what you add']) => unawaited(showPlans(context, title: title));
 
   void _makeRoom() => unawaited(showMakeRoom(context, account: _account, feeds: _feeds, onRemove: _remove));
-
-  /// The link field's suggestions: what YouTube's search finds for the
-  /// typed text, once typing pauses. Links and URLs don't search.
-  Future<Iterable<SearchResult>> _search(TextEditingValue value) async {
-    final query = value.text.trim();
-    _searching?.cancel();
-    _searching = null;
-    if (!_isQuery(query)) return const [];
-    if (_searches[query] case final results?) {
-      _answer(query, results, null);
-      return results;
-    }
-    final token = CancellationToken();
-    setState(() => _searching = token);
-    try {
-      await Future<void>.delayed(_searchDelay).asCancellable(token);
-      final merged = _life.merge(token).merge(TimeoutCancellationToken(callTimeout));
-      final results = await (await widget.youtube.session(merged)).search(query, merged);
-      if (_searches.length >= 50) _searches.remove(_searches.keys.first);
-      _searches[query] = results;
-      _answer(query, results, null);
-      return results;
-    } on CancelledException {
-      // Typed on, or the window went away; else it timed out.
-      if (!token.isCancelled && !_life.isCancelled) _answer(query, const [], 'It took too long.');
-      return const [];
-    } catch (e) {
-      _answer(query, const [], e);
-      return const [];
-    } finally {
-      if (_searching == token && mounted) setState(() => _searching = null);
-    }
-  }
-
-  void _answer(String query, List<SearchResult> results, Object? error) {
-    if (!mounted) return;
-    setState(() {
-      _answered = query;
-      _found = results.length;
-      _searchError = error;
-    });
-  }
 
   Future<void> _copyFeedLink(Feed feed) async {
     final url = feed.rssUrl;
@@ -430,31 +392,14 @@ class _CloudPageState extends State<CloudPage> {
     );
   }
 
-  /// Search YouTube or paste a link: says what it recognises as you type,
-  /// and lists what search finds under it (arrows and Return, or a click,
-  /// add one). A compact address field like a browser's: recessed paper at
-  /// rest, a shade deeper under the pointer, white with the accent ring
-  /// while typing.
-  Widget _linkField(TextTheme text) => RawAutocomplete<SearchResult>(
-    textEditingController: _link,
-    focusNode: _linkFocus,
-    displayStringForOption: (result) => result.title,
-    optionsBuilder: _search,
-    // An open podcast takes a video; anything else is a feed of its own.
-    onSelected: (result) => switch (_open) {
-      final open? when result.kind == SourceRefKind.video => _addTo(open, link: result.url),
-      _ => _add(result.url),
-    },
-    fieldViewBuilder: (context, _, _, submit) => _linkInput(text, submit),
-    optionsViewBuilder: (context, select, options) => _SearchResults(results: options.toList(), onSelected: select),
-  );
-
-  Widget _linkInput(TextTheme text, VoidCallback submit) {
+  /// Paste a link, or type to search: says what it recognises as you type.
+  /// A compact address field like a browser's: recessed paper at rest, a
+  /// shade deeper under the pointer, white with the accent ring while
+  /// typing.
+  Widget _linkField(TextTheme text) {
     final typed = _link.text.trim();
     final link = parseYouTubeLink(typed);
     final adding = _adding != null;
-    final searching = _searching != null;
-    final answered = !searching && _isQuery(typed) && _answered == typed;
     final focused = _linkFocus.hasFocus;
     final hint = text.bodySmall!.copyWith(color: brand.fgSoft);
     // Even leading keeps the glyphs (and the caret) on the icon's centre line;
@@ -479,11 +424,6 @@ class _CloudPageState extends State<CloudPage> {
         child: Text('Add ${kindLabel(l.kind).replaceFirst('YouTube ', '')}'),
       ),
       _ when _looksLikeUrl(typed) => Text('Not a YouTube link', style: hint.copyWith(color: brand.danger)),
-      _ when answered && _searchError != null => Tooltip(
-        message: '$_searchError',
-        child: Text('Couldn’t search YouTube', style: hint.copyWith(color: brand.danger)),
-      ),
-      _ when answered && _found == 0 => Text('Nothing found', style: hint),
       _ when focused || typed.isNotEmpty => null,
       _ => Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -521,7 +461,7 @@ class _CloudPageState extends State<CloudPage> {
           child: Row(children: [
             SizedBox.square(
               dimension: 16,
-              child: adding || searching
+              child: adding
                 ? const Padding(
                     padding: EdgeInsets.all(1.5),
                     child: CircularProgressIndicator(strokeWidth: 1.75, color: brand.accent),
@@ -534,11 +474,11 @@ class _CloudPageState extends State<CloudPage> {
                 controller: _link,
                 focusNode: _linkFocus,
                 enabled: !adding,
-                // A link adds itself; typed words add the highlighted result.
+                // A link adds itself; typed words have gone to Search.
                 onSubmitted: (_) => switch ((link, open)) {
                   (final l?, final o?) when l.kind == SourceKind.video => _addTo(o),
                   (_?, _) => _add(),
-                  _ => submit(),
+                  _ => null,
                 },
                 style: input,
                 strutStyle: StrutStyle.fromTextStyle(input, forceStrutHeight: true),
@@ -553,7 +493,7 @@ class _CloudPageState extends State<CloudPage> {
                   hint: Padding(
                     padding: const EdgeInsets.only(left: 3),
                     child: Text(
-                      open == null ? 'Search YouTube or paste a link' : 'Search YouTube or paste a video to add it here',
+                      open == null ? 'Search YouTube or paste a link' : 'Paste a video link to add it here, or search',
                       style: input.copyWith(color: brand.fgFaint),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -588,18 +528,17 @@ class _CloudPageState extends State<CloudPage> {
         child: const Text('Add video'),
       ),
       const SizedBox(width: 1),
-      MenuAnchor(
-        alignmentOffset: const Offset(0, 8),
-        style: _menuStyle,
-        menuChildren: _ownPodcasts(text, _addTo),
-        builder: (context, menu, _) => Tooltip(
+      Dropdown(
+        align: MenuAlign.end,
+        items: _ownPodcasts(_addTo),
+        builder: (context, menu) => Tooltip(
           message: 'Add to a podcast of yours',
           waitDuration: const Duration(milliseconds: 400),
           child: TextButton(
             style: _chip(text, const BorderRadius.horizontal(right: Radius.circular(7))).copyWith(
               padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 5)),
             ),
-            onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+            onPressed: menu.toggle,
             child: const Icon(Icons.expand_more_rounded, size: 17),
           ),
         ),
@@ -608,28 +547,13 @@ class _CloudPageState extends State<CloudPage> {
   }
 
   /// The menu of the listener's own podcasts to add a video to, then a new one.
-  List<Widget> _ownPodcasts(TextTheme text, void Function(Feed?) pick) {
+  List<Widget> _ownPodcasts(void Function(Feed?) pick) {
     final own = _feeds.own;
     return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
-        child: Text('Add to a podcast of yours', style: text.bodySmall!.copyWith(color: brand.fgSoft, fontSize: 12.5)),
-      ),
-      for (final feed in own)
-        MenuItemButton(
-          leadingIcon: const Icon(Icons.podcasts_rounded, size: 18, color: brand.fgSoft),
-          onPressed: () => pick(feed),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 260),
-            child: Text(feed.title, style: text.bodyMedium, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-        ),
-      if (own.isNotEmpty) const Divider(height: 9, color: brand.line),
-      MenuItemButton(
-        leadingIcon: const Icon(Icons.add_rounded, size: 18, color: brand.fgSoft),
-        onPressed: () => pick(null),
-        child: Text('New podcast…', style: text.bodyMedium),
-      ),
+      const MenuHeader('Add to a podcast of yours'),
+      for (final feed in own) MenuEntry(feed.title, icon: Icons.podcasts_rounded, onPressed: () => pick(feed)),
+      if (own.isNotEmpty) const MenuDivider(),
+      MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => pick(null)),
     ];
   }
 
@@ -647,36 +571,24 @@ class _CloudPageState extends State<CloudPage> {
         ),
       );
     }
-    return MenuAnchor(
-      alignmentOffset: const Offset(0, 6),
-      style: _menuStyle,
-      menuChildren: _ownPodcasts(text, (target) => _addTo(target, from: feed)),
-      builder: (context, menu, _) => IconButton(
+    return Dropdown(
+      align: MenuAlign.end,
+      items: _ownPodcasts((target) => _addTo(target, from: feed)),
+      builder: (context, menu) => IconButton(
         tooltip: 'Add to a podcast of yours',
         visualDensity: VisualDensity.compact,
-        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+        onPressed: menu.toggle,
         icon: const Icon(Icons.playlist_add_rounded, size: 19, color: brand.fgSoft),
       ),
     );
   }
 
-  static final _menuStyle = MenuStyle(
-    backgroundColor: const WidgetStatePropertyAll(brand.white),
-    shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-    padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
-  );
-
   /// The listener's initial; it opens who is signed in, syncing and signing out.
-  Widget _accountMenu(TextTheme text, User user) => MenuAnchor(
-    alignmentOffset: const Offset(0, 6),
-    style: MenuStyle(
-      backgroundColor: const WidgetStatePropertyAll(brand.white),
-      shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
-    ),
-    menuChildren: [
+  Widget _accountMenu(TextTheme text, User user) => Dropdown(
+    align: MenuAlign.end,
+    items: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(user.email, style: text.bodySmall!.copyWith(color: brand.fgSoft)),
           const SizedBox(height: 2),
@@ -689,31 +601,16 @@ class _CloudPageState extends State<CloudPage> {
           ),
         ]),
       ),
-      const Divider(height: 1, color: brand.line),
+      const MenuDivider(),
       if (user.plan == Plan.free)
-        MenuItemButton(
-          leadingIcon: const Icon(Icons.workspace_premium_outlined, size: 18, color: brand.fgSoft),
-          onPressed: _plans,
-          child: Text('See plans…', style: text.bodyMedium),
-        )
+        MenuEntry('See plans…', icon: Icons.workspace_premium_outlined, onPressed: _plans)
       else
-        MenuItemButton(
-          leadingIcon: const Icon(Icons.open_in_new_rounded, size: 18, color: brand.fgSoft),
-          onPressed: () => openInBrowser(context, billingUrl),
-          child: Text('Manage plan', style: text.bodyMedium),
-        ),
-      MenuItemButton(
-        leadingIcon: const Icon(Icons.sync_rounded, size: 18, color: brand.fgSoft),
-        onPressed: _feeds.loading ? null : _feeds.syncNow,
-        child: Text('Sync now', style: text.bodyMedium),
-      ),
-      MenuItemButton(
-        leadingIcon: const Icon(Icons.logout_rounded, size: 18, color: brand.fgSoft),
-        onPressed: _account.signOut,
-        child: Text('Sign out', style: text.bodyMedium),
-      ),
+        MenuEntry('Manage plan', icon: Icons.open_in_new_rounded, onPressed: () => openInBrowser(context, billingUrl)),
+      MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: _feeds.loading ? null : _feeds.syncNow),
+      const MenuDivider(),
+      MenuEntry('Sign out', icon: Icons.logout_rounded, onPressed: _account.signOut),
     ],
-    builder: (context, menu, _) => Tooltip(
+    builder: (context, menu) => Tooltip(
       message: user.email,
       child: InkWell(
         customBorder: const CircleBorder(),
@@ -1038,12 +935,9 @@ class _CloudPageState extends State<CloudPage> {
   }
 
   /// A podcast app's icon in the menu, rounded like an app icon.
-  Widget _menuIcon(String asset) => Padding(
-    padding: const EdgeInsetsDirectional.only(end: 4),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Image.asset(asset, width: 24, height: 24, filterQuality: FilterQuality.medium),
-    ),
+  Widget _menuIcon(String asset) => ClipRRect(
+    borderRadius: BorderRadius.circular(5),
+    child: Image.asset(asset, width: 22, height: 22, filterQuality: FilterQuality.medium),
   );
 
   /// "Listen in…": the podcast apps on this device, then copying the link.
@@ -1061,28 +955,20 @@ class _CloudPageState extends State<CloudPage> {
       )
     : FutureBuilder(
     future: _podcastApps,
-    builder: (context, snapshot) => MenuAnchor(
-      style: MenuStyle(
-        backgroundColor: const WidgetStatePropertyAll(brand.white),
-        shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
-      ),
-      menuChildren: [
+    builder: (context, snapshot) => Dropdown(
+      items: [
         for (final app in snapshot.data ?? const <PodcastApp>[])
-          MenuItemButton(
-            leadingIcon: _menuIcon(app.icon),
+          MenuEntry(
+            app.web ? '${app.title} (web)' : app.title,
+            leading: _menuIcon(app.icon),
             onPressed: () => openInPodcastApp(app, rss),
-            child: Text(app.web ? '${app.title} (web)' : app.title, style: text.bodyMedium),
           ),
-        MenuItemButton(
-          leadingIcon: _menuIcon(podcastAppIcon('rss')),
-          onPressed: () => _copyFeedLink(feed),
-          child: Text('Copy feed link', style: text.bodyMedium),
-        ),
+        if (snapshot.data?.isNotEmpty ?? false) const MenuDivider(),
+        MenuEntry('Copy feed link', leading: _menuIcon(podcastAppIcon('rss')), onPressed: () => _copyFeedLink(feed)),
       ],
-      builder: (context, menu, _) => TextButton(
+      builder: (context, menu) => TextButton(
         style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+        onPressed: menu.toggle,
         child: const Text('Listen in…'),
       ),
     ),
@@ -1170,199 +1056,12 @@ String _failure(String what, Object error, {required String other}) => switch (e
   _ => '$what. $other',
 };
 
-/// Words to search YouTube for: not a link, nor too short to mean much.
+/// Words to search for: not a link, nor too short to mean much.
 bool _isQuery(String text) => text.characters.length >= 2 && parseYouTubeLink(text) == null && !_looksLikeUrl(text);
 
 /// A link, though not one ListenJar takes.
 bool _looksLikeUrl(String text) =>
   RegExp(r'^(https?://|www\.)|^[\w-]+(\.[\w-]+)+/', caseSensitive: false).hasMatch(text.trim());
-
-/// What search found, under the link field: a white sheet of rows, the
-/// highlighted one (arrows, or the pointer) in mist with what Return does.
-final class _SearchResults extends StatelessWidget {
-  const _SearchResults({required this.results, required this.onSelected});
-  final List<SearchResult> results;
-  final AutocompleteOnSelected<SearchResult> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final highlight = context.dependOnInheritedWidgetOfExactType<AutocompleteHighlightedOption>()?.notifier;
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: ConstrainedBox(
-        // Six and a half rows: the half says there's more.
-        constraints: const BoxConstraints(maxHeight: 6.5 * _SearchRow.height + 12),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: brand.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: const [
-              BoxShadow(color: Color(0x14171A38), offset: Offset(0, 2), blurRadius: 6),
-              BoxShadow(color: Color(0x33171A38), offset: Offset(0, 18), blurRadius: 40, spreadRadius: -12),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: ListView.builder(
-              padding: const EdgeInsets.all(6),
-              shrinkWrap: true,
-              itemCount: results.length,
-              itemExtent: _SearchRow.height,
-              itemBuilder: (context, i) => _SearchRow(
-                result: results[i],
-                highlighted: (highlight?.value ?? 0) == i,
-                onHover: () => highlight?.value = i,
-                onTap: () => onSelected(results[i]),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-final class _SearchRow extends StatelessWidget {
-  const _SearchRow({required this.result, required this.highlighted, required this.onHover, required this.onTap});
-  static const height = 58.0;
-  final SearchResult result;
-  final bool highlighted;
-  final VoidCallback onHover;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    if (highlighted) {
-      // Arrowed past the edge: bring it in, without moving a visible row.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!context.mounted) return;
-        for (final policy in const [ScrollPositionAlignmentPolicy.keepVisibleAtStart, ScrollPositionAlignmentPolicy.keepVisibleAtEnd]) {
-          unawaited(Scrollable.ensureVisible(context, alignmentPolicy: policy));
-        }
-      });
-    }
-    final kind = switch (result.kind) {
-      SourceRefKind.video => 'Video',
-      SourceRefKind.playlist => 'Playlist',
-      SourceRefKind.channel => 'Channel',
-    };
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => onHover(),
-      onHover: (_) {
-        if (!highlighted) onHover();
-      },
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: brand.quick,
-          curve: brand.easeOutExpo,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: highlighted ? brand.mist : brand.white,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Row(children: [
-            _SearchThumbnail(result: result),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    result.title,
-                    style: text.bodySmall!.copyWith(color: brand.fg, fontWeight: FontWeight.w600, height: 1.3),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [kind, ...result.details].join(' · '),
-                    style: text.bodySmall!.copyWith(color: brand.fgSoft, fontSize: 12.5, height: 1.3),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            AnimatedOpacity(
-              opacity: highlighted ? 1 : 0,
-              duration: brand.quick,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 12, right: 4),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text('Add', style: text.labelLarge!.copyWith(color: brand.accent, fontSize: 13)),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.keyboard_return_rounded, size: 15, color: brand.accent),
-                ]),
-              ),
-            ),
-          ]),
-        ),
-      ),
-    );
-  }
-}
-
-/// A result's picture, in a 64-wide slot so titles line up: a video's
-/// frame, a playlist's with the edge of the stack behind it, a channel's
-/// round avatar.
-final class _SearchThumbnail extends StatelessWidget {
-  const _SearchThumbnail({required this.result});
-  final SearchResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    const width = 64.0;
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    final placeholder = Container(color: brand.paper);
-    Widget image(double w) => switch (result.thumbnailUrl) {
-      null => placeholder,
-      final url => Image.network(
-        url,
-        fit: BoxFit.cover,
-        cacheWidth: (w * dpr).round(),
-        errorBuilder: (_, _, _) => placeholder,
-        frameBuilder: (_, child, frame, sync) => sync || frame != null ? child : placeholder,
-      ),
-    };
-    return SizedBox(
-      width: width,
-      height: 40,
-      child: switch (result.kind) {
-        SourceRefKind.channel => Center(
-          child: ClipOval(child: SizedBox.square(dimension: 36, child: image(36))),
-        ),
-        SourceRefKind.video => Center(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: SizedBox(width: width, height: 36, child: image(width)),
-          ),
-        ),
-        SourceRefKind.playlist => Stack(children: [
-          Positioned(
-            left: 5,
-            right: 5,
-            top: 0,
-            height: 8,
-            child: DecoratedBox(
-              decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(4)),
-            ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 36,
-            child: ClipRRect(borderRadius: BorderRadius.circular(6), child: image(width)),
-          ),
-        ]),
-      },
-    );
-  }
-}
 
 /// A feed row that opens: a paper tint under the pointer or with keyboard
 /// focus, and a chevron saying where it goes. Its own buttons keep their

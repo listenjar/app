@@ -2,7 +2,9 @@
 // which they change by picking a picture (artwork.dart, uploaded through
 // uploads.dart), and every episode it has, uploaded or on its way. Videos go
 // in from the window's link field, which adds to this podcast while it is
-// open (main.dart).
+// open (main.dart). The player follows the podcast's RSS feed like any other
+// show (podcasts.dart), so an uploaded episode plays, downloads and keeps its
+// place from here just as it does there: the feed's guid is the episode's id.
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -12,9 +14,11 @@ import 'package:material_ui/material_ui.dart';
 import 'artwork.dart';
 import 'backend/api.dart';
 import 'feeds.dart';
+import 'library.dart' show PodcastEpisode, videoThumbnail;
 import 'plans.dart' show formatBytes;
 import 'sync.dart';
 import 'theme.dart' as brand;
+import 'ui.dart' show Artwork, DownloadButton, EpisodeMenu, PlayButton, Services, showEpisode, spokenDate, spokenDuration;
 
 final class PodcastPage extends StatefulWidget {
   const PodcastPage({super.key, required this.feed, required this.feeds, required this.listenIn, required this.onRemove});
@@ -36,6 +40,9 @@ final class _PodcastPageState extends State<PodcastPage> {
   Object? _loadError;
   final _removing = <String>{};
   Object? _episodeError;
+
+  /// The playable row under the pointer.
+  String? _hovered;
 
   /// The picture being uploaded as artwork, shown at once, and how far
   /// along it is; then what went wrong, if it did.
@@ -85,11 +92,16 @@ final class _PodcastPageState extends State<PodcastPage> {
     final loading = () async {
       try {
         final episodes = await widget.feeds.episodes(_feed);
-        if (mounted) {
-          setState(() {
-            _episodes = episodes;
-            _loadError = null;
-          });
+        if (!mounted) return;
+        setState(() {
+          _episodes = episodes;
+          _loadError = null;
+        });
+        // An upload the player's copy of the feed hasn't seen yet plays
+        // once that copy catches up.
+        final known = _playable();
+        if (episodes.any((e) => e.uploadedAt != null && !known.containsKey(e.id))) {
+          unawaited(Services.of(context).podcasts.cloudPublished(_feed.id));
         }
       } catch (e) {
         if (mounted) setState(() => _loadError = e);
@@ -144,13 +156,23 @@ final class _PodcastPageState extends State<PodcastPage> {
     }
   }
 
+  /// The player's copy of each uploaded episode, by its feed guid.
+  Map<String, PodcastEpisode> _playable() {
+    final library = Services.of(context).library;
+    final show = library.podcasts.where((p) => p.cloudFeedId == _feed.id).firstOrNull;
+    return {if (show != null) for (final e in library.episodes(show.id)) e.guid: e};
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _header(text),
       const SizedBox(height: 36),
-      _episodeList(text),
+      ListenableBuilder(
+        listenable: Services.of(context).library,
+        builder: (context, _) => _episodeList(text, _playable()),
+      ),
     ]);
   }
 
@@ -222,7 +244,7 @@ final class _PodcastPageState extends State<PodcastPage> {
     ]);
   }
 
-  Widget _episodeList(TextTheme text) {
+  Widget _episodeList(TextTheme text, Map<String, PodcastEpisode> playable) {
     final episodes = _episodes;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Padding(
@@ -252,12 +274,15 @@ final class _PodcastPageState extends State<PodcastPage> {
             borderRadius: BorderRadius.circular(brand.radiusTile),
             boxShadow: const [brand.shadowSoft],
           ),
-          child: Column(children: [
-            for (final (i, episode) in episodes.indexed) ...[
-              if (i > 0) const Divider(height: 1, thickness: 1, indent: 104, color: brand.line),
-              _episodeRow(text, episode),
-            ],
-          ]),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(brand.radiusTile),
+            child: Column(children: [
+              for (final (i, episode) in episodes.indexed) ...[
+                if (i > 0) const Divider(height: 1, thickness: 1, indent: _rowInset * 2 + _thumbWidth, color: brand.line),
+                _episodeRow(text, episode, episode.uploadedAt == null ? null : playable[episode.id]),
+              ],
+            ]),
+          ),
         ),
     ]);
   }
@@ -276,70 +301,122 @@ final class _PodcastPageState extends State<PodcastPage> {
     ),
   );
 
-  Widget _episodeRow(TextTheme text, Episode episode) {
+  /// An episode: its video's thumbnail, title, and when, how long and how
+  /// big, or how its upload is going. Once the player has it, it plays like
+  /// an episode of any show: a click opens its notes, and it downloads,
+  /// queues and keeps its place, shown along the thumbnail's foot.
+  Widget _episodeRow(TextTheme text, Episode episode, PodcastEpisode? playable) {
     final removing = _removing.contains(episode.id);
-    final (detail, busy) = _detail(episode);
-    final published = DateTime.tryParse(episode.publishedAt)?.toLocal();
+    final (detail, busy) = _detail(episode, playable);
+    final published = DateTime.tryParse(episode.publishedAt);
+    final narrow = MediaQuery.sizeOf(context).width < 520;
+    final hover = playable != null && _hovered == episode.id;
     final small = text.bodySmall!.copyWith(
       color: brand.fgSoft,
       fontSize: 13,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
+    final progress = switch (playable) {
+      PodcastEpisode(started: true, duration: final d?) when d > Duration.zero =>
+        (playable.position.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0),
+      _ => null,
+    };
+    Widget thumbnail = Artwork(
+      url: videoThumbnail(episode.videoId),
+      title: episode.title,
+      size: _thumbWidth,
+      height: _thumbWidth * 9 / 16,
+      radius: 8,
+    );
+    if (progress != null) {
+      thumbnail = ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Stack(children: [
+          thumbnail,
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 3,
+              color: brand.accent,
+              backgroundColor: const Color(0x66FFFFFF),
+            ),
+          ),
+        ]),
+      );
+    }
+    final remove = IconButton(
+      tooltip: 'Remove episode',
+      visualDensity: VisualDensity.compact,
+      onPressed: removing ? null : () => _removeEpisode(episode),
+      icon: const Icon(Icons.close_rounded, size: 17, color: brand.fgFaint),
+    );
+    final row = Padding(
+      padding: EdgeInsets.fromLTRB(_rowInset, 12, playable == null ? 10 : 14, 12),
+      child: Row(children: [
+        thumbnail,
+        const SizedBox(width: _rowInset),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              episode.title,
+              style: text.bodySmall!.copyWith(
+                color: playable?.played ?? false ? brand.fgSoft : brand.fg,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              busy || published == null ? detail : [spokenDate(published), if (detail.isNotEmpty) detail].join(' · '),
+              style: small.copyWith(color: busy ? brand.accent : brand.fgSoft),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ]),
+        ),
+        const SizedBox(width: 12),
+        if (playable == null)
+          remove
+        else ...[
+          if (!narrow) DownloadButton(episode: playable),
+          remove,
+          EpisodeMenu(episode: playable),
+          const SizedBox(width: 4),
+          PlayButton(episode: playable, size: 36),
+        ],
+      ]),
+    );
     return AnimatedOpacity(
       key: ValueKey(episode.id),
       opacity: removing ? 0.4 : 1,
       duration: brand.quick,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 10, 12),
-        child: Row(children: [
-          SizedBox(
-            width: 68,
-            child: published == null
-              ? const SizedBox.shrink()
-              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(
-                    '${published.day} ${_months[published.month - 1]}',
-                    style: text.bodySmall!.copyWith(color: brand.fg, fontWeight: FontWeight.w600, fontSize: 13),
-                  ),
-                  Text('${published.year}', style: small),
-                ]),
+      child: playable == null
+        ? row
+        : MouseRegion(
+            onEnter: (_) => setState(() => _hovered = episode.id),
+            onExit: (_) => setState(() => _hovered = _hovered == episode.id ? null : _hovered),
+            child: AnimatedContainer(
+              duration: brand.quick,
+              curve: brand.easeOutExpo,
+              color: hover ? brand.mist : brand.mist.withValues(alpha: 0),
+              child: InkWell(onTap: () => showEpisode(context, playable), child: row),
+            ),
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                episode.title,
-                style: text.bodySmall!.copyWith(color: brand.fg, fontWeight: FontWeight.w600),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 2),
-              Text(
-                detail,
-                style: small.copyWith(color: busy ? brand.accent : brand.fgSoft),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ]),
-          ),
-          const SizedBox(width: 12),
-          IconButton(
-            tooltip: 'Remove episode',
-            visualDensity: VisualDensity.compact,
-            onPressed: removing ? null : () => _removeEpisode(episode),
-            icon: const Icon(Icons.close_rounded, size: 17, color: brand.fgFaint),
-          ),
-        ]),
-      ),
     );
   }
 
-  /// Under an episode's title: its length and size once it is live, what
-  /// the sync is doing with it otherwise, and whether that is under way.
-  (String, bool) _detail(Episode episode) {
-    final length = switch (episode.durationSeconds) {
-      final s? => _duration(s),
-      null => null,
+  /// Under an episode's title: its length, or what's left of it, and size
+  /// once it is live, what the sync is doing with it otherwise, and whether
+  /// that is under way.
+  (String, bool) _detail(Episode episode, PodcastEpisode? playable) {
+    final length = switch ((playable, episode.durationSeconds)) {
+      (PodcastEpisode(started: true, remaining: final left?), _) => '${spokenDuration(left)} left',
+      (_, final s?) => _duration(s),
+      _ => null,
     };
     if (episode.uploadedAt != null) {
       return ([?length, if (episode.byteLength case final b?) formatBytes(b)].join(' · '), false);
@@ -360,7 +437,11 @@ final class _PodcastPageState extends State<PodcastPage> {
   }
 }
 
-const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/// An episode row's left edge and the gap after its thumbnail.
+const _rowInset = 16.0;
+
+/// How wide an episode's video thumbnail is; 16:9, as YouTube shows it.
+const _thumbWidth = 96.0;
 
 /// "4:05", "1:02:03".
 String _duration(int seconds) {

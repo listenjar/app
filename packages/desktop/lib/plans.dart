@@ -377,7 +377,7 @@ final class _IntervalSwitch extends StatelessWidget {
               ),
               foregroundColor: WidgetStatePropertyAll(interval == value ? brand.white : brand.fgSoft),
               shape: WidgetStateProperty.resolveWith((states) => StadiumBorder(
-                side: states.contains(WidgetState.focused) ? brand.focusSide : BorderSide.none,
+                side: states.contains(WidgetState.focused) ? brand.focusSide : brand.focusSideOff,
               )),
             ),
             onPressed: () => onChanged(interval),
@@ -434,7 +434,7 @@ final class _PlanTileState extends State<_PlanTile> {
             decoration: BoxDecoration(
               color: widget.selected || _hover ? brand.mist : brand.paper,
               borderRadius: BorderRadius.circular(brand.radiusTile),
-              border: Border.all(color: widget.selected ? brand.accent : const Color(0x00000000), width: 2),
+              border: Border.all(color: widget.selected ? brand.accent : brand.accent.withValues(alpha: 0), width: 2),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [

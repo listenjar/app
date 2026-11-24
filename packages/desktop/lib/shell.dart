@@ -129,10 +129,10 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   void openNowPlaying() => unawaited(showNowPlaying(context));
 
   @override
-  void openSearch({String? query, bool youtube = false}) {
+  void openSearch({String? query, bool youtube = false, String? into}) {
     _navigators[Section.search]!.currentState?.popUntil((r) => r.isFirst);
     setState(() => _section = Section.search);
-    search.ask(query: query, youtube: youtube);
+    search.ask(query: query, youtube: youtube, into: into);
   }
 
   @override
@@ -237,15 +237,26 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
 final class SearchRequest extends ChangeNotifier {
   String? query;
   bool youtube = false;
+
+  /// The id of a ListenJar Cloud podcast of the listener's own to add
+  /// videos to, when search was opened from it.
+  String? into;
   int asked = 0;
 
-  void ask({String? query, bool youtube = false}) {
+  void ask({String? query, bool youtube = false, String? into}) {
     this.query = query;
     this.youtube = youtube;
+    this.into = into;
     asked++;
     notifyListeners();
   }
 }
+
+// Opaque, so AnimatedContainer lerps between real colours: Color.lerp doesn't
+// premultiply, and from transparent black every hover and selection change
+// passed through a dark grey frame. Hover is the sidebar under fg at 6%.
+const _sidebar = Color(0xFFEFEDE8);
+const _sidebarHover = Color(0xFFE3E1DC);
 
 final class _Sidebar extends StatelessWidget {
   const _Sidebar({required this.section, required this.onGo});
@@ -259,7 +270,7 @@ final class _Sidebar extends StatelessWidget {
     return Container(
       width: 236,
       decoration: const BoxDecoration(
-        color: Color(0xFFEFEDE8),
+        color: _sidebar,
         border: Border(right: BorderSide(color: brand.line)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -344,7 +355,7 @@ final class _NavItemState extends State<_NavItem> {
               curve: brand.easeOutExpo,
               padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.subtitle == null ? 9 : 8),
               decoration: BoxDecoration(
-                color: selected ? brand.white : (_hover ? brand.paperDeep : const Color(0x00000000)),
+                color: selected ? brand.white : (_hover ? _sidebarHover : _sidebar),
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: selected ? const [BoxShadow(color: Color(0x14171A38), offset: Offset(0, 4), blurRadius: 12, spreadRadius: -6)] : null,
               ),

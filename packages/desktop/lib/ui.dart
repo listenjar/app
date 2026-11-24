@@ -4,12 +4,14 @@
 // notes, and how times and dates read. Screens are in shell.dart and the
 // files it names.
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
 import 'package:material_ui/material_ui.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'account.dart';
@@ -17,6 +19,7 @@ import 'directory.dart';
 import 'downloads.dart';
 import 'feeds.dart';
 import 'library.dart';
+import 'menu.dart';
 import 'player.dart';
 import 'podcasts.dart';
 import 'theme.dart' as brand;
@@ -61,7 +64,8 @@ final class Navigation {
 
   void openShow(int podcastId) => target?.openShow(podcastId);
   void openNowPlaying() => target?.openNowPlaying();
-  void openSearch({String? query, bool youtube = false}) => target?.openSearch(query: query, youtube: youtube);
+  void openSearch({String? query, bool youtube = false, String? into}) =>
+    target?.openSearch(query: query, youtube: youtube, into: into);
   void openCloud() => target?.openCloud();
 
   static Navigation of(BuildContext context) => context.getInheritedWidgetOfExactType<NavigationScope>()!.navigation;
@@ -70,7 +74,9 @@ final class Navigation {
 abstract interface class NavigationTarget {
   void openShow(int podcastId);
   void openNowPlaying();
-  void openSearch({String? query, bool youtube = false});
+  /// [into] is a ListenJar Cloud podcast of the listener's own that the
+  /// videos found go into, with one click each.
+  void openSearch({String? query, bool youtube = false, String? into});
   void openCloud();
 }
 
@@ -129,8 +135,11 @@ String episodeMeta(PodcastEpisode e, {bool withShow = false}) => [
 /// A show's square cover, rounded by size (DESIGN.md "Shapes"): the cover
 /// when there is one, else the show's initial on the authored violet.
 final class Artwork extends StatelessWidget {
-  const Artwork({super.key, required this.url, required this.title, required this.size, this.height, this.radius});
+  const Artwork({super.key, required this.url, this.fallbackUrl, required this.title, required this.size, this.height, this.radius});
   final String? url;
+
+  /// Shown when [url] fails to load, before the lettered square.
+  final String? fallbackUrl;
   final String title;
 
   /// The width, and the height unless [height] says otherwise.
@@ -149,6 +158,19 @@ final class Artwork extends StatelessWidget {
         style: TextStyle(color: brand.white, fontWeight: FontWeight.w700, fontSize: size * 0.42, height: 1),
       ),
     );
+    Widget picture(String? url, Widget otherwise) => switch (url) {
+      final url? when url.isNotEmpty => Image.network(
+        url,
+        fit: BoxFit.cover,
+        cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => otherwise,
+        frameBuilder: (_, child, frame, sync) => sync || frame != null
+          ? child
+          : const ColoredBox(color: brand.paperDeep),
+      ),
+      _ => otherwise,
+    };
     return Semantics(
       excludeSemantics: true,
       child: ClipRRect(
@@ -156,19 +178,7 @@ final class Artwork extends StatelessWidget {
         child: SizedBox(
           width: size,
           height: height ?? size,
-          child: switch (url) {
-            final url? when url.isNotEmpty => Image.network(
-              url,
-              fit: BoxFit.cover,
-              cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
-              gaplessPlayback: true,
-              errorBuilder: (_, _, _) => fallback,
-              frameBuilder: (_, child, frame, sync) => sync || frame != null
-                ? child
-                : const ColoredBox(color: brand.paperDeep),
-            ),
-            _ => fallback,
-          },
+          child: picture(url, picture(fallbackUrl, fallback)),
         ),
       ),
     );
@@ -304,19 +314,6 @@ final class DownloadButton extends StatelessWidget {
   }
 }
 
-/// The menu's look everywhere in the player.
-final menuStyle = MenuStyle(
-  backgroundColor: const WidgetStatePropertyAll(brand.white),
-  shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(vertical: 6)),
-);
-
-Widget menuItem(BuildContext context, IconData icon, String label, VoidCallback? onPressed) => MenuItemButton(
-  leadingIcon: Icon(icon, size: 18, color: brand.fgSoft),
-  onPressed: onPressed,
-  child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
-);
-
 /// What else can be done with an episode.
 List<Widget> episodeActions(BuildContext context, PodcastEpisode e, {bool showLink = false}) {
   final s = Services.of(context);
@@ -324,16 +321,16 @@ List<Widget> episodeActions(BuildContext context, PodcastEpisode e, {bool showLi
   final current = s.player.current?.id == e.id;
   return [
     if (!current) ...[
-      menuItem(context, Icons.playlist_play_rounded, 'Play next', () => s.library.playNext(e.id)),
+      MenuEntry('Play next', icon: Icons.playlist_play_rounded, onPressed: () => s.library.playNext(e.id)),
       if (queued)
-        menuItem(context, Icons.playlist_remove_rounded, 'Remove from Up Next', () => s.library.dequeue(e.id))
+        MenuEntry('Remove from Up Next', icon: Icons.playlist_remove_rounded, onPressed: () => s.library.dequeue(e.id))
       else
-        menuItem(context, Icons.playlist_add_rounded, 'Play last', () => s.library.playLast([e.id])),
+        MenuEntry('Play last', icon: Icons.playlist_add_rounded, onPressed: () => s.library.playLast([e.id])),
     ],
     if (e.played)
-      menuItem(context, Icons.replay_rounded, 'Mark as unplayed', () => s.library.setPlayed([e.id], false))
+      MenuEntry('Mark as unplayed', icon: Icons.replay_rounded, onPressed: () => s.library.setPlayed([e.id], false))
     else
-      menuItem(context, Icons.done_all_rounded, 'Mark as played', () {
+      MenuEntry('Mark as played', icon: Icons.done_all_rounded, onPressed: () {
         if (current) {
           unawaited(s.player.markPlayedAndNext());
         } else {
@@ -341,37 +338,58 @@ List<Widget> episodeActions(BuildContext context, PodcastEpisode e, {bool showLi
         }
       }),
     if (e.downloadState == DownloadState.none || e.downloadState == DownloadState.failed)
-      menuItem(context, Icons.download_rounded, 'Download', () => unawaited(s.downloads.download(e)))
+      MenuEntry('Download', icon: Icons.download_rounded, onPressed: () => unawaited(s.downloads.download(e)))
     else
-      menuItem(context, Icons.delete_outline_rounded, 'Delete download', () => unawaited(s.downloads.delete(e))),
-    if (showLink) menuItem(context, Icons.podcasts_rounded, 'Go to show', () => Navigation.of(context).openShow(e.podcastId)),
+      MenuEntry('Delete download', icon: Icons.delete_outline_rounded, danger: true, onPressed: () => unawaited(s.downloads.delete(e))),
+    if (showLink) MenuEntry('Go to show', icon: Icons.podcasts_rounded, onPressed: () => Navigation.of(context).openShow(e.podcastId)),
+    if (episodeUrl(e) case final url?) MenuEntry('Share…', icon: Icons.adaptive.share, onPressed: () => unawaited(shareLink(context, url, title: e.title))),
     if (e.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
-      menuItem(
-        context,
-        e.youtubeId == null ? Icons.open_in_new_rounded : Icons.smart_display_outlined,
+      MenuEntry(
         e.youtubeId == null ? 'Open episode page' : 'Open on YouTube',
-        () => unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication)),
+        icon: e.youtubeId == null ? Icons.open_in_new_rounded : Icons.smart_display_outlined,
+        onPressed: () => unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication)),
       ),
   ];
 }
 
+/// The page that stands for [e] when it's shared: a YouTube video's watch
+/// page, or the episode's own page; null when it has neither.
+String? episodeUrl(PodcastEpisode e) => switch (e) {
+  PodcastEpisode(youtubeId: final id?) => 'https://www.youtube.com/watch?v=$id',
+  PodcastEpisode(link: final link?) when Uri.tryParse(link)?.hasScheme ?? false => link,
+  _ => null,
+};
+
+/// Hands [url] to the system share sheet: iOS and Android's sheet, the
+/// macOS sharing picker, Windows' Share. iPad and Mac anchor it on
+/// [context]'s widget. Linux has no share sheet, so the link is copied.
+Future<void> shareLink(BuildContext context, String url, {String? title}) async {
+  if (Platform.isLinux) {
+    await Clipboard.setData(ClipboardData(text: url));
+    if (context.mounted) tell(context, 'Link copied.');
+    return;
+  }
+  final box = context.findRenderObject() as RenderBox?;
+  await SharePlus.instance.share(ShareParams(
+    uri: Uri.parse(url),
+    title: title,
+    subject: title,
+    sharePositionOrigin: box == null || !box.hasSize ? null : box.localToGlobal(Offset.zero) & box.size,
+  ));
+}
+
 final class EpisodeMenu extends StatelessWidget {
-  const EpisodeMenu({super.key, required this.episode, this.showLink = false, this.color = brand.fgSoft});
+  const EpisodeMenu({super.key, required this.episode, this.showLink = false, this.tone = MenuTone.paper});
   final PodcastEpisode episode;
   final bool showLink;
-  final Color color;
+  final MenuTone tone;
 
   @override
-  Widget build(BuildContext context) => MenuAnchor(
-    style: menuStyle,
-    alignmentOffset: const Offset(-160, 0),
-    menuChildren: episodeActions(context, episode, showLink: showLink),
-    builder: (context, menu, _) => IconButton(
-      tooltip: 'More',
-      style: IconButton.styleFrom(hoverColor: brand.paperDeep),
-      onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-      icon: Icon(Icons.more_horiz_rounded, color: color),
-    ),
+  Widget build(BuildContext context) => Dropdown(
+    tone: tone,
+    align: MenuAlign.end,
+    items: episodeActions(context, episode, showLink: showLink),
+    builder: (context, menu) => MoreButton(menu: menu, tone: tone),
   );
 }
 
@@ -410,7 +428,7 @@ final class _EpisodeRowState extends State<EpisodeRow> {
         duration: brand.quick,
         curve: brand.easeOutExpo,
         decoration: BoxDecoration(
-          color: _hover ? brand.mist : brand.white.withValues(alpha: 0),
+          color: _hover ? brand.mist : brand.mist.withValues(alpha: 0),
           borderRadius: BorderRadius.circular(14),
         ),
         child: InkWell(

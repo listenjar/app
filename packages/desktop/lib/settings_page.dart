@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'library.dart';
 import 'library_page.dart' show exportOpml, importOpml;
+import 'menu.dart';
 import 'now_playing.dart' show speedLabel;
 import 'player.dart' show speeds;
 import 'plans.dart' show formatBytes;
@@ -178,19 +179,15 @@ Widget settingChoice<T>(
     context,
     title,
     body,
-    MenuAnchor(
-      style: menuStyle,
-      menuChildren: [
+    Dropdown(
+      align: MenuAlign.end,
+      items: [
         for (final option in options)
-          MenuItemButton(
-            leadingIcon: Icon(Icons.check_rounded, size: 18, color: option == value ? brand.accent : const Color(0x00000000)),
-            onPressed: () => onChanged(option),
-            child: Text(label(option), style: Theme.of(context).textTheme.bodyMedium),
-          ),
+          MenuEntry(label(option), checked: option == value, tabular: true, onPressed: () => onChanged(option)),
       ],
-      builder: (context, menu, _) => TextButton.icon(
+      builder: (context, menu) => TextButton.icon(
         style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+        onPressed: menu.toggle,
         iconAlignment: IconAlignment.end,
         icon: const Icon(Icons.unfold_more_rounded, size: 18),
         label: Text(label(value), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),

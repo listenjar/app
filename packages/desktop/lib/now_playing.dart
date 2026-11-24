@@ -7,8 +7,11 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'backend/api.dart' show Plan;
 import 'library.dart';
+import 'menu.dart';
 import 'player.dart';
+import 'shared_links.dart' show addVideoToOwnPodcast, makeVideoPodcast;
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -118,13 +121,19 @@ final class MiniPlayer extends StatelessWidget {
           child: brand.inkSurface(
             child: Material(
               type: MaterialType.transparency,
-              child: InkWell(
-                onTap: open,
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Padding(padding: EdgeInsets.fromLTRB(10, wide ? 10 : 8, 10, wide ? 8 : 6), child: content),
-                  _ThinProgress(player: player),
-                ]),
-              ),
+              // The seek strip sits over the bar's bottom edge, above the
+              // InkWell, so a click or drag there seeks instead of opening
+              // Now Playing.
+              child: Stack(children: [
+                InkWell(
+                  onTap: open,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Padding(padding: EdgeInsets.fromLTRB(10, wide ? 10 : 8, 10, wide ? 8 : 6), child: content),
+                    const SizedBox(height: _SeekLine.rest),
+                  ]),
+                ),
+                Positioned(left: 0, right: 0, bottom: 0, height: _SeekLine.reach, child: _SeekLine(player: player)),
+              ]),
             ),
           ),
         ),
@@ -163,24 +172,167 @@ final class _InkPlay extends StatelessWidget {
   );
 }
 
-/// The mini player's bottom edge, filling as the episode plays.
-final class _ThinProgress extends StatelessWidget {
-  const _ThinProgress({required this.player});
+/// The mini player's bottom edge, filling as the episode plays. Click or drag
+/// it to seek: on hover it thickens, shades up to the pointer and shows the
+/// time there.
+final class _SeekLine extends StatefulWidget {
+  const _SeekLine({required this.player});
   final Player player;
+
+  /// The line's thickness at rest and under the pointer.
+  static const rest = 3.0;
+  static const active = 6.0;
+
+  /// How far above the bar's bottom edge the strip takes the pointer.
+  static const reach = 14.0;
+
+  @override
+  State<_SeekLine> createState() => _SeekLineState();
+}
+
+final class _SeekLineState extends State<_SeekLine> {
+  final _bubble = OverlayPortalController();
+
+  /// Where the pointer is along the line, 0 to 1, while it hovers.
+  double? _hover;
+
+  /// Where a drag has the head, 0 to 1, until it lets go.
+  double? _drag;
+
+  Duration? get _total {
+    final total = widget.player.duration;
+    return total == null || total == Duration.zero ? null : total;
+  }
+
+  double _fraction(Offset local) {
+    final width = (context.findRenderObject()! as RenderBox).size.width;
+    return width == 0 ? 0 : (local.dx / width).clamp(0.0, 1.0);
+  }
+
+  Duration _at(Duration total, double fraction) => Duration(milliseconds: (total.inMilliseconds * fraction).round());
+
+  void _point(double? fraction) {
+    setState(() => _hover = fraction);
+    if (fraction != null || _drag != null) {
+      _bubble.show();
+    } else {
+      _bubble.hide();
+    }
+  }
+
+  void _seek(double fraction) {
+    final total = _total;
+    if (total != null) unawaited(widget.player.seek(_at(total, fraction)));
+  }
 
   @override
   Widget build(BuildContext context) => StreamBuilder<Duration>(
-    stream: player.positionStream,
+    stream: widget.player.positionStream,
     builder: (context, snapshot) {
-      final total = player.duration;
-      final at = snapshot.data ?? player.current?.position ?? Duration.zero;
-      final value = total == null || total == Duration.zero ? 0.0 : (at.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
-      return SizedBox(
-        height: 3,
-        child: LinearProgressIndicator(value: value, color: brand.accentLight, backgroundColor: brand.inkTile),
+      final total = _total;
+      final at = snapshot.data ?? widget.player.current?.position ?? Duration.zero;
+      final played = _drag ?? (total == null ? 0.0 : (at.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0));
+      final hot = total != null && (_hover != null || _drag != null);
+      final line = Align(
+        alignment: Alignment.bottomCenter,
+        child: AnimatedContainer(
+          duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 160),
+          curve: brand.easeOutExpo,
+          height: hot ? _SeekLine.active : _SeekLine.rest,
+          child: CustomPaint(
+            size: Size.infinite,
+            painter: _SeekPainter(played: played, pointer: _drag == null ? _hover : null),
+          ),
+        ),
+      );
+      if (total == null) return line;
+      return Semantics(
+        slider: true,
+        label: 'Seek',
+        value: clock(_at(total, played)),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onHover: (e) => _point(_fraction(e.localPosition)),
+          onExit: (_) => _point(null),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapUp: (d) => _seek(_fraction(d.localPosition)),
+            onHorizontalDragStart: (d) {
+              setState(() => _drag = _fraction(d.localPosition));
+              _bubble.show();
+            },
+            onHorizontalDragUpdate: (d) => setState(() => _drag = _fraction(d.localPosition)),
+            onHorizontalDragEnd: (_) {
+              final to = _drag;
+              setState(() => _drag = null);
+              if (to != null) _seek(to);
+              if (_hover == null) _bubble.hide();
+            },
+            onHorizontalDragCancel: () {
+              setState(() => _drag = null);
+              if (_hover == null) _bubble.hide();
+            },
+            child: OverlayPortal(
+              controller: _bubble,
+              overlayChildBuilder: (overlayContext) => _timeBubble(overlayContext, total, _drag ?? _hover),
+              child: line,
+            ),
+          ),
+        ),
       );
     },
   );
+
+  /// The time under the pointer, floating just above the line.
+  Widget _timeBubble(BuildContext overlayContext, Duration total, double? fraction) {
+    final box = context.findRenderObject() as RenderBox?;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (fraction == null || box == null || overlay == null || !box.attached) return const SizedBox.shrink();
+    final origin = box.localToGlobal(Offset.zero, ancestor: overlay);
+    final x = origin.dx + box.size.width * fraction;
+    final bottom = overlay.size.height - (origin.dy + box.size.height - _SeekLine.active - 6);
+    final style = Theme.of(context).textTheme.labelMedium!.copyWith(
+      color: brand.ink,
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Positioned(
+      left: x,
+      bottom: bottom,
+      child: IgnorePointer(
+        child: FractionalTranslation(
+          translation: const Offset(-0.5, 0),
+          child: DecoratedBox(
+            decoration: BoxDecoration(color: brand.white, borderRadius: BorderRadius.circular(7), boxShadow: const [brand.shadowFloat]),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              child: Text(clock(_at(total, fraction)), style: style),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+final class _SeekPainter extends CustomPainter {
+  _SeekPainter({required this.played, required this.pointer});
+  final double played;
+  final double? pointer;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(Offset.zero & size, Paint()..color = brand.inkTile);
+    final p = pointer;
+    if (p != null && p > played) {
+      canvas.drawRect(Rect.fromLTRB(size.width * played, 0, size.width * p, size.height), Paint()..color = brand.snow.withValues(alpha: 0.22));
+    }
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width * played, size.height), Paint()..color = brand.accentLight);
+  }
+
+  @override
+  bool shouldRepaint(_SeekPainter old) => old.played != played || old.pointer != pointer;
 }
 
 // Now Playing.
@@ -242,7 +394,16 @@ final class NowPlaying extends StatelessWidget {
       const Spacer(),
       Text('Now Playing', style: Theme.of(context).textTheme.labelLarge!.copyWith(color: brand.snowSoft, fontSize: 13)),
       const Spacer(),
-      EpisodeMenu(episode: e, showLink: true, color: brand.snow),
+      if (episodeUrl(e) case final url?)
+        Builder(
+          builder: (context) => IconButton(
+            tooltip: e.youtubeId == null ? 'Share' : 'Share YouTube link',
+            onPressed: () => unawaited(shareLink(context, url, title: e.title)),
+            style: IconButton.styleFrom(foregroundColor: brand.snow, hoverColor: brand.inkTile),
+            icon: Icon(Icons.adaptive.share, size: 22),
+          ),
+        ),
+      EpisodeMenu(episode: e, showLink: true, tone: MenuTone.ink),
     ]),
   );
 
@@ -282,6 +443,7 @@ final class NowPlaying extends StatelessWidget {
         _SpeedButton(player: player),
         _SleepButton(player: player),
         _UpNextButton(library: s.library),
+        if (player.current case final e? when e.youtubeId != null) _AddVideoButton(episode: e),
       ]),
       if (player.problem case final problem?) ...[
         const SizedBox(height: 16),
@@ -290,9 +452,9 @@ final class NowPlaying extends StatelessWidget {
     ]);
   }
 
-  /// The cover, [width] wide: square, or a YouTube video's 16:9 frame.
+  /// The cover, [width] wide: square, or a video's 16:9 frame.
   Widget _cover(PodcastEpisode e, double width) =>
-    Artwork(url: e.artwork, title: e.podcastTitle, size: width, height: e.youtubeId == null ? null : width * 9 / 16, radius: 24);
+    Artwork(url: e.cover, fallbackUrl: e.coverFallback, title: e.podcastTitle, size: width, height: e.widescreen ? width * 9 / 16 : null, radius: 24);
 
   Widget _notes(BuildContext context, Services s, PodcastEpisode e) => ShowNotes(html: s.library.description(e.id), episode: e, onInk: true);
 
@@ -343,7 +505,7 @@ final class NowPlaying extends StatelessWidget {
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                           DecoratedBox(
                             decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
-                            child: _cover(e, e.youtubeId == null ? cover : (cover * 16 / 9).clamp(0, column.maxWidth).toDouble()),
+                            child: _cover(e, e.widescreen ? (cover * 16 / 9).clamp(0, column.maxWidth).toDouble() : cover),
                           ),
                           const SizedBox(height: 28),
                           _identity(context, e, align: TextAlign.center),
@@ -476,20 +638,18 @@ final class _SpeedButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final speed = player.speed;
-    return MenuAnchor(
-      style: menuStyle,
-      menuChildren: [
+    return Dropdown(
+      tone: MenuTone.ink,
+      items: [
         for (final s in speeds)
-          MenuItemButton(
-            leadingIcon: Icon(Icons.check_rounded, size: 18, color: (s - speed).abs() < 0.01 ? brand.accent : const Color(0x00000000)),
+          MenuEntry(
+            s == 1.0 ? '1× · Normal' : speedLabel(s),
+            checked: (s - speed).abs() < 0.01,
+            tabular: true,
             onPressed: () => unawaited(player.setSpeed(s)),
-            child: Text(
-              s == 1.0 ? '1× · Normal' : speedLabel(s),
-              style: Theme.of(context).textTheme.bodyMedium!.copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
-            ),
           ),
       ],
-      builder: (context, menu, _) => Tooltip(
+      builder: (context, menu) => Tooltip(
         message: 'Playback speed',
         child: _pill(
           context,
@@ -497,7 +657,7 @@ final class _SpeedButton extends StatelessWidget {
           label: speedLabel(speed),
           active: (speed - 1).abs() > 0.01,
           compact: compact,
-          onTap: () => menu.isOpen ? menu.close() : menu.open(),
+          onTap: menu.toggle,
         ),
       ),
     );
@@ -523,35 +683,28 @@ final class _SleepButtonState extends State<_SleepButton> {
       SleepAtEnd() => 'End of episode',
       null => widget.compact ? '' : 'Sleep timer',
     };
-    final text = Theme.of(context).textTheme.bodyMedium;
-    return MenuAnchor(
-      style: menuStyle,
-      menuChildren: [
+    return Dropdown(
+      tone: MenuTone.ink,
+      items: [
         if (sleep is SleepAt) ...[
-          MenuItemButton(
-            onPressed: () => player.extendSleep(const Duration(minutes: 5)),
-            child: Text('5 more minutes', style: text),
-          ),
-          const Divider(height: 9, color: brand.line),
+          MenuEntry('5 more minutes', icon: Icons.more_time_rounded, onPressed: () => player.extendSleep(const Duration(minutes: 5))),
+          const MenuDivider(),
         ],
+        const MenuHeader('Stop playing'),
         for (final minutes in const [5, 10, 15, 30, 45, 60, 90])
-          MenuItemButton(
+          MenuEntry(
+            minutes < 60 ? 'In $minutes minutes' : (minutes == 60 ? 'In 1 hour' : 'In 1 hour 30 minutes'),
+            checked: sleep is SleepAt && sleep.length == Duration(minutes: minutes),
+            tabular: true,
             onPressed: () => player.setSleep(SleepAt(DateTime.now().add(Duration(minutes: minutes)), Duration(minutes: minutes))),
-            child: Text(minutes < 60 ? 'In $minutes minutes' : (minutes == 60 ? 'In 1 hour' : 'In 1 hour 30 minutes'), style: text),
           ),
-        MenuItemButton(
-          onPressed: () => player.setSleep(const SleepAtEnd()),
-          child: Text('At the end of this episode', style: text),
-        ),
+        MenuEntry('At the end of this episode', checked: sleep is SleepAtEnd, onPressed: () => player.setSleep(const SleepAtEnd())),
         if (sleep != null) ...[
-          const Divider(height: 9, color: brand.line),
-          MenuItemButton(
-            onPressed: () => player.setSleep(null),
-            child: Text('Turn off', style: text),
-          ),
+          const MenuDivider(),
+          MenuEntry('Turn off', icon: Icons.timer_off_outlined, onPressed: () => player.setSleep(null)),
         ],
       ],
-      builder: (context, menu, _) => Tooltip(
+      builder: (context, menu) => Tooltip(
         message: 'Sleep timer',
         child: _pill(
           context,
@@ -559,7 +712,7 @@ final class _SleepButtonState extends State<_SleepButton> {
           label: label,
           active: sleep != null,
           compact: widget.compact,
-          onTap: () => menu.isOpen ? menu.close() : menu.open(),
+          onTap: menu.toggle,
         ),
       ),
     );
@@ -620,6 +773,93 @@ final class _UpNextButton extends StatelessWidget {
           },
         ),
       ),
+    );
+  }
+}
+
+/// Where a YouTube video that's playing can stay: in the library, free and
+/// on this device; or, in ListenJar Cloud, as a podcast of its own or an
+/// episode of one of the listener's podcasts.
+final class _AddVideoButton extends StatefulWidget {
+  const _AddVideoButton({required this.episode});
+  final PodcastEpisode episode;
+
+  @override
+  State<_AddVideoButton> createState() => _AddVideoButtonState();
+}
+
+final class _AddVideoButtonState extends State<_AddVideoButton> {
+  bool _busy = false;
+
+  Future<void> _run(Future<void> Function(BuildContext context) action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action(context);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Services.of(context);
+    final e = widget.episode;
+    final url = 'https://www.youtube.com/watch?v=${e.youtubeId}';
+    return ListenableBuilder(
+      listenable: Listenable.merge([s.library, s.account, s.feeds]),
+      builder: (context, _) {
+        final show = s.library.podcast(e.podcastId);
+        final kept = show?.followed ?? false;
+        final user = s.account.user;
+        final planned = user != null && user.plan != Plan.free;
+        return Dropdown(
+        tone: MenuTone.ink,
+        items: [
+          MenuEntry(
+            kept ? 'In your Library' : 'Add to Library',
+            icon: Icons.library_add_outlined,
+            checked: kept ? true : null,
+            onPressed: kept || show == null
+              ? null
+              : () {
+                  s.podcasts.followShow(show);
+                  tell(context, 'Added “${e.title}” to your library.');
+                },
+          ),
+          const MenuDivider(),
+          const MenuHeader('ListenJar Cloud, for any podcast app'),
+          MenuEntry('Make it a podcast', icon: Icons.podcasts_rounded, onPressed: () => unawaited(_run((c) => makeVideoPodcast(c, url)))),
+          if (planned) ...[
+            for (final feed in s.feeds.own)
+              MenuEntry(
+                'Add to “${feed.title}”',
+                icon: Icons.playlist_add_rounded,
+                onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, feed))),
+              ),
+            MenuEntry('Add to a new podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null)))),
+          ] else
+            MenuEntry(
+              'Add to a podcast of yours…',
+              icon: Icons.playlist_add_rounded,
+              onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null))),
+            ),
+        ],
+        builder: (context, menu) => Tooltip(
+          message: 'Keep this video',
+          child: _pill(
+            context,
+            icon: kept ? Icons.library_add_check_outlined : Icons.library_add_outlined,
+            label: _busy ? 'Adding…' : 'Add video',
+            active: false,
+            onTap: () {
+              if (_busy) return;
+              menu.isOpen ? menu.close() : menu.open();
+            },
+          ),
+        ),
+        );
+      },
     );
   }
 }

@@ -20,7 +20,7 @@ import 'backend/api.dart' show Feed, Plan, SourceKind;
 import 'config.dart' show appScheme;
 import 'links.dart';
 import 'log.dart';
-import 'plans.dart' show showPlans;
+import 'plans.dart' show askPodcastTitle, showPlans;
 import 'sync.dart' show PlanLimit;
 import 'theme.dart' as brand;
 import 'ui.dart';
@@ -132,7 +132,13 @@ Future<void> addToCloud(BuildContext context, String url) => _guard(context, () 
 Future<bool> mayFollowInCloud(BuildContext context, String what) async {
   final user = Services.of(context).account.user;
   if (user == null) {
-    await _askToSignIn(context, what);
+    await _askToSignIn(
+      context,
+      title: 'Follow $what with ListenJar Cloud',
+      body: 'Single videos play here for free. Following a playlist or a channel makes it a podcast: '
+        'ListenJar keeps its new videos as episodes in the cloud, for this app and any podcast app. '
+        'That takes an account and a plan.',
+    );
     return false;
   }
   if (user.plan == Plan.free) {
@@ -140,6 +146,52 @@ Future<bool> mayFollowInCloud(BuildContext context, String what) async {
     return false;
   }
   return true;
+}
+
+/// Whether the listener may put a YouTube video in ListenJar Cloud, as a
+/// podcast of its own or in one of theirs. If they can't, says why, as
+/// [mayFollowInCloud] does.
+Future<bool> mayAddVideoToCloud(BuildContext context) async {
+  final user = Services.of(context).account.user;
+  if (user == null) {
+    await _askToSignIn(
+      context,
+      title: 'Make it a podcast with ListenJar Cloud',
+      body: 'This video plays here for free, and Add to Library keeps it on this device. '
+        'As a podcast, of its own or in one of yours, ListenJar keeps it in the cloud, '
+        'for this app and any podcast app. That takes an account and a plan.',
+    );
+    return false;
+  }
+  if (user.plan == Plan.free) {
+    await showPlans(context, title: 'Podcasts of your own');
+    return false;
+  }
+  return true;
+}
+
+/// Makes the YouTube video at [url] a ListenJar podcast of its own.
+Future<void> makeVideoPodcast(BuildContext context, String url) async {
+  if (!await mayAddVideoToCloud(context) || !context.mounted) return;
+  final feeds = Services.of(context).feeds;
+  await _guard(context, () async {
+    final feed = await feeds.add(url, CancellationToken().merge(TimeoutCancellationToken(const Duration(minutes: 2))));
+    if (context.mounted) tell(context, '“${feed.title}” is now a ListenJar podcast. It uploads from this device.');
+  });
+}
+
+/// Adds the YouTube video at [url] to [feed], a podcast of the listener's
+/// own, or, when [feed] is null, to a new one they name.
+Future<void> addVideoToOwnPodcast(BuildContext context, String url, Feed? feed) async {
+  if (!await mayAddVideoToCloud(context) || !context.mounted) return;
+  final feeds = Services.of(context).feeds;
+  final title = feed == null ? await askPodcastTitle(context) : null;
+  if ((feed == null && title == null) || !context.mounted) return;
+  await _guard(context, () async {
+    final target = feed ?? await feeds.create(title!);
+    await feeds.addVideo(target, url, CancellationToken());
+    if (context.mounted) tell(context, 'Added to “${target.title}”. It uploads from this device.');
+  });
 }
 
 Future<void> _guard(BuildContext context, Future<void> Function() action) async {
@@ -153,21 +205,21 @@ Future<void> _guard(BuildContext context, Future<void> Function() action) async 
   }
 }
 
-Future<void> _askToSignIn(BuildContext context, String what) async {
+/// Offers to sign in; yes closes Now Playing, if it's open, for the Cloud.
+Future<void> _askToSignIn(BuildContext context, {required String title, required String body}) async {
   final text = Theme.of(context).textTheme;
   final navigation = Navigation.of(context);
+  final root = Navigator.of(context, rootNavigator: true);
   final go = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       backgroundColor: brand.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-      title: Text('Follow $what with ListenJar Cloud', style: text.titleLarge),
+      title: Text(title, style: text.titleLarge),
       content: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 440),
         child: Text(
-          'Single videos play here for free. Following a playlist or a channel makes it a podcast: '
-          'ListenJar keeps its new videos as episodes in the cloud, for this app and any podcast app. '
-          'That takes an account and a plan.',
+          body,
           style: text.bodyMedium!.copyWith(color: brand.fgSoft),
         ),
       ),
@@ -177,7 +229,9 @@ Future<void> _askToSignIn(BuildContext context, String what) async {
       ],
     ),
   );
-  if (go == true) navigation.openCloud();
+  if (go != true) return;
+  root.popUntil((route) => route.isFirst);
+  navigation.openCloud();
 }
 
 sealed class _Where {

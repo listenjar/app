@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'library.dart';
+import 'menu.dart';
 import 'shell.dart';
 import 'theme.dart' as brand;
 import 'ui.dart';
@@ -142,33 +143,38 @@ final class _ShowPageState extends State<ShowPage> {
                 : const Icon(Icons.refresh_rounded, color: brand.fgSoft),
             ),
           ),
-        MenuAnchor(
-          style: menuStyle,
-          menuChildren: [
-            if (show.followed && show.kind == PodcastKind.rss)
-              MenuItemButton(
-                leadingIcon: Icon(show.autoDownload ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded, size: 18, color: brand.fgSoft),
+        Dropdown(
+          align: MenuAlign.end,
+          items: [
+            if (show.followed && show.kind == PodcastKind.rss) ...[
+              MenuEntry(
+                'Download new episodes',
+                checked: show.autoDownload,
                 onPressed: () => s.library.setAutoDownload(show.id, !show.autoDownload),
-                child: Text('Download new episodes', style: text.bodyMedium),
               ),
-            menuItem(context, Icons.done_all_rounded, 'Mark all as played', () => s.library.setAllPlayed(show.id, true)),
-            menuItem(context, Icons.playlist_add_rounded, 'Add unplayed to Up Next', () {
+              const MenuDivider(),
+            ],
+            MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
+            MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
               s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
             }),
             if (show.kind == PodcastKind.rss)
-              menuItem(context, Icons.link_rounded, 'Copy feed link', () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
+              MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
             if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
-              menuItem(context, Icons.open_in_new_rounded, show.isYouTube ? 'Open on YouTube' : 'Open website', () {
+              MenuEntry(show.isYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
                 unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
               }),
-            if (show.followed && show.cloudFeedId == null)
-              menuItem(context, Icons.remove_circle_outline_rounded, show.isYouTube ? 'Remove from Library' : 'Unfollow', () => _unfollow(context, show)),
+            if (show.followed && show.cloudFeedId == null) ...[
+              const MenuDivider(),
+              MenuEntry(
+                show.isYouTube ? 'Remove from Library' : 'Unfollow',
+                icon: Icons.remove_circle_outline_rounded,
+                danger: true,
+                onPressed: () => _unfollow(context, show),
+              ),
+            ],
           ],
-          builder: (context, menu, _) => IconButton(
-            tooltip: 'More',
-            onPressed: () => menu.isOpen ? menu.close() : menu.open(),
-            icon: const Icon(Icons.more_horiz_rounded, color: brand.fgSoft),
-          ),
+          builder: (context, menu) => MoreButton(menu: menu),
         ),
       ]),
       if (show.cloudFeedId != null) ...[

@@ -11,6 +11,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import 'backend/api.dart' show SourceKind;
+import 'links.dart';
+
 import 'rss.dart';
 
 /// What a show in the library is.
@@ -136,7 +139,40 @@ final class PodcastEpisode {
 
   bool get downloaded => downloadState == DownloadState.done && downloadPath != null;
   bool get started => position > Duration.zero && !played;
-  String? get artwork => artworkUrl ?? podcastArtworkUrl;
+
+  /// The YouTube video the episode is: a video added on its own, or a feed
+  /// episode whose link is one (a podcast of the listener's own).
+  String? get videoId => youtubeId ?? switch (link) {
+    final link? => switch (parseYouTubeLink(link)) {
+      YouTubeLink(kind: SourceKind.video, :final id) => id,
+      _ => null,
+    },
+    null => null,
+  };
+
+  /// Small square art: a video's thumbnail, as the episode rows show it,
+  /// else the episode's own picture, else the show's.
+  String? get artwork => switch (videoId) {
+    final id? => videoThumbnail(id),
+    null => artworkUrl ?? podcastArtworkUrl,
+  };
+
+  /// Whether the cover is a video's 16:9 frame.
+  bool get widescreen => videoId != null;
+
+  /// The big cover: a video's sharpest frame, else [artwork].
+  String? get cover => switch (videoId) {
+    final id? => 'https://i.ytimg.com/vi/$id/maxresdefault.jpg',
+    null => artwork,
+  };
+
+  /// What [cover] falls back to when a video has no 1280×720 frame:
+  /// hqdefault, there for every video, whose 4:3 letterbox bars the 16:9
+  /// frame crops away.
+  String? get coverFallback => switch (videoId) {
+    final id? => 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
+    null => null,
+  };
 
   /// What's left to hear, when the length is known.
   Duration? get remaining => switch (duration) {
@@ -485,6 +521,10 @@ final class Library extends ChangeNotifier {
 
   PodcastEpisode? episode(int id) => _episodes('e.id = ?', [id]).firstOrNull;
 
+  /// The YouTube video [videoId] as an episode of its own, once it was
+  /// played or kept from search ([addYouTubeVideo]).
+  PodcastEpisode? youtubeVideo(String videoId) => _episodes('p.feed_url = ?', [_watchUrl(videoId)]).firstOrNull;
+
   /// The show notes of [id], HTML or text.
   String description(int id) =>
     _db.select('select description from episodes where id = ?', [id]).firstOrNull?['description'] as String? ?? '';
@@ -635,7 +675,7 @@ final class Library extends ChangeNotifier {
     required String description,
     required DateTime? publishedAt,
   }) {
-    final url = 'https://www.youtube.com/watch?v=$videoId';
+    final url = _watchUrl(videoId);
     final now = DateTime.now().millisecondsSinceEpoch;
     _db.execute('''
       insert into podcasts (feed_url, kind, title, author, description, artwork_url, link, subscribed_at, refreshed_at, followed)
@@ -651,6 +691,8 @@ final class Library extends ChangeNotifier {
     _changed();
     return podcast(id)!;
   }
+
+  static String _watchUrl(String videoId) => 'https://www.youtube.com/watch?v=$videoId';
 
   /// Stops following [podcast]; returns its downloads' files to delete.
   List<String> unsubscribe(int podcast) {
@@ -827,3 +869,7 @@ final class Library extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// A YouTube video's thumbnail: 320×180, with no letterbox bars, and there
+/// for every video.
+String videoThumbnail(String videoId) => 'https://i.ytimg.com/vi/$videoId/mqdefault.jpg';
