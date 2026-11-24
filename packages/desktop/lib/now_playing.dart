@@ -55,57 +55,63 @@ final class _NowPlayingRoute extends PageRoute<void> {
     return SlideTransition(position: Tween(begin: const Offset(0, 1), end: Offset.zero).animate(position), child: child);
   }
 
-  /// Pushes Now Playing at the bottom of the window, held by a swipe up
-  /// out of the mini player; null if another gesture holds the navigator.
-  static _NowPlayingRoute? lift(BuildContext context) {
+  /// Pushes Now Playing [value] of the way up, where a swipe up out of the
+  /// mini player let it go at [velocity], and settles it as [release] does.
+  static void _letGo(BuildContext context, double value, double velocity) {
     final nav = Navigator.of(context, rootNavigator: true);
-    if (nav.userGestureInProgress) return null;
-    final route = _NowPlayingRoute().._lifted = true;
+    final route = _NowPlayingRoute();
     unawaited(nav.push(route));
-    // The finger has it, not the rise push started.
-    route.controller!.value = 0;
-    route._grab();
-    return route;
+    final c = route.controller!..value = value;
+    if (!route._grab(route)) {
+      unawaited(c.forward());
+      return;
+    }
+    route._lifted = true;
+    route.release(velocity, route);
   }
 
-  bool _swiping = false;
+  /// What holds the page: the scroll view or the handle the swipe started
+  /// on, so another one letting go doesn't drop it.
+  Object? _holder;
 
   /// Whether the swipe holding the page started at the mini player.
   bool _lifted = false;
 
-  /// Whether a swipe holds the page.
-  bool get swiping => _swiping;
+  /// The height the page travels, the window's, from when the swipe began.
+  double _height = 0;
 
-  bool _grab() {
+  /// Whether [holder]'s swipe holds the page.
+  bool heldBy(Object holder) => _holder == holder;
+
+  bool _grab(Object holder) {
     final nav = navigator;
-    if (nav == null || !isCurrent || nav.userGestureInProgress) return false;
-    _swiping = true;
+    final height = nav?.context.size?.height ?? 0;
+    if (nav == null || height <= 0 || !isCurrent || nav.userGestureInProgress) return false;
+    _holder = holder;
+    _height = height;
     nav.didStartUserGesture();
     return true;
   }
 
-  /// The height the page travels: the window's.
-  double get _height => navigator?.context.size?.height ?? 0;
-
   /// Moves the page down by [dy] logical pixels, up when negative, no higher
-  /// than open; returns how much of [dy] it took. A swipe starts only
-  /// going down.
-  double swipe(double dy) {
-    final height = _height;
-    if (height <= 0) return 0;
-    if (!_swiping && (dy <= 0 || !_grab())) return 0;
+  /// than open, for [holder]; returns how much of [dy] it took. A swipe
+  /// starts only going down.
+  double swipe(double dy, Object holder) {
+    if (_holder == null && (dy <= 0 || !_grab(holder))) return 0;
+    if (_holder != holder) return 0;
     final c = controller!;
     final before = c.value;
-    c.value = (before - dy / height).clamp(0.0, 1.0);
-    return (before - c.value) * height;
+    c.value = (before - dy / _height).clamp(0.0, 1.0);
+    return (before - c.value) * _height;
   }
 
-  /// Lets the page go with the finger moving down at [velocity] logical
-  /// pixels a second: a flick goes the way it points; a page let go a third
-  /// of the way from where the swipe started goes on, anything else back.
-  void release(double velocity) {
-    if (!_swiping) return;
-    _swiping = false;
+  /// Lets [holder]'s swipe go with the finger moving down at [velocity]
+  /// logical pixels a second: a flick goes the way it points; a page let go
+  /// a third of the way from where the swipe started goes on, anything else
+  /// back.
+  void release(double velocity, Object holder) {
+    if (_holder != holder) return;
+    _holder = null;
     final nav = navigator!;
     final c = controller!;
     final height = _height;
@@ -138,7 +144,7 @@ final class _NowPlayingRoute extends PageRoute<void> {
 
   @override
   void dispose() {
-    if (_swiping) navigator?.didStopUserGesture();
+    if (_holder != null) navigator?.didStopUserGesture();
     super.dispose();
   }
 }
@@ -161,18 +167,18 @@ final class _SwipePhysics extends ScrollPhysics {
     if (offset > 0) {
       // Down: the content scrolls back to its top, then the page follows.
       final room = position.pixels > position.minScrollExtent ? position.pixels - position.minScrollExtent : 0.0;
-      if (offset > room) offset = room + (offset - room - route.swipe(offset - room));
+      if (offset > room) offset = room + (offset - room - route.swipe(offset - room, position));
     } else {
       // Up: the page goes back up, then the content scrolls.
-      offset -= route.swipe(offset);
+      offset -= route.swipe(offset, position);
     }
     return super.applyPhysicsToUserOffset(position, offset);
   }
 
   @override
   Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
-    if (!route.swiping) return super.createBallisticSimulation(position, velocity);
-    route.release(-velocity);
+    if (!route.heldBy(position)) return super.createBallisticSimulation(position, velocity);
+    route.release(-velocity, position);
     return super.createBallisticSimulation(position, 0);
   }
 }
@@ -289,6 +295,10 @@ final class MiniPlayer extends StatelessWidget {
 /// A swipe up on the mini player lifts Now Playing out of it under the
 /// finger, for any pointer: it opens when let go a third of the way up or
 /// flicked up, and goes back down otherwise.
+///
+/// While the finger is down the page is an overlay, not yet a route: pushing
+/// a route cancels every pointer down in its navigator, this finger too.
+/// Letting go pushes the route from where the overlay was.
 final class _Lift extends StatefulWidget {
   const _Lift({required this.child});
   final Widget child;
@@ -297,17 +307,55 @@ final class _Lift extends StatefulWidget {
   State<_Lift> createState() => _LiftState();
 }
 
-final class _LiftState extends State<_Lift> {
-  _NowPlayingRoute? _route;
+final class _LiftState extends State<_Lift> with SingleTickerProviderStateMixin {
+  late final _position = AnimationController(vsync: this);
+  OverlayEntry? _page;
+  double _height = 0;
 
   void _update(DragUpdateDetails d) {
-    if (_route == null && d.delta.dy < 0) _route = _NowPlayingRoute.lift(context);
-    _route?.swipe(d.delta.dy);
+    if (_page == null) {
+      final nav = Navigator.of(context, rootNavigator: true);
+      final height = nav.context.size?.height ?? 0;
+      if (d.delta.dy >= 0 || height <= 0 || nav.userGestureInProgress) return;
+      _height = height;
+      _position.value = 0;
+      _page = OverlayEntry(
+        // A picture of the page till it's let go: it takes no pointer or
+        // focus, and keeps the pointer from what's under it.
+        builder: (_) => AbsorbPointer(
+          child: ExcludeFocus(
+            child: SlideTransition(
+              position: Tween(begin: const Offset(0, 1), end: Offset.zero).animate(_position),
+              child: const NowPlaying(),
+            ),
+          ),
+        ),
+      );
+      nav.overlay!.insert(_page!);
+    }
+    _position.value -= d.delta.dy / _height;
   }
 
   void _release(double velocity) {
-    _route?.release(velocity);
-    _route = null;
+    if (_drop()) _NowPlayingRoute._letGo(context, _position.value, velocity);
+  }
+
+  /// Takes the overlay away; whether there was one.
+  bool _drop() {
+    final page = _page;
+    if (page == null) return false;
+    _page = null;
+    page
+      ..remove()
+      ..dispose();
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _drop();
+    _position.dispose();
+    super.dispose();
   }
 
   @override
@@ -598,23 +646,25 @@ final class NowPlaying extends StatelessWidget {
   };
 
   /// Lets a drag of [devices] (any, if null) on [child] carry the page.
-  static Widget _grip(BuildContext context, Widget child, {Set<PointerDeviceKind>? devices}) => GestureDetector(
-    behavior: HitTestBehavior.opaque,
-    supportedDevices: devices,
-    onVerticalDragUpdate: (d) => _route(context)?.swipe(d.delta.dy),
-    onVerticalDragEnd: (d) => _route(context)?.release(d.primaryVelocity ?? 0),
-    onVerticalDragCancel: () => _route(context)?.release(0),
-    child: child,
+  static Widget _grip(Widget child, {Set<PointerDeviceKind>? devices}) => Builder(
+    // The grip's own element holds the swipe: it lasts across rebuilds.
+    builder: (grip) => GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      supportedDevices: devices,
+      onVerticalDragUpdate: (d) => _route(grip)?.swipe(d.delta.dy, grip),
+      onVerticalDragEnd: (d) => _route(grip)?.release(d.primaryVelocity ?? 0, grip),
+      onVerticalDragCancel: () => _route(grip)?.release(0, grip),
+      child: child,
+    ),
   );
 
   /// A mouse doesn't scroll by dragging, so it carries the page from the
   /// player too: the cover, the title and the controls. Not the show notes,
   /// where it selects text.
-  static Widget _mouseGrip(BuildContext context, Widget child) => _grip(context, child, devices: const {PointerDeviceKind.mouse});
+  static Widget _mouseGrip(Widget child) => _grip(child, devices: const {PointerDeviceKind.mouse});
 
   // The top bar is the page's handle, for any pointer.
   Widget _topBar(BuildContext context, PodcastEpisode e) => _grip(
-    context,
     Padding(
     padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
     child: Row(children: [
@@ -698,7 +748,7 @@ final class NowPlaying extends StatelessWidget {
       _topBar(context, e),
       Expanded(
         child: ListView(physics: _physics(context), padding: const EdgeInsets.fromLTRB(28, 12, 28, 40), children: [
-          _mouseGrip(context, Column(children: [
+          _mouseGrip(Column(children: [
             DecoratedBox(
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
               child: _cover(e, cover),
@@ -741,7 +791,7 @@ final class NowPlaying extends StatelessWidget {
                     final cover = (column.maxHeight - 390).clamp(140.0, 400.0).toDouble();
                     return SingleChildScrollView(
                       physics: _physics(context),
-                      child: _mouseGrip(context, ConstrainedBox(
+                      child: _mouseGrip(ConstrainedBox(
                         constraints: BoxConstraints(minHeight: column.maxHeight),
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                           DecoratedBox(
