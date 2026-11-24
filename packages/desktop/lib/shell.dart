@@ -150,8 +150,10 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
 
   void _go(Section section) {
     if (section == _section) {
-      // A second tap goes back to the section's first page.
+      // A second tap goes back to the section's first page; on Search it
+      // also puts the caret in the field, as Apple Podcasts does.
       _navigators[section]!.currentState?.popUntil((r) => r.isFirst);
+      if (section == Section.search) search.focus();
       return;
     }
     setState(() => _section = section);
@@ -319,6 +321,7 @@ final class SearchRequest extends ChangeNotifier {
   /// The id of a ListenJar Cloud podcast of the listener's own to add
   /// videos to, when search was opened from it.
   String? into;
+  /// How many times [ask] was called; [focus] leaves it be.
   int asked = 0;
 
   void ask({String? query, bool youtube = false, String? into}) {
@@ -328,6 +331,10 @@ final class SearchRequest extends ChangeNotifier {
     asked++;
     notifyListeners();
   }
+
+  /// Puts the caret in search's field, and the keyboard up, keeping what
+  /// it searches.
+  void focus() => notifyListeners();
 }
 
 // Opaque, so AnimatedContainer lerps between real colours: Color.lerp doesn't

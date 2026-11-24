@@ -8,6 +8,7 @@
 import 'dart:async';
 
 import 'package:cancellation_token/cancellation_token.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'backend/api.dart' show SourceKind;
@@ -84,16 +85,34 @@ final class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
+  /// The request's [SearchRequest.asked] last taken up; a call that leaves it
+  /// be (a second tap on Search) only focuses the field.
+  int _seen = 0;
+
   void _asked() {
     final r = widget.request;
-    setState(() {
-      _mode = r.youtube ? _Mode.youtube : _Mode.podcasts;
-      _intoId = r.into;
+    if (r.asked != _seen) {
+      _seen = r.asked;
+      setState(() {
+        _mode = r.youtube ? _Mode.youtube : _Mode.podcasts;
+        _intoId = r.into;
+      });
+      // The caret at the end, so typing carries on where another screen's
+      // field left off.
+      if (r.query case final q?) _field.value = TextEditingValue(text: q, selection: TextSelection.collapsed(offset: q.length));
+    }
+    // After the frame: a page popped off search on the way here would
+    // otherwise hand focus back as it goes.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // A focused field whose keyboard was put away (Android's back) gets
+      // it back; focusing raises it otherwise.
+      if (_focus.hasFocus) {
+        unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+      } else {
+        _focus.requestFocus();
+      }
     });
-    // The caret at the end, so typing carries on where another screen's
-    // field left off.
-    if (r.query case final q?) _field.value = TextEditingValue(text: q, selection: TextSelection.collapsed(offset: q.length));
-    _focus.requestFocus();
   }
 
   Future<void> _loadCharts() async {
