@@ -26,13 +26,6 @@ ffi.Pointer<ffi.Char> filename,
 external void yt_free(ffi.Pointer<YtEngine> engine,
 );
 
-@ffi.Native<ffi.Void Function(ffi.Pointer<YtEngine> , ffi.Int32 , ffi.Pointer<ffi.Uint8> , ffi.Int64 )>()
-external void yt_host_return(ffi.Pointer<YtEngine> engine,
-int kind,
-ffi.Pointer<ffi.Uint8> data,
-int len,
-);
-
 @ffi.Native<ffi.Void Function(ffi.Pointer<YtInterrupt> , ffi.Int64 )>()
 external void yt_interrupt_cancel(ffi.Pointer<YtInterrupt> interrupt,
 int call,
@@ -53,11 +46,10 @@ external ffi.Pointer<YtInterrupt> yt_interrupt_new();
 external ffi.Pointer<ffi.Char> yt_load(ffi.Pointer<YtEngine> engine,
 );
 
-@ffi.Native<ffi.Pointer<YtEngine> Function(ffi.Int64 , ffi.Int64 , ffi.Pointer<YtInterrupt> , YtHost )>()
+@ffi.Native<ffi.Pointer<YtEngine> Function(ffi.Int64 , ffi.Int64 , ffi.Pointer<YtInterrupt> )>()
 external ffi.Pointer<YtEngine> yt_new(int memory_limit,
 int stack_limit,
 ffi.Pointer<YtInterrupt> interrupt,
-YtHost host,
 );
 
 @ffi.Native<ffi.Pointer<ffi.Char> Function(ffi.Pointer<YtEngine> )>()
@@ -73,12 +65,14 @@ int call,
 external void yt_string_free(ffi.Pointer<ffi.Char> text,
 );
 
+@ffi.Native<ffi.Pointer<ffi.Char> Function(ffi.Pointer<YtEngine> , ffi.Pointer<ffi.Pointer<ffi.Char>> )>()
+external ffi.Pointer<ffi.Char> yt_take_outbox(ffi.Pointer<YtEngine> engine,
+ffi.Pointer<ffi.Pointer<ffi.Char>> outbox,
+);
+
 final class YtEngine extends ffi.Opaque{
 }
 
-typedef YtHost = ffi.Pointer<ffi.NativeFunction<YtHostFunction>>;
-typedef YtHostFunction = ffi.Void Function(ffi.Pointer<YtEngine> engine, ffi.Pointer<ffi.Char> name, ffi.Pointer<ffi.Char> args, ffi.Int64 args_len);
-typedef DartYtHostFunction = void Function(ffi.Pointer<YtEngine> engine, ffi.Pointer<ffi.Char> name, ffi.Pointer<ffi.Char> args, int args_len);
 final class YtInterrupt extends ffi.Opaque{
 }
 

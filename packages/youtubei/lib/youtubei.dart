@@ -1,11 +1,19 @@
-/// The listenbox/YouTube.js fork in embedded QuickJS: the Dart port of the
-/// Go youtubei crate. YouTube.js owns every YouTube request and parser; this
-/// package owns the runtime, its host primitives and thin typed bindings.
+/// YouTube.js (the listenbox/YouTube.js fork) in embedded QuickJS, with the
+/// same API in Dart: `Innertube.create`, `innertube.getBasicInfo`,
+/// `format.decipher(innertube.session.player)`. Its namespaces are libraries
+/// of their own, imported with YouTube.js's names:
+///
+/// ```dart
+/// import 'package:youtubei/youtubei.dart';
+/// import 'package:youtubei/misc.dart' as Misc;
+/// import 'package:youtubei/yt.dart' as YT;
+/// import 'package:youtubei/yt_nodes.dart' as YTNodes;
+/// ```
+///
+/// Where YouTube.js takes an AbortSignal, this takes a CancellationToken.
 library;
 
-export 'src/engine.dart'
-  show Fetch, YouTubei, startYouTubei, closeYouTubei, callYouTubei, initialize, playlistHead, continuation,
-    videoInfo, channel, search, decipher, release;
-export 'src/http_fetch.dart';
-export 'src/models.dart'
-  hide sessionOptionsJson, sessionFromJson, playlistFromJson, playabilityFromJson, videoInfoFromJson, channelFromJson, searchFromJson;
+export 'src/engine.dart' show YouTubeiLog;
+export 'src/fetch.dart';
+export 'src/innertube.dart';
+export 'src/utils.dart' show InnertubeError, UniversalCache;

@@ -1,7 +1,10 @@
 // The YouTube.js engine, ported from the Go youtubei crate's engine.go.
 //
 // One QuickJS runtime lives in its own isolate, which owns every JavaScript
-// value and runs YouTube.js's promise jobs, timers and host calls. The owner
+// value and runs YouTube.js's promise jobs and timers. Dart calls JavaScript;
+// JavaScript never calls Dart. After each call in, the engine takes the
+// outbox (host.js): finished calls, fetches, digests, cache reads and writes,
+// timers and log lines, and answers them by calling in again. The owner
 // isolate keeps the transport: YouTube.js's fetch comes back to the caller's
 // Fetch, so cookies, HTTP and policy stay outside this package. Calls may
 // overlap while they await I/O; closing drains accepted calls first.
@@ -20,41 +23,67 @@ import 'package:cancellation_token/cancellation_token.dart';
 import 'package:crypto/crypto.dart';
 import 'package:ffi/ffi.dart';
 
-import 'bindings.g.dart';
-import 'models.dart';
+import 'package:meta/meta.dart';
 
-/// The transport YouTube.js's fetch goes through.
-typedef Fetch = Future<FetchResponse> Function(FetchRequest request, CancellationToken token);
+import 'bindings.g.dart';
+import 'fetch.dart';
+import 'utils.dart';
+
+/// Where YouTube.js's log lines go: [level] is `error`, `warning`, `info` or
+/// `debug`.
+typedef YouTubeiLog = void Function(String level, String message);
 
 const _memoryLimit = 768 << 20;
 // Dart runs isolates on threads with small native stacks; stay well inside.
 const _stackLimit = 512 << 10;
 
-/// A running engine. Use it through [initialize], [playlistHead],
-/// [continuation], [videoInfo], [channel], [search], [decipher], [release]
-/// and [callYouTubei]; stop it with [closeYouTubei].
+/// A running engine, behind one Innertube: call into it with [callYouTubei],
+/// stop it with [closeYouTubei].
+@internal
 final class YouTubei {
-  YouTubei._(this._fetch, this._interrupt, this._events);
+  YouTubei._(this._fetch, this._log, this._interrupt, this._events);
 
   final Fetch _fetch;
+  final YouTubeiLog? _log;
   final Pointer<YtInterrupt> _interrupt;
   final ReceivePort _events;
   late final SendPort _commands;
   final _exited = Completer<void>();
   final _calls = <int, CancellableCompleter<Object?>>{};
-  final _fetches = <int, ({int call, CancellationToken token})>{};
+  final _asks = <int, ({int call, CancellationToken token})>{};
   final _hostErrors = <int, ({int call, Object error})>{};
   var _nextCall = 0;
   var _nextHostError = 0;
   var _closing = false;
+  final _released = <int>[];
 }
 
-/// Starts an engine: a new isolate evaluates the embedded YouTube.js.
-Future<YouTubei> startYouTubei(Fetch fetch, {CancellationToken? token}) async {
+/// Releases a live YouTube.js object's handle once [owner], the Dart object
+/// standing for it, is collected.
+@internal
+void retainHandle(YouTubei yt, Object owner, int handle) => _handles.attach(owner, (yt, handle));
+
+final _handles = Finalizer<(YouTubei, int)>((h) {
+  final (yt, handle) = h;
+  if (yt._closing) return;
+  yt._released.add(handle);
+  if (yt._released.length > 1) return;
+  scheduleMicrotask(() {
+    final handles = [...yt._released];
+    yt._released.clear();
+    if (yt._closing) return;
+    unawaited(callYouTubei(yt, '__bridge.release', handles).then<void>((_) {}, onError: (_) {}));
+  });
+});
+
+/// Starts an engine: a new isolate evaluates the embedded YouTube.js. [log]
+/// receives YouTube.js's log lines.
+@internal
+Future<YouTubei> startYouTubei(Fetch fetch, {CancellationToken? token, YouTubeiLog? log}) async {
   token?.throwIfCancelled();
   final interrupt = yt_interrupt_new();
   if (interrupt == nullptr) throw StateError('allocate the QuickJS interrupt');
-  final yt = YouTubei._(fetch, interrupt, ReceivePort('youtubei'));
+  final yt = YouTubei._(fetch, log, interrupt, ReceivePort('youtubei'));
   final ready = CancellableCompleter<void>(token, onCancel: () => yt_interrupt_close(interrupt));
   yt._events.listen((message) => _onEvent(yt, message, ready));
   try {
@@ -69,6 +98,7 @@ Future<YouTubei> startYouTubei(Fetch fetch, {CancellationToken? token}) async {
 
 /// Stops accepting calls, waits for accepted ones to finish, then frees the
 /// runtime. Cancel the calls' tokens to stop them sooner.
+@internal
 Future<void> closeYouTubei(YouTubei yt) async {
   if (!yt._closing) {
     yt._closing = true;
@@ -77,9 +107,8 @@ Future<void> closeYouTubei(YouTubei yt) async {
   await yt._exited.future;
 }
 
-/// Calls `expression(args)` in YouTube.js and returns its JSON value. Prefer
-/// the typed operations; this is the escape hatch for upstream methods they
-/// do not cover.
+/// Calls `expression(args)` in YouTube.js and returns its JSON value.
+@internal
 Future<Object?> callYouTubei(YouTubei yt, String expression, Object? args, {CancellationToken? token}) async {
   if (yt._closing) throw StateError('YouTube runtime closed');
   token?.throwIfCancelled();
@@ -90,44 +119,12 @@ Future<Object?> callYouTubei(YouTubei yt, String expression, Object? args, {Canc
   return completer.future;
 }
 
-Future<Session> initialize(YouTubei yt, SessionOptions options, {CancellationToken? token}) async =>
-  sessionFromJson(await callYouTubei(yt, '__bridge.initialize', sessionOptionsJson(options), token: token));
-
-/// The first page of a playlist, with no videos it marks unavailable hidden.
-Future<Playlist> playlistHead(YouTubei yt, String id, {CancellationToken? token}) async =>
-  playlistFromJson(await callYouTubei(yt, '__bridge.playlistHead', id, token: token));
-
-/// The page after [page]; consumes [page]'s handle.
-Future<Playlist> continuation(YouTubei yt, Playlist page, {CancellationToken? token}) async =>
-  playlistFromJson(await callYouTubei(yt, '__bridge.continuation', page.handle, token: token));
-
-Future<VideoInfo> videoInfo(YouTubei yt, String id, Client client, {CancellationToken? token}) async =>
-  videoInfoFromJson(await callYouTubei(yt, '__bridge.videoInfo', {'id': id, 'client': client.value}, token: token));
-
-/// A channel from its link (`/channel/UC…`, `/@handle`, `/c/…`, `/user/…`):
-/// YouTube resolves a handle to its id, then reads the channel's metadata.
-Future<Channel> channel(YouTubei yt, String url, {CancellationToken? token}) async =>
-  channelFromJson(await callYouTubei(yt, '__bridge.channel', url, token: token));
-
-/// What YouTube's search lists for [query], in its order: videos, channels,
-/// playlists and the shelves between them.
-Future<List<SearchItem>> search(YouTubei yt, String query, {CancellationToken? token}) async =>
-  searchFromJson(await callYouTubei(yt, '__bridge.search', query, token: token));
-
-/// The playable URL of [format], loading the player when it needs one.
-Future<String> decipher(YouTubei yt, Format format, {CancellationToken? token}) async =>
-  await callYouTubei(yt, '__bridge.decipher', format.handle, token: token) as String;
-
-/// Frees live handles: formats, or playlist pages not continued.
-Future<void> release(YouTubei yt, Iterable<int> handles, {CancellationToken? token}) =>
-  callYouTubei(yt, '__bridge.release', handles.toList(), token: token);
-
 void _cancelCall(YouTubei yt, int id) {
   if (yt._calls.remove(id) == null) return;
   yt_interrupt_cancel(yt._interrupt, id);
   yt._commands.send(_Cancel(id));
-  for (final fetch in yt._fetches.values) {
-    if (fetch.call == id) fetch.token.cancel();
+  for (final ask in yt._asks.values) {
+    if (ask.call == id) ask.token.cancel();
   }
   yt._hostErrors.removeWhere((_, e) => e.call == id);
 }
@@ -149,8 +146,10 @@ void _onEvent(YouTubei yt, Object? message, CancellableCompleter<void> ready) {
       ready.complete();
     case _StartFailed(:final message):
       ready.completeError(StateError('initialize embedded YouTube.js: $message'));
-    case _FetchStart(:final id, :final call, :final request):
-      unawaited(_runFetch(yt, id, call, request));
+    case _Ask(:final id, :final call, :final kind, :final fields):
+      unawaited(_runAsk(yt, id, call, kind, fields));
+    case _Log(:final level, :final message):
+      yt._log?.call(level, message);
     case _Done(:final id, :final result):
       _complete(yt, id, result);
     case _Fault(:final message):
@@ -179,41 +178,80 @@ void _complete(YouTubei yt, int id, Map<String, Object?> result) {
     completer.complete(result['value']);
     return;
   }
-  completer.completeError(YouTubeiException(
+  completer.completeError(InnertubeError(
     error['message'] as String? ?? 'YouTube.js failed',
+    error['info'],
+    name: error['name'] as String? ?? 'Error',
     stack: error['stack'] as String?,
-    info: error['info'],
-    playabilityStatus: playabilityFromJson(error['playability_status']),
     cause: cause,
   ));
 }
 
-Future<void> _runFetch(YouTubei yt, int id, int call, FetchRequest request) async {
+/// Answers what JavaScript asked of the owner: a fetch through the caller's
+/// transport, or the cache.
+Future<void> _runAsk(YouTubei yt, int id, int call, String kind, Map<String, Object?> fields) async {
   final token = CancellationToken();
-  yt._fetches[id] = (call: call, token: token);
-  // A fetch a cancelled call started after its cancellation fails at once.
+  yt._asks[id] = (call: call, token: token);
+  // An ask a cancelled call made after its cancellation fails at once.
   if (call != 0 && !yt._calls.containsKey(call)) token.cancel();
   try {
-    final response = await yt._fetch(request, token);
     token.throwIfCancelled();
-    yt._commands.send(_FetchDone(id, jsonEncode({
-      'id': id,
-      'response': {
-        'url': response.url,
-        'status': response.status,
-        'headers': [for (final (k, v) in response.headers) [k, v]],
-      },
-    }), TransferableTypedData.fromList([response.body])));
+    final (Object? value, Uint8List? bytes) = switch (kind) {
+      'fetch' => await _fetchAsk(yt, fields['request']! as Map, token),
+      'cacheGet' || 'cacheSet' || 'cacheRemove' => await _cacheAsk(kind, fields),
+      _ => throw UnsupportedError('unknown ask $kind'),
+    };
+    token.throwIfCancelled();
+    yt._commands.send(_Answered(
+      id,
+      jsonEncode({'id': id, 'value': value}),
+      bytes == null ? null : TransferableTypedData.fromList([bytes]),
+    ));
   } catch (error) {
     final key = ++yt._nextHostError;
     yt._hostErrors[key] = (call: call, error: error);
-    yt._commands.send(_FetchDone(id, jsonEncode({
+    yt._commands.send(_Answered(id, jsonEncode({
       'id': id,
       'error': {'message': '$error', 'host_error': key},
     }), null));
   } finally {
-    yt._fetches.remove(id);
+    yt._asks.remove(id);
   }
+}
+
+Future<(Object?, Uint8List?)> _fetchAsk(YouTubei yt, Map request, CancellationToken token) async {
+  final response = await yt._fetch(FetchRequest(
+    url: request['url'] as String,
+    method: request['method'] as String,
+    headers: [for (final h in request['headers'] as List) ((h as List)[0] as String, h[1] as String)],
+    body: switch (request['body']) {
+      final String body => base64.decode(body),
+      _ => null,
+    },
+  ), token);
+  return (
+    {
+      'url': response.url,
+      'status': response.status,
+      'headers': [for (final (k, v) in response.headers) [k, v]],
+    },
+    response.body,
+  );
+}
+
+/// Platform's Cache in JavaScript, answered by [UniversalCache]'s files.
+Future<(Object?, Uint8List?)> _cacheAsk(String kind, Map<String, Object?> fields) async {
+  final directory = fields['directory']! as String;
+  final key = fields['key']! as String;
+  switch (kind) {
+    case 'cacheGet':
+      return (null, await cacheGet(directory, key));
+    case 'cacheSet':
+      await cacheSet(directory, key, base64.decode(fields['data']! as String));
+    case 'cacheRemove':
+      await cacheRemove(directory, key);
+  }
+  return (null, null);
 }
 
 // Messages from the owner to the engine isolate.
@@ -230,8 +268,8 @@ final class _Cancel {
   final int id;
 }
 
-final class _FetchDone {
-  const _FetchDone(this.id, this.json, this.body);
+final class _Answered {
+  const _Answered(this.id, this.json, this.body);
   final int id;
   final String json;
   final TransferableTypedData? body;
@@ -253,11 +291,19 @@ final class _StartFailed {
   final String message;
 }
 
-final class _FetchStart {
-  const _FetchStart(this.id, this.call, this.request);
+/// A fetch or cache ask from JavaScript, made while [call] ran.
+final class _Ask {
+  const _Ask(this.id, this.call, this.kind, this.fields);
   final int id;
   final int call;
-  final FetchRequest request;
+  final String kind;
+  final Map<String, Object?> fields;
+}
+
+final class _Log {
+  const _Log(this.level, this.message);
+  final String level;
+  final String message;
 }
 
 final class _Done {
@@ -282,16 +328,14 @@ final class _Engine {
   final SendPort owner;
   final ReceivePort commands;
   late final Pointer<YtEngine> native;
-  late final NativeCallable<YtHostFunction> host;
 
   /// Calls accepted and neither done nor cancelled.
   final pending = <int>{};
   final cancelled = <int>{};
 
-  /// The call that started each fetch and timer.
-  final fetchCalls = <int, int>{};
+  /// The call that made each ask and timer.
+  final askCalls = <int, int>{};
   final timers = <int, ({int call, Timer timer})>{};
-  var nextFetch = 0;
 
   /// The call the JavaScript running now works for, 0 when unknown.
   var running = 0;
@@ -302,19 +346,14 @@ final class _Engine {
 void _engineMain((SendPort, int) args) {
   final (owner, interruptAddress) = args;
   final e = _Engine(owner, ReceivePort('youtubei engine'));
-  e.host = NativeCallable<YtHostFunction>.isolateLocal(
-    (Pointer<YtEngine> native, Pointer<Char> name, Pointer<Char> args, int length) =>
-      _hostCall(e, native, name.cast<Utf8>().toDartString(), args.cast<Utf8>().toDartString(length: length)),
-  );
-  final native = yt_new(_memoryLimit, _stackLimit, Pointer.fromAddress(interruptAddress), e.host.nativeFunction);
+  final native = yt_new(_memoryLimit, _stackLimit, Pointer.fromAddress(interruptAddress));
   if (native == nullptr) {
-    e.host.close();
     owner.send(const _StartFailed('create the QuickJS runtime'));
     owner.send(const _Exited());
     return;
   }
   e.native = native;
-  final error = _take(yt_load(native)) ?? _pump(e);
+  final error = _take(yt_load(native)) ?? _pump(e) ?? _drain(e, 0);
   if (error != null) {
     _free(e);
     owner.send(_StartFailed(error));
@@ -340,25 +379,84 @@ void _onCommand(_Engine e, Object? message) {
     case _Cancel(:final id):
       e.cancelled.add(id);
       e.pending.remove(id);
-    case _FetchDone(:final id, :final json, :final body):
-      final call = e.fetchCalls.remove(id) ?? 0;
+    case _Answered(:final id, :final json, :final body):
+      final call = e.askCalls.remove(id) ?? 0;
       final bytes = body?.materialize().asUint8List();
-      _deliver(e, call, '__hostFetchSettle', json, bytes);
+      _deliver(e, call, '__answer', json, bytes);
     case _Close():
       e.closing = true;
   }
   _exitIfDrained(e);
 }
 
-/// Runs [action] for [call], then the promise jobs it queued. Returns the
-/// error of a failed [action].
+/// Runs [action] for [call], then the promise jobs it queued, then acts on
+/// the outbox. Returns the error of a failed [action].
 String? _run(_Engine e, int call, Pointer<Char> Function() action) {
   e.running = call;
   yt_set_running(e.native, call);
   final error = _take(action());
-  final fault = _pump(e);
+  final fault = _pump(e) ?? _drain(e, call);
   if (fault != null) e.owner.send(_Fault(fault));
   return error;
+}
+
+/// Acts on what JavaScript queued while [call] ran. Answers that need
+/// JavaScript again wait for a later microtask, so JavaScript never runs
+/// inside this. Returns an error taking the outbox.
+String? _drain(_Engine e, int call) {
+  final (error, text) = using((arena) {
+    final out = arena<Pointer<Char>>()..value = nullptr;
+    final error = _take(yt_take_outbox(e.native, out));
+    return (error, _take(out.value) ?? '');
+  });
+  if (error != null || text.isEmpty) return error;
+  for (final message in (jsonDecode(text) as List).cast<Map<String, Object?>>()) {
+    switch (message['kind']) {
+      case 'done':
+        final id = message['id']! as int;
+        final result = (jsonDecode(message['result']! as String) as Map).cast<String, Object?>();
+        if (e.pending.remove(id)) e.owner.send(_Done(id, result));
+      case final String kind when kind == 'fetch' || kind.startsWith('cache'):
+        final id = message['id']! as int;
+        e.askCalls[id] = call;
+        e.owner.send(_Ask(id, call, kind, message));
+      case 'digest':
+        final id = message['id']! as int;
+        final (json, bytes) = _digest(id, message);
+        scheduleMicrotask(() {
+          _deliver(e, call, '__answer', json, bytes);
+          _exitIfDrained(e);
+        });
+      case 'timer':
+        final id = message['id']! as int;
+        final delay = message['delay']! as num;
+        e.timers[id] = (call: call, timer: Timer(Duration(milliseconds: max(0, delay.toInt())), () {
+          e.timers.remove(id);
+          _deliver(e, call, '__fireTimer', '{"id":$id}', null);
+          _exitIfDrained(e);
+        }));
+      case 'clearTimer':
+        e.timers.remove(message['id']! as int)?.timer.cancel();
+      case 'log':
+        e.owner.send(_Log(message['level']! as String, message['message']! as String));
+      case final kind:
+        e.owner.send(_Fault('unknown outbox message $kind'));
+    }
+  }
+  return null;
+}
+
+(String, Uint8List?) _digest(int id, Map<String, Object?> message) {
+  try {
+    final hash = switch ((message['algorithm']! as String).toUpperCase()) {
+      'SHA-1' => sha1, // Required by YouTube's existing protocol.
+      'SHA-256' => sha256,
+      final other => throw UnsupportedError('unsupported digest "$other"'),
+    };
+    return (jsonEncode({'id': id}), Uint8List.fromList(hash.convert(base64.decode(message['data']! as String)).bytes));
+  } catch (error) {
+    return (jsonEncode({'id': id, 'error': {'message': '$error'}}), null);
+  }
 }
 
 void _deliver(_Engine e, int call, String function, String json, Uint8List? bytes) {
@@ -404,7 +502,6 @@ void _free(_Engine e) {
   e.timers.clear();
   e.commands.close();
   yt_free(e.native);
-  e.host.close();
 }
 
 String? _take(Pointer<Char> error) {
@@ -414,103 +511,4 @@ String? _take(Pointer<Char> error) {
   } finally {
     yt_string_free(error);
   }
-}
-
-/// Answers JavaScript's synchronous __host(name, json).
-void _hostCall(_Engine e, Pointer<YtEngine> native, String name, String args) {
-  try {
-    switch (name) {
-      case 'done':
-        final result = (jsonDecode(args) as Map).cast<String, Object?>();
-        final id = result['id'] as int;
-        if (e.pending.remove(id)) e.owner.send(_Done(id, result));
-        _return(native, 'U');
-      case 'fetch':
-        final request = (jsonDecode(args) as Map).cast<String, Object?>();
-        final id = ++e.nextFetch;
-        e.fetchCalls[id] = e.running;
-        e.owner.send(_FetchStart(id, e.running, FetchRequest(
-          url: request['url'] as String,
-          method: request['method'] as String,
-          headers: [for (final h in request['headers'] as List) ((h as List)[0] as String, h[1] as String)],
-          body: switch (request['body']) {
-            final String body => base64.decode(body),
-            _ => null,
-          },
-        )));
-        _return(native, 'J', utf8.encode('$id'));
-      case 'randomUUID':
-        _return(native, 'S', utf8.encode(_uuid(e.random)));
-      case 'randomBytes':
-        final count = jsonDecode(args) as int;
-        if (count < 0 || count > 65536) throw RangeError('invalid random byte length $count');
-        _return(native, 'B', Uint8List.fromList([for (var i = 0; i < count; i++) e.random.nextInt(256)]));
-      case 'digest':
-        final [algorithm as String, data as String] = jsonDecode(args) as List;
-        final hash = switch (algorithm.toUpperCase()) {
-          'SHA-1' => sha1, // Required by YouTube's existing protocol.
-          'SHA-256' => sha256,
-          _ => throw UnsupportedError('unsupported digest "$algorithm"'),
-        };
-        _return(native, 'B', Uint8List.fromList(hash.convert(base64.decode(data)).bytes));
-      case 'parseURL':
-        final [input as String, base as String] = jsonDecode(args) as List;
-        _return(native, 'J', utf8.encode(jsonEncode(_parseURL(input, base))));
-      case 'setTimer':
-        final [id as int, delay as num] = jsonDecode(args) as List;
-        final call = e.running;
-        e.timers[id] = (call: call, timer: Timer(Duration(milliseconds: max(0, delay.toInt())), () {
-          e.timers.remove(id);
-          _deliver(e, call, '__fireTimer', '{"id":$id}', null);
-          _exitIfDrained(e);
-        }));
-        _return(native, 'U');
-      case 'clearTimer':
-        e.timers.remove(jsonDecode(args) as int)?.timer.cancel();
-        _return(native, 'U');
-      default:
-        throw UnsupportedError('unknown host call $name');
-    }
-  } catch (error) {
-    _return(native, 'E', utf8.encode('$error'));
-  }
-}
-
-void _return(Pointer<YtEngine> native, String kind, [List<int> data = const []]) => using((arena) {
-  final bytes = arena<Uint8>(max(data.length, 1))..asTypedList(data.length).setAll(0, data);
-  yt_host_return(native, kind.codeUnitAt(0), bytes, data.length);
-});
-
-String _uuid(Random random) {
-  final b = [for (var i = 0; i < 16; i++) random.nextInt(256)];
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  final hex = [for (final v in b) v.toRadixString(16).padLeft(2, '0')].join();
-  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-'
-    '${hex.substring(16, 20)}-${hex.substring(20)}';
-}
-
-Map<String, String> _parseURL(String input, String base) {
-  var uri = Uri.parse(input);
-  if (base.isNotEmpty) uri = Uri.parse(base).resolveUri(uri);
-  if (!uri.hasScheme) throw const FormatException('URL must be absolute');
-  final [username, password] = switch (uri.userInfo.indexOf(':')) {
-    -1 => [uri.userInfo, ''],
-    final i => [uri.userInfo.substring(0, i), uri.userInfo.substring(i + 1)],
-  };
-  final hostname = uri.host.contains(':') ? '[${uri.host}]' : uri.host;
-  final port = uri.hasPort ? '${uri.port}' : '';
-  final host = port.isEmpty ? hostname : '$hostname:$port';
-  return {
-    'protocol': '${uri.scheme}:',
-    'username': Uri.decodeComponent(username),
-    'password': Uri.decodeComponent(password),
-    'host': host,
-    'hostname': hostname,
-    'port': port,
-    'pathname': uri.path.isEmpty ? '/' : uri.path,
-    'search': uri.hasQuery ? '?${uri.query}' : '',
-    'hash': uri.hasFragment ? '#${uri.fragment}' : '',
-    'origin': '${uri.scheme}://$host',
-  };
 }

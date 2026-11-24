@@ -2,7 +2,6 @@ EXPORTS
   yt_deliver
   yt_eval
   yt_free
-  yt_host_return
   yt_interrupt_cancel
   yt_interrupt_close
   yt_interrupt_free
@@ -12,3 +11,4 @@ EXPORTS
   yt_pump
   yt_set_running
   yt_string_free
+  yt_take_outbox

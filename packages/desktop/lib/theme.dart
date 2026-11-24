@@ -24,6 +24,46 @@ const mist = Color(0xFFEEF0FD);
 const danger = Color(0xFFD4483F);
 const white = Color(0xFFFFFFFF);
 
+// The ink side (DESIGN.md "Neutral", "The Two-Tone Rule"): the player's own
+// surfaces, where listening happens.
+const inkRaised = Color(0xFF15161C);
+const inkLine = Color(0x17FFFFFF);
+const inkTile = Color(0x0DFFFFFF);
+const snow = Color(0xFFF3F4F7);
+const snowSoft = Color(0xFFA5A8B6);
+const snowFaint = Color(0xFF8B8E9C);
+const accentLight = Color(0xFF8F9CFF);
+const violet = Color(0xFF8E79FD);
+const ok = Color(0xFF377D40);
+const okOnInk = Color(0xFF7FD08A);
+const dangerOnInk = Color(0xFFFF8A80);
+
+/// Float: dark cards and the mini player (DESIGN.md "Shadow Vocabulary").
+const shadowFloat = BoxShadow(
+  color: Color(0x470A0B0F),
+  offset: Offset(0, 24),
+  blurRadius: 48,
+  spreadRadius: -18,
+);
+
+/// The ink panel's two glows: periwinkle top-left, violet bottom-right.
+const inkGlow = [
+  RadialGradient(center: Alignment(-0.9, -1), radius: 1.1, colors: [Color(0x4D5165EE), Color(0x005165EE)]),
+  RadialGradient(center: Alignment(1, 1.1), radius: 1.0, colors: [Color(0x408E79FD), Color(0x008E79FD)]),
+];
+
+/// An ink surface with its glows, for the player.
+Widget inkSurface({required Widget child, BorderRadius? radius}) => DecoratedBox(
+  decoration: BoxDecoration(color: ink, borderRadius: radius),
+  child: DecoratedBox(
+    decoration: BoxDecoration(gradient: inkGlow[0], borderRadius: radius),
+    child: DecoratedBox(
+      decoration: BoxDecoration(gradient: inkGlow[1], borderRadius: radius),
+      child: child,
+    ),
+  ),
+);
+
 // Corners (DESIGN.md "Shapes").
 const radiusCard = 28.0;
 const radiusSheet = 22.0;

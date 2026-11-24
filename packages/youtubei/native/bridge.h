@@ -11,10 +11,6 @@ typedef struct YtInterrupt YtInterrupt;
 // One QuickJS runtime and context, confined to the thread that created it.
 typedef struct YtEngine YtEngine;
 
-// The synchronous host call: JavaScript's __host(name, json). The callee
-// answers with yt_host_return before returning.
-typedef void (*YtHost)(YtEngine *engine, const char *name, const char *args, int64_t args_len);
-
 YtInterrupt *yt_interrupt_new(void);
 void yt_interrupt_free(YtInterrupt *interrupt);
 // Stops any JavaScript running now or later.
@@ -22,7 +18,7 @@ void yt_interrupt_close(YtInterrupt *interrupt);
 // Stops the JavaScript a call runs, while it is the running call.
 void yt_interrupt_cancel(YtInterrupt *interrupt, int64_t call);
 
-YtEngine *yt_new(int64_t memory_limit, int64_t stack_limit, YtInterrupt *interrupt, YtHost host);
+YtEngine *yt_new(int64_t memory_limit, int64_t stack_limit, YtInterrupt *interrupt);
 void yt_free(YtEngine *engine);
 // Attributes the JavaScript about to run to a call, 0 for none.
 void yt_set_running(YtEngine *engine, int64_t call);
@@ -39,8 +35,9 @@ char *yt_pump(YtEngine *engine);
 char *yt_deliver(YtEngine *engine, const char *name, const char *json, int64_t json_len, const uint8_t *bytes,
                  int64_t bytes_len);
 
-// kind: 'U' undefined, 'S' string, 'J' JSON, 'B' ArrayBuffer, 'E' throws an Error with this message.
-void yt_host_return(YtEngine *engine, int32_t kind, const uint8_t *data, int64_t len);
+// Sets *outbox to the JSON array of what JavaScript queued since the last
+// take (host.js), to free with yt_string_free, or NULL when it queued nothing.
+char *yt_take_outbox(YtEngine *engine, char **outbox);
 void yt_string_free(char *text);
 
 #endif

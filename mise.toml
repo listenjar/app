@@ -1,0 +1,8 @@
+# The desktop app's own tools, on top of the root mise.toml (Flutter is there).
+[tools]
+# Swift, Linux only: type-checks the iOS and macOS runners against stubs
+# (moon run desktop:swift-check). macOS has Xcode's.
+swift = { version = "6.4.3", os = ["linux"] }
+# zig, off Windows only: compiles the Windows runner against its Win32 and
+# Flutter headers (moon run desktop:windows-check). Windows has MSVC.
+zig = { version = "0.15.2", os = ["linux", "macos"] }

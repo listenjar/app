@@ -1,7 +1,13 @@
 // The web and Node primitives the embedded YouTube.js bundle uses: the subset
 // it needs, not a general browser or Node runtime. Ported from the Go youtubei
-// crate's hostPrimitives. Native helpers from bridge.c: __host(name, json),
+// crate's hostPrimitives. Native helpers from bridge.c: __randomBytes(length),
 // __utf8Encode(string) and __utf8Decode(buffer, offset, length).
+//
+// Dart calls JavaScript; JavaScript never calls Dart. What it needs from
+// outside (a fetch, a digest, the cache, a timer, a finished call, a log
+// line) goes into the outbox, which engine.dart takes after each call in
+// with __takeOutbox(). Dart answers an ask with __answer(message, bytes) and
+// fires a timer with __fireTimer({id}).
 globalThis.__hostErrorID = function find(error, seen = new Set()) {
   if (!error || typeof error !== 'object' || seen.has(error)) return 0;
   seen.add(error);
@@ -17,9 +23,32 @@ globalThis.require = specifier => {
   }};
   throw new ReferenceError('Native module unavailable: ' + specifier);
 };
-globalThis.console = Object.fromEntries(['log', 'info', 'warn', 'error', 'debug', 'trace'].map(k => [k, () => {}]));
+const outbox = [];
+globalThis.__takeOutbox = () => outbox.length ? JSON.stringify(outbox.splice(0)) : '';
+// ask(kind, fields): what Dart answers, as {value, bytes}.
+const asks = new Map(); let nextAsk = 0;
+const ask = (kind, fields) => new Promise((resolve, reject) => {
+  const id = ++nextAsk;
+  asks.set(id, {resolve, reject});
+  outbox.push({kind, id, ...fields});
+});
+globalThis.__answer = ({id, value, error}, bytes) => {
+  const waiter = asks.get(id);
+  if (!waiter) return;
+  asks.delete(id);
+  if (!error) return waiter.resolve({value, bytes});
+  const failure = new Error(error.message);
+  if (error.host_error) failure.__hostError = error.host_error;
+  waiter.reject(failure);
+};
 
-const hostJSON = (name, value) => __host(name, JSON.stringify(value ?? null));
+const logText = value => {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.stack ? `${value}\n${value.stack}` : String(value);
+  try { return JSON.stringify(value) ?? String(value); } catch { return String(value); }
+};
+const logTo = level => (...args) => outbox.push({kind: 'log', level, message: args.map(logText).join(' ').slice(0, 4000)});
+globalThis.console = {log: logTo('info'), info: logTo('info'), warn: logTo('warning'), error: logTo('error'), debug: logTo('debug'), trace: logTo('debug')};
 const asBytes = value => value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
 
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -101,23 +130,185 @@ globalThis.URLSearchParams = class URLSearchParams {
   forEach(fn, thisArg) { for (const [k, v] of this.pairs) fn.call(thisArg, v, k, this); }
   toString() { return this.pairs.map(([k, v]) => encodeForm(k) + '=' + encodeForm(v)).join('&'); }
 };
+// URL after the WHATWG URL Standard, for the URLs YouTube.js builds: special
+// (http, https, ws, wss, ftp, file) and opaque ones, relative references,
+// dot segments, default ports and percent-encoding. ASCII hosts only: an
+// internationalized domain name throws.
+const specialPorts = {'http:': '80', 'https:': '443', 'ws:': '80', 'wss:': '443', 'ftp:': '21', 'file:': ''};
+const c0 = c => c < 0x20 || c > 0x7e;
+const fragmentSet = c => c0(c) || ' "<>`'.includes(String.fromCharCode(c));
+const querySet = c => c0(c) || ' "#<>'.includes(String.fromCharCode(c));
+const specialQuerySet = c => querySet(c) || c === 0x27;
+const pathSet = c => querySet(c) || '?^`{}'.includes(String.fromCharCode(c));
+const userinfoSet = c => pathSet(c) || '/:;=@[\\]|'.includes(String.fromCharCode(c));
+const percentEncode = (text, set) => {
+  let out = '';
+  for (const ch of text) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80 && !set(c)) { out += ch; continue; }
+    let utf8;
+    try { utf8 = encodeURIComponent(ch); } catch { utf8 = '%EF%BF%BD'; }
+    out += c < 0x80 ? '%' + c.toString(16).toUpperCase().padStart(2, '0') : utf8;
+  }
+  return out;
+};
+const isDot = s => s === '.' || s.toLowerCase() === '%2e';
+const isDoubleDot = s => ['..', '.%2e', '%2e.', '%2e%2e'].includes(s.toLowerCase());
+// Resolves `.` and `..` in an absolute path, as the standard's path state does.
+const normalizePath = (path, special) => {
+  const segments = path.split('/').slice(1);
+  const out = [];
+  segments.forEach((s, i) => {
+    const last = i === segments.length - 1;
+    if (isDoubleDot(s)) { out.pop(); if (last) out.push(''); }
+    else if (isDot(s)) { if (last) out.push(''); }
+    else out.push(percentEncode(s, pathSet));
+  });
+  return '/' + out.join('/');
+};
+const parseHost = (host, special) => {
+  if (host.startsWith('[')) {
+    if (!host.endsWith(']')) throw new TypeError('Invalid URL');
+    return host.toLowerCase();
+  }
+  if (!special) return percentEncode(host, c0);
+  let decoded;
+  try { decoded = decodeURIComponent(host); } catch { throw new TypeError('Invalid URL'); }
+  if (/[^\x21-\x7e]|[#%/:<>?@[\\\]^|]/.test(decoded)) throw new TypeError('Invalid URL');
+  return decoded.toLowerCase();
+};
+// Splits "user:pass@host:port" into its parts.
+const parseAuthority = (authority, protocol) => {
+  const special = protocol in specialPorts;
+  const at = authority.lastIndexOf('@');
+  const userinfo = at < 0 ? '' : authority.slice(0, at);
+  let hostport = authority.slice(at + 1);
+  const colon = userinfo.indexOf(':');
+  const username = percentEncode(colon < 0 ? userinfo : userinfo.slice(0, colon), userinfoSet);
+  const password = colon < 0 ? '' : percentEncode(userinfo.slice(colon + 1), userinfoSet);
+  let port = '';
+  const portAt = hostport.lastIndexOf(':');
+  if (portAt >= 0 && !hostport.slice(portAt).includes(']')) {
+    port = hostport.slice(portAt + 1);
+    hostport = hostport.slice(0, portAt);
+    if (!/^\d*$/.test(port)) throw new TypeError('Invalid URL');
+    if (port) {
+      const n = Number(port);
+      if (n > 65535) throw new TypeError('Invalid URL');
+      port = n === Number(specialPorts[protocol] ?? NaN) ? '' : String(n);
+    }
+  }
+  const hostname = parseHost(hostport, special);
+  if (special && protocol !== 'file:' && !hostname) throw new TypeError('Invalid URL');
+  return {username, password, hostname, port};
+};
+const split = text => {
+  const hash = text.indexOf('#');
+  const fragment = hash < 0 ? null : text.slice(hash + 1);
+  const beforeHash = hash < 0 ? text : text.slice(0, hash);
+  const q = beforeHash.indexOf('?');
+  return {rest: q < 0 ? beforeHash : beforeHash.slice(0, q), query: q < 0 ? null : beforeHash.slice(q + 1), fragment};
+};
+const build = (protocol, authority, path, query, fragment, opaque) => {
+  const special = protocol in specialPorts;
+  const parts = {protocol, username: '', password: '', hostname: '', port: '', opaque, hasAuthority: authority !== null};
+  if (authority !== null) Object.assign(parts, parseAuthority(authority, protocol));
+  parts.host = parts.hostname + (parts.port ? ':' + parts.port : '');
+  if (opaque) parts.pathname = percentEncode(path, c0);
+  else if (authority !== null || path.startsWith('/')) parts.pathname = normalizePath(path || '/', special);
+  else parts.pathname = path ? normalizePath('/' + path, special).slice(1) : '';
+  if (special && !parts.pathname) parts.pathname = '/';
+  parts.query = query === null ? null : percentEncode(query, special ? specialQuerySet : querySet);
+  parts.fragment = fragment === null ? null : percentEncode(fragment, fragmentSet);
+  return parts;
+};
+const parseURL = function parseURL(input, base) {
+  // eslint-disable-next-line no-control-regex
+  input = String(input).replace(/^[\x00-\x20]+|[\x00-\x20]+$/g, '').replace(/[\t\n\r]/g, '');
+  const baseParts = base === undefined ? null : parseURL(base);
+  const scheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(input);
+  if (scheme) {
+    const protocol = scheme[1].toLowerCase() + ':';
+    const special = protocol in specialPorts;
+    let {rest, query, fragment} = split(input.slice(scheme[0].length));
+    if (special) rest = rest.replace(/\\/g, '/');
+    if (special && baseParts?.protocol === protocol && !rest.startsWith('/')) {
+      return resolve(baseParts, rest, query, fragment);
+    }
+    if (protocol === 'file:') {
+      const body = rest.startsWith('//') ? rest.slice(2) : null;
+      const slash = body?.indexOf('/') ?? -1;
+      if (body === null) return build(protocol, '', rest.startsWith('/') ? rest : '/' + rest, query, fragment, false);
+      return build(protocol, slash < 0 ? body : body.slice(0, slash), slash < 0 ? '' : body.slice(slash), query, fragment, false);
+    }
+    if (special) {
+      const body = rest.replace(/^\/*/, '');
+      const slash = body.indexOf('/');
+      return build(protocol, slash < 0 ? body : body.slice(0, slash), slash < 0 ? '' : body.slice(slash), query, fragment, false);
+    }
+    if (rest.startsWith('//')) {
+      const body = rest.slice(2);
+      const slash = body.indexOf('/');
+      return build(protocol, slash < 0 ? body : body.slice(0, slash), slash < 0 ? '' : body.slice(slash), query, fragment, false);
+    }
+    return build(protocol, null, rest, query, fragment, !rest.startsWith('/'));
+  }
+  if (!baseParts) throw new TypeError('Invalid URL');
+  let {rest, query, fragment} = split(input);
+  if (baseParts.protocol in specialPorts) rest = rest.replace(/\\/g, '/');
+  if (baseParts.opaque) {
+    if (rest || query !== null || fragment === null) throw new TypeError('Invalid URL');
+    return {...baseParts, fragment: percentEncode(fragment, fragmentSet)};
+  }
+  return resolve(baseParts, rest, query, fragment);
+};
+// A relative reference against [base] (RFC 3986 section 5.2.2).
+const resolve = (base, rest, query, fragment) => {
+  const special = base.protocol in specialPorts;
+  if (rest.startsWith('//')) {
+    const body = rest.slice(2);
+    const slash = body.indexOf('/');
+    return build(base.protocol, slash < 0 ? body : body.slice(0, slash), slash < 0 ? '' : body.slice(slash), query, fragment, false);
+  }
+  const authority = base.hasAuthority ? (base.username ? base.username + (base.password ? ':' + base.password : '') + '@' : '') + base.host : null;
+  let path;
+  if (!rest) {
+    path = base.pathname;
+    if (query === null) query = base.query;
+  } else if (rest.startsWith('/')) {
+    path = rest;
+  } else {
+    const dir = base.pathname.slice(0, base.pathname.lastIndexOf('/') + 1);
+    path = (dir || (base.hasAuthority || special ? '/' : '')) + rest;
+  }
+  const parts = build(base.protocol, authority, path, query, fragment, false);
+  // The base's userinfo and host are already encoded.
+  return {...parts, username: base.username, password: base.password, hostname: base.hostname, port: base.port, host: base.host};
+};
 globalThis.URL = class URL {
-  constructor(value, base) { this._parts = hostJSON('parseURL', [String(value), base === undefined ? '' : String(base)]); this._params = null; }
-  get href() { const p = this._parts; const auth = p.username ? encodeURIComponent(p.username) + (p.password ? ':' + encodeURIComponent(p.password) : '') + '@' : ''; return p.protocol + '//' + auth + p.host + p.pathname + p.search + p.hash; }
-  set href(v) { this._parts = hostJSON('parseURL', [String(v), '']); this._params = null; }
-  get origin() { return this._parts.protocol + '//' + this._parts.host; }
-  get searchParams() { if (!this._params) this._params = new URLSearchParams(this._parts.search, v => { this._parts.search = v ? '?' + v : ''; }); return this._params; }
+  constructor(value, base) { this._parts = parseURL(value, base === undefined ? undefined : String(base)); this._params = null; }
+  get href() {
+    const p = this._parts;
+    const tail = (p.query === null ? '' : '?' + p.query) + (p.fragment === null ? '' : '#' + p.fragment);
+    if (!p.hasAuthority) return p.protocol + p.pathname + tail;
+    return p.protocol + '//' + (p.username ? p.username + (p.password ? ':' + p.password : '') + '@' : '') + p.host + p.pathname + tail;
+  }
+  set href(v) { this._parts = parseURL(v); this._params = null; }
+  get origin() { const p = this._parts; return p.protocol in specialPorts && p.protocol !== 'file:' ? p.protocol + '//' + p.host : 'null'; }
+  get search() { return this._parts.query ? '?' + this._parts.query : ''; }
+  set search(v) { v = String(v).replace(/^\?/, ''); this._parts.query = v ? percentEncode(v, this._parts.protocol in specialPorts ? specialQuerySet : querySet) : null; this._params = null; }
+  get hash() { return this._parts.fragment ? '#' + this._parts.fragment : ''; }
+  set hash(v) { v = String(v).replace(/^#/, ''); this._parts.fragment = v ? percentEncode(v, fragmentSet) : null; }
+  get searchParams() { if (!this._params) this._params = new URLSearchParams(this.search, v => { this._parts.query = v || null; }); return this._params; }
   toString() { return this.href; } toJSON() { return this.href; }
   static canParse(v, b) { try { new URL(v, b); return true; } catch { return false; } }
   static parse(v, b) { try { return new URL(v, b); } catch { return null; } }
 };
-for (const key of ['protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'hash']) Object.defineProperty(URL.prototype, key, {
+for (const key of ['protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname']) Object.defineProperty(URL.prototype, key, {
   get() { return this._parts[key]; },
   set(value) {
     value = String(value); const p = this._parts;
-    if (key === 'search') { p.search = value && !value.startsWith('?') ? '?' + value : value; this._params = null; }
-    else if (key === 'hash') p.hash = value && !value.startsWith('#') ? '#' + value : value;
-    else if (key === 'hostname') { p.hostname = value; p.host = value + (p.port ? ':' + p.port : ''); }
+    if (key === 'hostname') { p.hostname = value; p.host = value + (p.port ? ':' + p.port : ''); }
     else if (key === 'port') { p.port = value; p.host = p.hostname + (value ? ':' + value : ''); }
     else p[key] = value;
   },
@@ -171,27 +362,31 @@ globalThis.Response = class Response extends Body {
   static json(value, init = {}) { return new Response(JSON.stringify(value), {...init, headers: {'content-type': 'application/json', ...init.headers}}); }
 };
 
-// fetch: the host starts the request and returns its id; yt_deliver settles it
-// with __hostFetchSettle(message, body) once the owner's transport answers.
-const fetchWaiters = new Map();
-globalThis.__hostFetchSettle = ({id, response, error}, body) => {
-  const waiter = fetchWaiters.get(id);
-  if (!waiter) return;
-  fetchWaiters.delete(id);
-  if (error) { const failure = new Error('fetch: ' + error.message); failure.__hostError = error.host_error; waiter.reject(failure); }
-  else waiter.resolve(new Response(body ?? null, response));
-};
+// fetch: the caller's transport answers with the response's url, status and
+// headers, and its body as bytes.
 globalThis.fetch = (input, init = {}) => {
   const request = new Request(input, init);
-  return new Promise((resolve, reject) => {
-    const id = hostJSON('fetch', {url: request.url, method: request.method, headers: Array.from(request.headers), body: request._bytes.length ? toBase64(request._bytes) : null});
-    fetchWaiters.set(id, {resolve, reject});
-  });
+  const fields = {url: request.url, method: request.method, headers: Array.from(request.headers), body: request._bytes.length ? toBase64(request._bytes) : null};
+  return ask('fetch', {request: fields}).then(
+    ({value, bytes}) => new Response(bytes ?? null, value),
+    error => { error.message = 'fetch: ' + error.message; throw error; },
+  );
 };
+const randomBytes = length => new Uint8Array(__randomBytes(length));
 globalThis.crypto = {
-  randomUUID: () => __host('randomUUID', 'null'),
-  getRandomValues: array => { asBytes(array).set(new Uint8Array(hostJSON('randomBytes', array.byteLength))); return array; },
-  subtle: {digest: async (algorithm, bytes) => hostJSON('digest', [typeof algorithm === 'string' ? algorithm : algorithm.name, toBase64(bytes)])},
+  randomUUID: () => {
+    const b = randomBytes(16);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const hex = Array.from(b, v => v.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  },
+  getRandomValues: array => {
+    if (array.byteLength > 65536) throw new DOMException('Too many random bytes', 'QuotaExceededError');
+    asBytes(array).set(randomBytes(array.byteLength));
+    return array;
+  },
+  subtle: {digest: async (algorithm, bytes) => (await ask('digest', {algorithm: typeof algorithm === 'string' ? algorithm : algorithm.name, data: toBase64(bytes)})).bytes},
 };
 globalThis.CustomEvent = class CustomEvent { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } };
 globalThis.Event = class Event { constructor(type) { this.type = type; } };
@@ -215,29 +410,31 @@ globalThis.structuredClone = function clone(value, seen = new Map()) {
   return result;
 };
 
-// Timers: the host arms a Dart Timer and calls __fireTimer({id}) when it fires.
+// Timers: Dart arms a Timer and calls __fireTimer({id}) when it fires.
 const timerCallbacks = new Map(); let nextTimer = 0;
-globalThis.setTimeout = (fn, delay = 0, ...args) => { const id = ++nextTimer; timerCallbacks.set(id, () => fn(...args)); hostJSON('setTimer', [id, Number(delay) || 0]); return id; };
-globalThis.clearTimeout = id => { if (timerCallbacks.delete(id)) hostJSON('clearTimer', id); };
+globalThis.setTimeout = (fn, delay = 0, ...args) => { const id = ++nextTimer; timerCallbacks.set(id, () => fn(...args)); outbox.push({kind: 'timer', id, delay: Number(delay) || 0}); return id; };
+globalThis.clearTimeout = id => { if (timerCallbacks.delete(id)) outbox.push({kind: 'clearTimer', id}); };
 globalThis.__fireTimer = ({id}) => { const fn = timerCallbacks.get(id); timerCallbacks.delete(id); fn?.(); };
 globalThis.queueMicrotask = fn => Promise.resolve().then(fn);
 globalThis.caches = {async open() { const data = new Map(); return {match: async k => data.get(k)?.clone(), put: async (k, v) => { data.set(k, v.clone()); }, delete: async k => data.delete(k)}; }};
 const joining = new WeakSet(), nativeJoin = Array.prototype.join;
 Array.prototype.join = function (separator) { if (this == null) return nativeJoin.call(this, separator); const receiver = Object(this); if (joining.has(receiver)) return ''; joining.add(receiver); try { return nativeJoin.call(receiver, separator); } finally { joining.delete(receiver); } };
 
-// __invoke runs one Dart call: fn(args), answered through __host('done').
+// __invoke runs one Dart call: fn(args), answered by a `done` in the outbox,
+// its result already JSON so that one unserializable value can't spoil the
+// rest of the outbox.
 globalThis.__invoke = (id, fn, args) => {
   (async () => {
     try { return {value: await fn(args)}; }
     catch (e) {
-      const info = e?.info;
-      return {error: {message: String(e?.message ?? e), stack: e?.stack, info, host_error: __hostErrorID(e),
-        playability_status: __playability(info?.playability_status ?? (info?.status === 'ERROR' ? info : undefined)) ?? undefined}};
+      let info = null;
+      try { info = __serialize(e?.info) ?? null; } catch { /* left out */ }
+      return {error: {name: e?.constructor?.name ?? e?.name ?? 'Error', message: String(e?.message ?? e), stack: e?.stack, info, host_error: __hostErrorID(e)}};
     }
   })().then(result => {
     let text;
     try { text = JSON.stringify({id, ...result}); }
     catch (e) { text = JSON.stringify({id, error: {message: 'Unserializable YouTube.js value: ' + String(e?.message ?? e)}}); }
-    __host('done', text);
+    outbox.push({kind: 'done', id, result: text});
   });
 };

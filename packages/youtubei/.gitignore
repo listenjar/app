@@ -1,3 +1,5 @@
 .dart_tool/
 # Built by `moon run desktop:bundle` from packages/youtubejs.
 /native/youtubejs.js
+# Written by `moon run desktop:scripts` (tool/scripts.mjs) from the scripts.
+/native/scripts.g.c

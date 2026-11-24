@@ -8,8 +8,12 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
-  // Opened again, say by the sign-in page's link: focus the window there is.
-  if (FocusRunningInstance()) {
+  std::vector<std::string> command_line_arguments =
+      GetCommandLineArguments();
+
+  // Opened again, say by the sign-in page's link or a shared one: hand it to
+  // the window there is.
+  if (FocusRunningInstance(command_line_arguments)) {
     return EXIT_SUCCESS;
   }
   RegisterUrlScheme();
@@ -26,9 +30,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   flutter::DartProject project(L"data");
 
-  std::vector<std::string> command_line_arguments =
-      GetCommandLineArguments();
-
+  // A link that opened the app reaches main() (lib/shared_links.dart).
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);

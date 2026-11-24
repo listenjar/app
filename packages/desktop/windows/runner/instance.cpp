@@ -4,10 +4,15 @@
 
 #include <string>
 
-bool FocusRunningInstance() {
+bool FocusRunningInstance(const std::vector<std::string>& links) {
   HWND window = ::FindWindowW(kWindowClassName, nullptr);
   if (window == nullptr) {
     return false;
+  }
+  for (const std::string& link : links) {
+    COPYDATASTRUCT data{kOpenLink, static_cast<DWORD>(link.size()),
+                        const_cast<char*>(link.data())};
+    ::SendMessageW(window, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data));
   }
   if (::IsIconic(window)) {
     ::ShowWindow(window, SW_RESTORE);

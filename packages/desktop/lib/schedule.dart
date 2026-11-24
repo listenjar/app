@@ -1,5 +1,5 @@
-// When the feeds sync on their own: about once an hour, with or without a
-// window, on every platform. Each platform only supplies the clock that
+// When the feeds sync and the podcasts refresh on their own: about once an
+// hour, with or without a window, on every platform. Each platform only supplies the clock that
 // runs the one job, [runSyncJob]:
 //
 // - macOS, Windows: the process outlives its window (tray.dart), so an
@@ -10,9 +10,13 @@
 //   foreground service, its notification saying so, which may outlast a
 //   plain job's ten minutes for a long video).
 //
-// The job never assumes which: it syncs the app's Feeds when this isolate
-// has them, hands off to the isolate that does when another has them, and
-// otherwise opens the kept account cold, syncs, and closes it again.
+// - iOS: the OS suspends the app; it refreshes when opened and on resume
+//   (shell.dart), and while it plays, the hourly timer runs.
+//
+// The job never assumes which: it syncs the app's Feeds and refreshes its
+// Podcasts when this isolate has them, hands off to the isolate that does
+// when another has them, and otherwise opens the kept account and the
+// library cold, syncs and refreshes, and closes them again.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -21,7 +25,10 @@ import 'dart:ui' show IsolateNameServer;
 import 'package:workmanager/workmanager.dart';
 
 import 'account.dart';
+import 'downloads.dart';
 import 'feeds.dart';
+import 'library.dart';
+import 'podcasts.dart';
 import 'youtube.dart';
 
 const _every = Duration(hours: 1);
@@ -33,8 +40,8 @@ const _portName = 'listenjar.sync';
 /// isolate for gone (it ended without unregistering).
 const _answer = Duration(seconds: 10);
 
-/// This isolate's app Feeds, once a schedule started with them.
-Feeds? _app;
+/// This isolate's app Feeds and Podcasts, once a schedule started with them.
+(Feeds, Podcasts)? _app;
 
 abstract interface class SyncSchedule {
   /// This platform's clock.
@@ -44,13 +51,16 @@ abstract interface class SyncSchedule {
   /// about every hour from now on, for as long as the platform keeps the
   /// schedule: the process's life on desktop, until the app is uninstalled
   /// on Android. Safe to call on every launch.
-  Future<void> start(Feeds feeds);
+  Future<void> start(Feeds feeds, Podcasts podcasts);
 }
 
 /// The one thing every platform's clock runs: a sync pass over the feeds,
 /// wherever this process keeps them.
 Future<void> runSyncJob() async {
-  if (_app case final feeds?) return feeds.sync();
+  if (_app case (final feeds, final podcasts)?) {
+    await Future.wait([feeds.sync(), podcasts.refreshAll(force: true)]);
+    return;
+  }
   if (IsolateNameServer.lookupPortByName(_portName) case final app?) {
     if (await _handOff(app)) return;
     IsolateNameServer.removePortNameMapping(_portName);
@@ -59,20 +69,28 @@ Future<void> runSyncJob() async {
   final youtube = YouTubeService();
   final account = Account();
   final feeds = Feeds(account, youtube);
+  final library = await Library.open();
+  final downloads = Downloads(library, youtube);
+  final podcasts = Podcasts(library, downloads, youtube);
   try {
+    await downloads.start();
     await account.restore();
-    await feeds.sync();
+    await Future.wait([feeds.sync(), podcasts.refreshAll(force: true)]);
   } finally {
+    podcasts.dispose();
+    await downloads.close();
+    library.dispose();
     feeds.dispose();
     account.dispose();
     await youtube.close();
   }
 }
 
-/// Takes jobs from other isolates of this process into [feeds].
-void _serve(Feeds feeds) {
+/// Takes jobs from other isolates of this process into [feeds] and
+/// [podcasts].
+void _serve(Feeds feeds, Podcasts podcasts) {
   if (_app != null) return;
-  _app = feeds;
+  _app = (feeds, podcasts);
   final port = ReceivePort('sync jobs');
   IsolateNameServer.removePortNameMapping(_portName);
   IsolateNameServer.registerPortWithName(port.sendPort, _portName);
@@ -80,7 +98,7 @@ void _serve(Feeds feeds) {
     final to = reply as SendPort;
     to.send(true);
     try {
-      await feeds.sync();
+      await Future.wait([feeds.sync(), podcasts.refreshAll(force: true)]);
     } finally {
       to.send(false);
     }
@@ -107,8 +125,8 @@ final class _TimerSchedule implements SyncSchedule {
   Timer? _timer;
 
   @override
-  Future<void> start(Feeds feeds) async {
-    _serve(feeds);
+  Future<void> start(Feeds feeds, Podcasts podcasts) async {
+    _serve(feeds, podcasts);
     _timer ??= Timer.periodic(_every, (_) => unawaited(runSyncJob().catchError((_) {})));
   }
 }
@@ -117,8 +135,8 @@ final class _WorkManagerSchedule implements SyncSchedule {
   static const _task = 'sync';
 
   @override
-  Future<void> start(Feeds feeds) async {
-    _serve(feeds);
+  Future<void> start(Feeds feeds, Podcasts podcasts) async {
+    _serve(feeds, podcasts);
     await Workmanager().initialize(_runScheduled);
     await Workmanager().registerPeriodicTask(
       _task,

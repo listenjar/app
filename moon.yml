@@ -16,7 +16,7 @@ fileGroups:
     - public.yaml
     - packages/desktop/lib/**/*
     - packages/desktop/pubspec.yaml
-    - packages/desktop/{android,linux,macos,windows}/**/*
+    - packages/desktop/{android,ios,linux,macos,windows}/**/*
     - "!packages/desktop/**/ephemeral/**/*"
     - "!packages/desktop/android/{.gradle,.kotlin,app/build}/**/*"
     - packages/youtubei/{hook,lib,native,tool}/**/*
@@ -43,6 +43,20 @@ tasks:
     outputs: [packages/youtubei/native/youtubejs.js]
     options:
       cache: true
+  scripts:
+    description: >-
+      Write packages/youtubei/native/scripts.g.c, the scripts youtubei's build hook compiles in
+      (host.js, the bundle, bindings.js), as C string literals any C compiler takes.
+    deps: [~:bundle]
+    command: node packages/youtubei/tool/scripts.mjs
+    inputs:
+      - packages/youtubei/native/host.js
+      - packages/youtubei/native/bindings.js
+      - packages/youtubei/native/youtubejs.js
+      - packages/youtubei/tool/scripts.mjs
+    outputs: [packages/youtubei/native/scripts.g.c]
+    options:
+      cache: true
   codegen:
     description: >-
       Generate the Dart API client in packages/desktop/lib/backend from public.yaml with oasmith,
@@ -56,6 +70,24 @@ tasks:
       node ../../scripts/pricing-dart.ts packages/desktop/lib/pricing/catalog.dart
     options:
       cache: true
+  swift-check:
+    description: >-
+      Type-check the iOS and macOS runners' app delegates on Linux against stubs of the Flutter,
+      UIKit and AppKit API they use (tool/swift-check; Swift from mise.toml, Linux only).
+    inputs: [tool/swift-check/**/*, packages/desktop/ios/Runner/*.swift, packages/desktop/macos/Runner/AppDelegate.swift]
+    script: tool/swift-check/check.sh
+    options:
+      cache: true
+      os: linux
+  windows-check:
+    description: >-
+      Compile the Windows runner off Windows with zig, against the Win32 and Flutter embedder
+      headers (tool/windows-check; zig from mise.toml, not on Windows).
+    inputs: [tool/windows-check/**/*, packages/desktop/windows/runner/**/*]
+    script: tool/windows-check/check.sh
+    options:
+      cache: true
+      os: [linux, macos]
   icons:
     description: >-
       Render every platform's app icon from resources/icon.svg: as is for release, with a DEBUG
@@ -67,7 +99,7 @@ tasks:
       runInCI: false
   ffigen:
     description: Regenerate packages/youtubei/lib/src/bindings.g.dart from native/bridge.h after changing it.
-    deps: [~:bundle]
+    deps: [~:scripts]
     script: cd packages/youtubei && dart run tool/ffigen.dart
     options:
       cache: false
@@ -76,12 +108,12 @@ tasks:
     description: >-
       Run the app on macOS against backend:dev on http://localhost:8787, hot reloading on every
       save under packages/*/lib (tool/dev.dart) and printing the DTD URI for the Dart MCP server.
-    deps: [~:codegen, ~:bundle]
+    deps: [~:codegen, ~:scripts]
     script: dart tool/dev.dart macos
     preset: server
   build:
     description: Package the release macOS app into packages/desktop/build/macos.
-    deps: [~:codegen, ~:bundle]
+    deps: [~:codegen, ~:scripts]
     inputs: ["@group(sources)"]
     outputs: [packages/desktop/build/macos/Build/Products/Release/**/*]
     script: cd packages/desktop && flutter build macos --release
@@ -90,7 +122,7 @@ tasks:
       runInCI: false
   check:
     description: Analyze the Flutter app and youtubei.
-    deps: [~:codegen, ~:bundle]
+    deps: [~:codegen, ~:scripts]
     script: flutter analyze packages/desktop packages/youtubei
     options:
       cache: false

@@ -1,14 +1,22 @@
-// The native half of youtubei: one QuickJS runtime and context, the host
-// primitives YouTube.js needs that are faster in C than in JavaScript, and a
-// single synchronous `__host(name, json)` call back into the owning Dart
-// isolate. Everything here runs on that isolate's thread, except the interrupt,
-// which other threads signal.
+// The native half of youtubei: one QuickJS runtime and context, and the host
+// primitives YouTube.js needs synchronously or faster than JavaScript does
+// them (UTF-8, the system's random bytes). JavaScript never calls Dart: the
+// owning isolate calls in, then takes the outbox (host.js). Everything here
+// runs on that isolate's thread, except the interrupt, which other threads
+// signal.
+#ifdef _WIN32
+#define _CRT_RAND_S // rand_s
+#endif
 #include "bridge.h"
 #include "quickjs.h"
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sys/random.h>
+#endif
 
 // The scripts embedded by hook/build.dart: host.js, the YouTube.js bundle and
 // bindings.js, each zero-terminated as JS_Eval requires.
@@ -31,13 +39,8 @@ struct YtEngine {
   JSRuntime *runtime;
   JSContext *context;
   YtInterrupt *interrupt;
-  YtHost host;
   // The call whose JavaScript is running now, 0 when unknown.
   int64_t running;
-  // What the current host call returned, set through yt_host_return.
-  char result_kind;
-  uint8_t *result;
-  size_t result_len;
 };
 
 YtInterrupt *yt_interrupt_new(void) { return calloc(1, sizeof(YtInterrupt)); }
@@ -96,67 +99,45 @@ static char *take_exception(YtEngine *engine) {
   return result;
 }
 
-static void clear_result(YtEngine *engine) {
-  free(engine->result);
-  engine->result = NULL;
-  engine->result_len = 0;
-  engine->result_kind = 'U';
-}
-
-// Called by the Dart host callback before it returns: U undefined, S string,
-// J JSON, B ArrayBuffer, E thrown Error with this message.
-void yt_host_return(YtEngine *engine, int32_t kind, const uint8_t *data, int64_t len) {
-  clear_result(engine);
-  engine->result_kind = (char)kind;
-  if (len > 0) {
-    engine->result = malloc((size_t)len + 1);
-    if (!engine->result) {
-      engine->result_kind = 'E';
-      return;
+// Fills [out] from the system's cryptographic random source.
+static int fill_random(uint8_t *out, size_t len) {
+#if defined(_WIN32)
+  while (len) {
+    unsigned int value;
+    if (rand_s(&value)) return -1;
+    size_t n = len < sizeof value ? len : sizeof value;
+    memcpy(out, &value, n);
+    out += n;
+    len -= n;
+  }
+#elif defined(__linux__) && !defined(__ANDROID__)
+  while (len) {
+    ssize_t n = getrandom(out, len, 0);
+    if (n < 0) {
+      if (errno == EINTR) continue;
+      return -1;
     }
-    memcpy(engine->result, data, (size_t)len);
-    engine->result[len] = 0;
-    engine->result_len = (size_t)len;
+    out += n;
+    len -= (size_t)n;
   }
+#else
+  arc4random_buf(out, len);
+#endif
+  return 0;
 }
 
-// __host(name, json): the synchronous call into Dart.
-static JSValue js_host(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+// __randomBytes(length): ArrayBuffer of random bytes, at most 64 KiB.
+static JSValue js_random_bytes(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  YtEngine *engine = JS_GetContextOpaque(ctx);
-  if (argc < 2) return JS_ThrowTypeError(ctx, "__host(name, json)");
-  const char *name = JS_ToCString(ctx, argv[0]);
-  if (!name) return JS_EXCEPTION;
-  size_t args_len;
-  const char *args = JS_ToCStringLen(ctx, &args_len, argv[1]);
-  if (!args) {
-    JS_FreeCString(ctx, name);
-    return JS_EXCEPTION;
-  }
-  clear_result(engine);
-  engine->host(engine, name, args, (int64_t)args_len);
-  JS_FreeCString(ctx, name);
-  JS_FreeCString(ctx, args);
-  const char *data = engine->result ? (const char *)engine->result : "";
-  JSValue value;
-  switch (engine->result_kind) {
-  case 'S':
-    value = JS_NewStringLen(ctx, data, engine->result_len);
-    break;
-  case 'J':
-    value = JS_ParseJSON(ctx, data, engine->result_len, "<host>");
-    break;
-  case 'B':
-    value = JS_NewArrayBufferCopy(ctx, engine->result, engine->result_len);
-    break;
-  case 'E':
-    value = JS_ThrowInternalError(ctx, "%s", engine->result ? data : "host call failed");
-    break;
-  default:
-    value = JS_UNDEFINED;
-  }
-  clear_result(engine);
-  return value;
+  int64_t len;
+  if (JS_ToInt64(ctx, &len, argc > 0 ? argv[0] : JS_UNDEFINED)) return JS_EXCEPTION;
+  if (len < 0 || len > 65536) return JS_ThrowRangeError(ctx, "__randomBytes length out of range");
+  uint8_t *bytes = malloc(len ? (size_t)len : 1);
+  if (!bytes) return JS_ThrowOutOfMemory(ctx);
+  JSValue buffer = fill_random(bytes, (size_t)len) ? JS_ThrowInternalError(ctx, "no system random source")
+                                                    : JS_NewArrayBufferCopy(ctx, bytes, (size_t)len);
+  free(bytes);
+  return buffer;
 }
 
 // __utf8Encode(string): ArrayBuffer.
@@ -185,12 +166,10 @@ static JSValue js_utf8_decode(JSContext *ctx, JSValueConst this_val, int argc, J
   return JS_NewStringLen(ctx, (const char *)bytes + offset, (size_t)length);
 }
 
-YtEngine *yt_new(int64_t memory_limit, int64_t stack_limit, YtInterrupt *interrupt, YtHost host) {
+YtEngine *yt_new(int64_t memory_limit, int64_t stack_limit, YtInterrupt *interrupt) {
   YtEngine *engine = calloc(1, sizeof(YtEngine));
   if (!engine) return NULL;
   engine->interrupt = interrupt;
-  engine->host = host;
-  engine->result_kind = 'U';
   engine->runtime = JS_NewRuntime();
   if (!engine->runtime) {
     free(engine);
@@ -207,7 +186,8 @@ YtEngine *yt_new(int64_t memory_limit, int64_t stack_limit, YtInterrupt *interru
   }
   JS_SetContextOpaque(engine->context, engine);
   JSValue global = JS_GetGlobalObject(engine->context);
-  JS_SetPropertyStr(engine->context, global, "__host", JS_NewCFunction(engine->context, js_host, "__host", 2));
+  JS_SetPropertyStr(engine->context, global, "__randomBytes",
+                    JS_NewCFunction(engine->context, js_random_bytes, "__randomBytes", 1));
   JS_SetPropertyStr(engine->context, global, "__utf8Encode",
                     JS_NewCFunction(engine->context, js_utf8_encode, "__utf8Encode", 1));
   JS_SetPropertyStr(engine->context, global, "__utf8Decode",
@@ -221,7 +201,6 @@ void yt_free(YtEngine *engine) {
   JS_UpdateStackTop(engine->runtime);
   JS_FreeContext(engine->context);
   JS_FreeRuntime(engine->runtime);
-  clear_result(engine);
   free(engine);
 }
 
@@ -280,6 +259,39 @@ char *yt_deliver(YtEngine *engine, const char *name, const char *json, int64_t j
   }
   JS_FreeValue(ctx, args[0]);
   JS_FreeValue(ctx, args[1]);
+  JS_FreeValue(ctx, fn);
+  JS_FreeValue(ctx, global);
+  return error;
+}
+
+// Sets *outbox to what JavaScript queued since the last take, as a JSON
+// array to free with yt_string_free, or NULL when it queued nothing. Returns
+// NULL or the error to free.
+char *yt_take_outbox(YtEngine *engine, char **outbox) {
+  JSContext *ctx = engine->context;
+  *outbox = NULL;
+  JS_UpdateStackTop(engine->runtime);
+  JSValue global = JS_GetGlobalObject(ctx);
+  JSValue fn = JS_GetPropertyStr(ctx, global, "__takeOutbox");
+  JSValue result = JS_Call(ctx, fn, global, 0, NULL);
+  char *error = NULL;
+  if (JS_IsException(result)) {
+    error = take_exception(engine);
+  } else {
+    size_t len;
+    const char *text = JS_ToCStringLen(ctx, &len, result);
+    if (!text) {
+      error = take_exception(engine);
+    } else {
+      if (len) {
+        *outbox = malloc(len + 1);
+        if (*outbox) memcpy(*outbox, text, len + 1);
+        else error = copy_string(NULL);
+      }
+      JS_FreeCString(ctx, text);
+    }
+  }
+  JS_FreeValue(ctx, result);
   JS_FreeValue(ctx, fn);
   JS_FreeValue(ctx, global);
   return error;

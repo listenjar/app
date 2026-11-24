@@ -22,9 +22,11 @@ class AppDelegate: FlutterAppDelegate {
 
   // The sign-in page in the browser opens $(LISTENJAR_URL_SCHEME)://sign-in
   // (Info.plist). LaunchServices activates the app; bring the window back
-  // too, even from the Dock.
+  // too, even from the Dock. A $(LISTENJAR_URL_SCHEME)://open?url=… link
+  // goes on to lib/shared_links.dart.
   override func application(_ application: NSApplication, open urls: [URL]) {
     super.application(application, open: urls)
+    urls.filter { $0.host == "open" }.forEach { SharedLinks.shared?.open($0.absoluteString) }
     showWindow()
   }
 
@@ -38,6 +40,32 @@ class AppDelegate: FlutterAppDelegate {
       NSApp.activate()
     } else {
       NSApp.activate(ignoringOtherApps: true)
+    }
+  }
+}
+
+/// Links opened with ListenJar, for lib/shared_links.dart. One that arrives
+/// before Dart listens waits until Dart asks for `pending`.
+final class SharedLinks {
+  /// Made with the window (MainFlutterWindow.swift).
+  static var shared: SharedLinks?
+
+  private let channel: FlutterMethodChannel
+  private var pending: [String] = []
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "listenjar/links", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "pending", let self else { return result(FlutterMethodNotImplemented) }
+      result(self.pending)
+      self.pending.removeAll()
+    }
+  }
+
+  func open(_ link: String) {
+    channel.invokeMethod("open", arguments: link) { [weak self] result in
+      let missed = result is FlutterError || (result as? NSObject) === FlutterMethodNotImplemented
+      if missed { self?.pending.append(link) }
     }
   }
 }

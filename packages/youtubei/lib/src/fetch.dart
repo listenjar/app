@@ -4,8 +4,26 @@ import 'dart:typed_data';
 
 import 'package:cancellation_token/cancellation_token.dart';
 
-import 'engine.dart';
-import 'models.dart';
+/// YouTube.js's `fetch` option: the transport its requests go through. The
+/// token stands in for the request's AbortSignal.
+typedef Fetch = Future<FetchResponse> Function(FetchRequest request, CancellationToken token);
+
+/// One HTTP request YouTube.js makes through its `fetch`.
+final class FetchRequest {
+  const FetchRequest({required this.url, required this.method, required this.headers, this.body});
+  final String url;
+  final String method;
+  final List<(String, String)> headers;
+  final Uint8List? body;
+}
+
+final class FetchResponse {
+  const FetchResponse({required this.url, required this.status, required this.headers, required this.body});
+  final String url;
+  final int status;
+  final List<(String, String)> headers;
+  final Uint8List body;
+}
 
 /// A [Fetch] over a dart:io [HttpClient]. Cancelling the token aborts the
 /// request. Set `client.userAgent = null`: YouTube.js sends its own.

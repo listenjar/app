@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
+import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
 
@@ -11,11 +12,12 @@ const _sources = [
   'native/quickjs/libunicode.c',
   'native/quickjs/cutils.c',
   'native/quickjs/dtoa.c',
-  'native/scripts.c',
+  'native/scripts.g.c',
 ];
 
-/// The scripts native/scripts.c embeds; youtubejs.js is the bundle
-/// `moon run desktop:bundle` builds from packages/youtubejs.
+/// The scripts native/scripts.g.c holds, as tool/scripts.mjs writes it
+/// (`moon run desktop:scripts`); youtubejs.js is the bundle `moon run
+/// desktop:bundle` builds from packages/youtubejs.
 const _scripts = ['native/host.js', 'native/youtubejs.js', 'native/bindings.js'];
 
 const _assetName = 'src/bindings.g.dart';
@@ -25,11 +27,7 @@ void main(List<String> args) async {
   await build(args, (input, output) async {
     if (!input.config.buildCodeAssets) return;
     final scripts = [for (final script in _scripts) input.packageRoot.resolve(script)];
-    for (final script in scripts) {
-      if (!File.fromUri(script).existsSync()) {
-        throw StateError('${script.toFilePath()} is missing: run `moon run desktop:bundle`');
-      }
-    }
+    _checkGenerated(input.packageRoot.resolve('native/scripts.g.c'), scripts);
     output.dependencies.addAll(scripts);
     if (input.config.code.targetOS == OS.windows) {
       await _windows(input, output);
@@ -41,7 +39,7 @@ void main(List<String> args) async {
       sources: _sources,
       includes: ['native', 'native/quickjs'],
       defines: _defines,
-      flags: ['-std=gnu11', '-fwrapv', '-Wno-c23-extensions'],
+      flags: ['-std=gnu11', '-fwrapv'],
       libraries: switch (input.config.code.targetOS) {
         OS.linux => ['m', 'pthread'],
         OS.android => ['m'],
@@ -49,6 +47,23 @@ void main(List<String> args) async {
       },
     ).run(input: input, output: output);
   });
+}
+
+/// Fails unless [generated] holds the [scripts] as they are now: its first
+/// lines are their SHA-256s.
+void _checkGenerated(Uri generated, List<Uri> scripts) {
+  const run = 'run `moon run desktop:scripts`';
+  final file = File.fromUri(generated);
+  if (!file.existsSync()) throw StateError('${file.path} is missing: $run');
+  final lines = file.readAsLinesSync().take(scripts.length).toList();
+  for (final (i, script) in scripts.indexed) {
+    final source = File.fromUri(script);
+    if (!source.existsSync()) throw StateError('${source.path} is missing: $run');
+    final hash = sha256.convert(source.readAsBytesSync());
+    if (i >= lines.length || !lines[i].startsWith('// sha256 $hash ')) {
+      throw StateError('${file.path} is older than ${source.path}: $run');
+    }
+  }
 }
 
 Future<void> _windows(BuildInput input, BuildOutputBuilder output) async {

@@ -1,0 +1,2 @@
+#include "Generated.xcconfig"
+LISTENJAR_URL_SCHEME = listenjar

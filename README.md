@@ -1,6 +1,12 @@
 # ListenJar desktop
 
-The [ListenJar](https://listenjar.com) app for macOS, Windows, Linux and Android, in Flutter.
+The [ListenJar](https://listenjar.com) app for macOS, Windows, Linux, Android and iOS, in Flutter.
+
+It is a podcast player first, free and without an account: follow any RSS feed or a show from
+the directory, refresh, download, Up Next, playback speed and a sleep timer, with the system's
+media controls and headphone buttons. A single YouTube video plays as an episode of its own.
+Signing in adds ListenJar Cloud: YouTube playlists, channels and custom podcasts as feeds that
+ListenJar hosts, which the paid plans pay storage for.
 
 It talks to the ListenJar API described in [public.yaml](public.yaml) (OpenAPI 3.2), through
 a Dart client that [oasmith](https://github.com/responsibleapi/oasmith) generates into the
@@ -16,6 +22,32 @@ A [pub workspace](https://dart.dev/tools/pub/workspaces) ([pubspec.yaml](pubspec
 | [packages/youtubei](packages/youtubei) | [listenbox/YouTube.js](https://github.com/listenbox/YouTube.js) in embedded QuickJS, for Dart |
 | [packages/youtubejs](packages/youtubejs) | Git submodule of the YouTube.js fork (`master`), which youtubei bundles |
 
+## Player
+
+| File | What |
+| --- | --- |
+| [library.dart](packages/desktop/lib/library.dart) | Shows, episodes, Up Next and settings, in SQLite (`library.sqlite`) |
+| [rss.dart](packages/desktop/lib/rss.dart) | Fetches and parses RSS and Atom feeds and OPML, from the address as given (`http` too, as AntennaPod does) |
+| [podcasts.dart](packages/desktop/lib/podcasts.dart) | Following, refreshing (conditional GETs) and OPML import and export |
+| [directory.dart](packages/desktop/lib/directory.dart) | Search and top charts from Apple's podcast directory, as AntennaPod uses |
+| [player.dart](packages/desktop/lib/player.dart) | [just_audio](https://pub.dev/packages/just_audio) behind [audio_service](https://pub.dev/packages/audio_service): the lock screen, notification, headphones and media keys |
+| [downloads.dart](packages/desktop/lib/downloads.dart) | Episode downloads ([background_downloader](https://pub.dev/packages/background_downloader)), YouTube's through youtubei, and the storage rules (`tidyDownloads`) |
+| [storage_page.dart](packages/desktop/lib/storage_page.dart) | Settings → Storage: the space downloads take, show by show, and the rules for it |
+
+The media session is the platform's own: Android's and iOS's through audio_service, macOS's
+Now Playing, MPRIS on Linux ([audio_service_mpris](https://pub.dev/packages/audio_service_mpris))
+and the System Media Transport Controls on Windows ([windows_media.dart](packages/desktop/lib/windows_media.dart)).
+Windows and Linux play through libmpv ([just_audio_media_kit](https://pub.dev/packages/just_audio_media_kit)).
+
+Storage works like Telegram's Storage Usage. A ring shows the shows whose downloads take the
+most space (the five largest, then the rest as one part); untick shows to delete only the rest.
+Downloads can be capped at 2, 5, 10 or 25 GB (no limit by default): past the cap, the downloads
+played or downloaded longest ago go first. Played episodes' downloads go right away (the
+default), after a day or a week, or stay; downloads unplayed for a week, a month or three
+months can go too. The episode playing and Up Next always stay, and a running download is never
+touched. The rules run when the app starts, every hour, after a download finishes or an episode
+ends, and when they change; each deletion logs on the `storage` logger with its reason.
+
 SQLite comes from [`package:sqlite3`](https://pub.dev/packages/sqlite3)'s build hook. QuickJS
 is compiled by youtubei's build hook. Neither needs a system library.
 
@@ -30,15 +62,81 @@ moon run desktop:build   # release macOS app in packages/desktop/build/macos
 moon run desktop:check   # flutter analyze
 ```
 
-`desktop:codegen` (public.yaml → `lib/backend`) and `desktop:bundle` (packages/youtubejs →
-`packages/youtubei/native/youtubejs.js`) run before each of those. For other platforms run
-`flutter run -d windows|linux|<android device>` in `packages/desktop` after them. Windows builds
-QuickJS with MinGW-w64 GCC (MSVC can't build it); see [packages/youtubei](packages/youtubei).
+`desktop:codegen` (public.yaml → `lib/backend`) and `desktop:scripts` (packages/youtubejs →
+`packages/youtubei/native/youtubejs.js` → `native/scripts.g.c`) run before each of those, and
+moon caches both on their inputs. For other platforms run `moon run desktop:codegen
+desktop:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `packages/desktop`.
+
+- Windows builds QuickJS with MinGW-w64 GCC (MSVC can't build it); see
+  [packages/youtubei](packages/youtubei). The media controls (smtc_windows) build with
+  [Rust](https://rustup.rs).
+- Linux needs libmpv: `libmpv-dev` to build and `libmpv2` to run on Debian and Ubuntu (`mpv-libs`
+  on Fedora, `mpv` on Arch). Without it the app opens but can't play.
+- iOS needs Xcode. Its app icon is still Flutter's: `desktop:icons` doesn't render iOS yet.
+
+Off their platforms, two checks type-check the native runners:
+
+- `moon run desktop:swift-check` (Linux): the iOS and macOS AppDelegates against stub UIKit,
+  Cocoa and Flutter modules, with [Swift for Linux](https://www.swift.org/install/linux/)
+  ([tool/swift-check](tool/swift-check)).
+- `moon run desktop:windows-check` (Linux, macOS): the Windows runner's C++ against the Flutter
+  engine's headers, with `zig c++ -target x86_64-windows-gnu` ([tool/windows-check](tool/windows-check)).
+
+[mise.toml](mise.toml) installs Swift (Linux only) and Zig for them.
+
+Android runs in [Redroid](https://github.com/remote-android/redroid-doc) on a Linux machine with
+the binder module (`sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"`):
+
+```sh
+docker run -itd --rm --privileged --name redroid -p 5555:5555 redroid/redroid:14.0.0_64only-latest
+adb connect localhost:5555
+flutter run -d localhost:5555
+```
+
+## Shared links
+
+A YouTube or podcast link shared to the app opens as if typed into its link field: a video is
+added as an episode (or, signed in on a paid plan, to a podcast of your choice), a playlist or
+channel goes to ListenJar Cloud, anything else is searched
+([shared_links.dart](packages/desktop/lib/shared_links.dart)). Each platform hands links over on
+the `listenjar/links` channel:
+
+| Platform | How a link arrives |
+| --- | --- |
+| Android | The share sheet (`text/plain`) and YouTube's https links ([MainActivity.kt](packages/desktop/android/app/src/main/kotlin/com/listenjar/desktop/MainActivity.kt)); since Android 12, links open in the app only once its "Open supported links" setting is on, as the app can't verify youtube.com |
+| iOS, macOS | `listenjar://open?url=…`, which the website and shortcuts can open (AppDelegate.swift) |
+| Windows | Command-line arguments, forwarded to the running instance with `WM_COPYDATA` ([instance.cpp](packages/desktop/windows/runner/instance.cpp)) |
+| Linux | Command-line arguments |
+
+A share extension for iOS and macOS and a Windows share target (which needs MSIX packaging) are
+still to come.
+
+## Debugging
+
+Each part of the app logs through a `Logger` of its own ([log.dart](packages/desktop/lib/log.dart)):
+`youtube`, `youtube.http`, `youtube.js` (YouTube.js's own log), `podcasts`, `rss`, `player`,
+`downloads`, `storage`, `links`. Outside release builds, records of level FINE and up print to
+`flutter run`'s console and go to DevTools' Logging view; warnings and up go there in release.
+`traced()` wraps slow work (each YouTube request, resolving a video, a feed refresh): it logs how
+long the work took and how it ended, shows it as a task in DevTools' Performance view and the
+VM timeline (Chrome trace JSON), and warns every 10 s while it waits.
+
+Debug builds answer service extensions, which the Dart MCP server's `vm_service callMethod` and
+DevTools can call:
+
+| Extension | Answer |
+| --- | --- |
+| `ext.listenjar.log` | Recent records; `since` a sequence number, `level` (default FINE), `logger` a name prefix |
+| `ext.listenjar.running` | Traced work not finished yet, oldest first |
+| `ext.listenjar.state` | Account plan, what plays, Up Next, downloads, links waiting (no names or email) |
+
+SEVERE records and uncaught async errors are reported as Flutter errors, so they show where
+runtime errors show (the MCP's `get_runtime_errors`).
 
 ## Icons
 
 [resources/icon.svg](resources/icon.svg) is the one source. `moon run desktop:icons` renders it
-for macOS, Windows, Android and Linux: as is for release and profile builds, and with a red
+for macOS, Windows, Android and Linux (not iOS yet): as is for release and profile builds, and with a red
 DEBUG ribbon for debug builds, so a dev build never passes for the installed app.
 
 ## Configuration
@@ -70,4 +168,9 @@ back to the front. The token lives in the system credential store
 (Keychain, Credential Manager, Secret Service or the Android Keystore); "Sign out" revokes and
 forgets it.
 
-The app sends nothing anywhere else: no telemetry, tracing or crash reports.
+## What the app talks to
+
+Feeds and episode files come from each podcast's own host. Podcast search and the charts go to
+Apple's directory (`itunes.apple.com`, `rss.marketingtools.apple.com`), and YouTube search and
+videos to YouTube. The ListenJar API only when you're signed in. Nothing else: no telemetry,
+tracing or crash reports.

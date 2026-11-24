@@ -1,82 +1,112 @@
-// Thin bindings to the live YouTube.js API, ported from the Go youtubei crate.
-// They call upstream methods and read upstream properties; they never build
-// YouTube requests or parse responses themselves. Live objects stay here
-// behind numeric handles until a continuation consumes them or Dart releases
-// them.
+// Thin bindings to the live YouTube.js API. Dart's classes (lib/src/) mirror
+// YouTube.js's: each Dart method calls the upstream method of the same name
+// here and gets back what it returned, serialized by __serialize. They never
+// build YouTube requests or parse responses themselves. Objects a later call
+// needs (formats, the player, playlists, API responses) stay here behind
+// numeric handles until the Dart object holding them is collected.
 const __handles = new Map(); let __nextHandle = 0; let __innertube;
 const __retain = value => { const id = ++__nextHandle; __handles.set(id, value); return id; };
-const __text = value => value?.text ?? null;
-const __playability = status => {
-  if (!status) return null;
-  const screen = status.error_screen; const message = screen?.content ?? screen;
-  return {status: status.status, reason: status.reason ?? '', subreason: message?.subreason?.toString() ?? message?.reason?.toString() ?? ''};
+const __live = handle => {
+  if (!__handles.has(handle)) throw new Error('Released YouTube.js object');
+  return __handles.get(handle);
 };
-const __playlist = page => ({
-  handle: __retain(page), title: page.info?.title ?? '', thumbnails: page.info?.thumbnails ?? [],
-  has_continuation: page.has_continuation, is_complete: page.is_complete,
-  alerts: Array.from(page.page?.alerts ?? [], a => ({type: a.type, alert_type: a.alert_type})),
-  items: Array.from(page.items, n => {
-    if (n.type === 'PlaylistVideo') return {type: n.type, id: n.id, title: n.title.toString(), source_title: __text(n.title), is_playable: n.is_playable, duration_seconds: n.duration?.seconds ?? 0, upcoming_ms: n.upcoming?.getTime()};
-    if (n.type === 'LockupView') return {type: n.type, id: n.content_id, title: n.metadata?.title?.toString() ?? '', source_title: __text(n.metadata?.title), content_type: n.content_type, duration_badges: Array.from(n.content_image?.overlays ?? []).flatMap(o => Array.from(o.badges ?? [], b => b.text).filter(Boolean))};
-    return {type: n.type};
-  }),
-});
-globalThis.__bridge = {
-  async initialize(options) {
-    const data = new Map();
-    class Cache { get cache_dir() { return ''; } async get(k) { return data.get(k); } async set(k, v) { data.set(k, v); } async remove(k) { data.delete(k); } }
-    YouTubeJS.Platform.load({...YouTubeJS.Platform.shim, runtime: 'unknown', Cache, eval: (data, env) => Function(...Object.keys(env), data.output)(...Object.values(env))});
-    __innertube = await YouTubeJS.Innertube.create({...options, cache: new YouTubeJS.UniversalCache(false), fetch});
-    return {user_agent: __innertube.session.user_agent, visionos_user_agent: YouTubeJS.Constants.CLIENTS.VISIONOS.USER_AGENT, tv_user_agent: YouTubeJS.Constants.CLIENTS.TV.USER_AGENT};
-  },
-  async playlistHead(id) {
-    const response = await __innertube.actions.execute('/browse', {browseId: 'VL' + id, params: 'wgYCCAA='});
-    return __playlist(new YouTubeJS.YT.Playlist(__innertube.actions, response, false));
-  },
-  async continuation(handle) {
-    const page = __handles.get(handle);
-    if (!page) throw new Error('Released upstream playlist');
-    __handles.delete(handle);
-    return __playlist(await page.getContinuation());
-  },
-  async videoInfo({id, client}) {
-    const info = await __innertube.getBasicInfo(id, {client});
-    const formats = [...(info.streaming_data?.formats ?? []), ...(info.streaming_data?.adaptive_formats ?? [])];
-    const micro = info.page[0].microformat;
-    return {basic_info: info.basic_info, playability_status: __playability(info.playability_status), publish_date: micro?.publish_date ?? '', upload_date: micro?.upload_date ?? '', cpn: info.cpn,
-      formats: formats.map(f => ({handle: __retain(f), itag: f.itag, mime_type: f.mime_type, bitrate: f.bitrate, width: f.width, height: f.height, fps: f.fps, content_length: f.content_length, has_audio: f.has_audio, has_video: f.has_video, is_type_otf: f.is_type_otf, drm_families: f.drm_families, audio_track: f.audio_track, url: f.url, cipher: f.cipher, signature_cipher: f.signature_cipher}))};
-  },
-  async decipher(handle) {
-    const format = __handles.get(handle);
-    if (!format) throw new Error('Released upstream format');
-    if ((format.cipher || format.signature_cipher || (format.url && new URL(format.url).searchParams.has('n'))) && !__innertube.session.player) {
-      __innertube.session.player = await YouTubeJS.Player.create(__innertube.session.cache, fetch);
+// Where Platform's Cache keeps files; set before YouTube.js builds one.
+let __cacheDirectory = '';
+
+// A YouTube.js value as JSON: data properties and getters, by the names
+// YouTube.js gives them. Text is its `text`; Formats, Players and pages a
+// later call continues from carry a `$handle`.
+const __serialize = (value, seen = new Set()) => {
+  if (value === undefined || value === null) return null;
+  switch (typeof value) {
+    case 'string': case 'boolean': return value;
+    case 'number': return Number.isFinite(value) ? value : null;
+    case 'bigint': return String(value);
+    case 'function': case 'symbol': return undefined;
+  }
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return undefined;
+  if (value instanceof YouTubeJS.Misc.Text) return {text: value.text ?? null};
+  // Its `data` is the player's whole solver script.
+  if (value instanceof YouTubeJS.Player) return {$handle: __retain(value), player_id: value.player_id, signature_timestamp: value.signature_timestamp, po_token: value.po_token ?? null, url: value.url};
+  if (seen.has(value)) return null;
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.map(v => __serialize(v, seen) ?? null);
+    const out = {};
+    if (value instanceof YouTubeJS.Misc.Format) out.$handle = __retain(value);
+    for (const key of Object.keys(value)) {
+      const v = __serialize(value[key], seen);
+      if (v !== undefined) out[key] = v;
     }
-    return format.decipher(__innertube.session.player);
-  },
-  async channel(url) {
-    let id = /^https:\/\/www\.youtube\.com\/channel\/(UC[\w-]{22})$/.exec(url)?.[1];
-    if (!id) {
-      const endpoint = await __innertube.resolveURL(url);
-      id = endpoint?.payload?.browseId;
-      if (!id?.startsWith('UC')) throw new Error('Not a YouTube channel: ' + url);
-    }
-    const metadata = (await __innertube.getChannel(id)).metadata ?? {};
-    return {id: metadata.external_id || id, title: metadata.title ?? '', thumbnails: metadata.avatar ?? metadata.thumbnail ?? []};
-  },
-  async search(query) {
-    const search = await __innertube.search(query);
-    return Array.from(search.results, n => {
-      if (n.type === 'Video') return {type: n.type, id: n.video_id, title: n.title?.toString() ?? '', author: n.author?.name ?? '', thumbnails: n.thumbnails ?? [], duration: n.duration?.text ?? '', view_count: n.short_view_count?.toString() ?? '', is_live: n.is_live, is_upcoming: !!n.is_upcoming};
-      if (n.type === 'Channel') return {type: n.type, id: n.id, title: n.author?.name ?? '', thumbnails: n.author?.thumbnails ?? [], subscriber_count: n.subscriber_count?.toString() ?? '', video_count: n.video_count?.toString() ?? ''};
-      if (n.type === 'LockupView') {
-        const image = n.content_image?.primary_thumbnail ?? n.content_image;
-        return {type: n.type, id: n.content_id, content_type: n.content_type, title: n.metadata?.title?.toString() ?? '', thumbnails: image?.image ?? [],
-          metadata_rows: Array.from(n.metadata?.metadata?.metadata_rows ?? [], r => Array.from(r.metadata_parts ?? [], p => p.text?.toString() ?? '')),
-          badges: Array.from(image?.overlays ?? []).flatMap(o => Array.from(o.badges ?? [], b => b.text).filter(Boolean))};
+    // Getters (Video's is_live, duration) live on the prototypes.
+    for (let proto = Object.getPrototypeOf(value); proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
+      for (const [key, d] of Object.entries(Object.getOwnPropertyDescriptors(proto))) {
+        if (!d.get || key in out || key.startsWith('_')) continue;
+        try {
+          const v = __serialize(value[key], seen);
+          if (v !== undefined) out[key] = v;
+        } catch { /* a getter that needs what this value lacks */ }
       }
-      return {type: n.type};
-    });
+    }
+    return out;
+  } finally {
+    seen.delete(value);
+  }
+};
+const __playlist = playlist => ({
+  $handle: __retain(playlist), info: __serialize(playlist.info), items: __serialize(playlist.items),
+  has_continuation: playlist.has_continuation, is_complete: playlist.is_complete,
+  page: {alerts: __serialize(playlist.page?.alerts ?? [])},
+});
+const __session = session => ({user_agent: session.user_agent, logged_in: session.logged_in, player: __serialize(session.player)});
+
+globalThis.__bridge = {
+  async create({cache, ...config}) {
+    // Platform's Cache asks the caller (engine.dart's cache asks), which
+    // keeps files as YouTube.js's Node cache does.
+    class Cache {
+      #directory = __cacheDirectory;
+      get cache_dir() { return this.#directory; }
+      async get(key) { return (await ask('cacheGet', {directory: this.#directory, key})).bytes; }
+      async set(key, value) { await ask('cacheSet', {directory: this.#directory, key, data: toBase64(value)}); }
+      async remove(key) { await ask('cacheRemove', {directory: this.#directory, key}); }
+    }
+    YouTubeJS.Platform.load({...YouTubeJS.Platform.shim, runtime: 'unknown', Cache, eval: (data, env) => Function(...Object.keys(env), data.output)(...Object.values(env))});
+    const {Level} = YouTubeJS.Log;
+    YouTubeJS.Log.setLevel(Level.ERROR, Level.WARNING, Level.INFO);
+    let universal;
+    if (cache) {
+      __cacheDirectory = cache.cache_dir;
+      universal = new YouTubeJS.UniversalCache(cache.persistent, cache.persistent_directory ?? undefined);
+    }
+    __innertube = await YouTubeJS.Innertube.create({...config, cache: universal, fetch});
+    return {session: __session(__innertube.session), constants: {CLIENTS: __serialize(YouTubeJS.Constants.CLIENTS)}};
   },
+  async getBasicInfo({video_id, options}) {
+    const info = await __innertube.getBasicInfo(video_id, options);
+    return {basic_info: __serialize(info.basic_info), playability_status: __serialize(info.playability_status),
+      streaming_data: __serialize(info.streaming_data), page: [{microformat: __serialize(info.page[0]?.microformat)}], cpn: info.cpn};
+  },
+  async search({query, filters}) {
+    const search = await __innertube.search(query, filters);
+    return {results: __serialize(search.results), estimated_results: search.estimated_results, has_continuation: search.has_continuation};
+  },
+  async getPlaylist({id}) { return __playlist(await __innertube.getPlaylist(id)); },
+  async getChannel({id}) {
+    const channel = await __innertube.getChannel(id);
+    return {metadata: __serialize(channel.metadata)};
+  },
+  async resolveURL({url}) { return __serialize(await __innertube.resolveURL(url)); },
+  async execute({endpoint, args}) {
+    const response = await __innertube.actions.execute(endpoint, args);
+    return {$handle: __retain(response), success: response.success, status_code: response.status_code};
+  },
+  // `new YT.Playlist(actions, data, already_parsed)`.
+  async newPlaylist({data, already_parsed}) {
+    return __playlist(new YouTubeJS.YT.Playlist(__innertube.actions, __live(data), already_parsed));
+  },
+  async getContinuation({playlist}) { return __playlist(await __live(playlist).getContinuation()); },
+  async decipher({format, player}) { return __live(format).decipher(player ? __live(player) : undefined); },
   release(handles) { for (const handle of handles) __handles.delete(handle); },
 };

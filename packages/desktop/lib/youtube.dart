@@ -11,7 +11,24 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
-import 'package:youtubei/youtubei.dart' as yt;
+import 'package:path_provider/path_provider.dart';
+import 'package:youtubei/misc.dart' as Misc; // ignore: library_prefixes
+import 'package:youtubei/youtubei.dart';
+import 'package:youtubei/yt.dart' as YT; // ignore: library_prefixes
+import 'package:youtubei/yt_nodes.dart' as YTNodes; // ignore: library_prefixes
+
+import 'log.dart';
+
+final _log = Logger('youtube');
+final _httpLog = Logger('youtube.http');
+final _jsLog = Logger('youtube.js');
+
+void _logJs(String level, String message) => _jsLog.log(switch (level) {
+  'error' => Level.SEVERE,
+  'warning' => Level.WARNING,
+  'info' => Level.INFO,
+  _ => Level.FINE,
+}, message);
 
 /// A video in a source, as the playlist listed it.
 final class Video {
@@ -72,7 +89,7 @@ final class MediaStream {
   /// Which rendition this is; a saved partial download resumes only into the
   /// same one.
   final String identity;
-  final yt.Format format;
+  final Misc.Format format;
 }
 
 /// A video ready to download: its metadata and its audio stream.
@@ -99,9 +116,9 @@ final class Media {
   /// `audio/mp4` (AAC, preferred) or `audio/webm` (Opus).
   final String contentType;
   MediaStream audio;
-  yt.VideoInfo _playback;
-  yt.Client _client;
-  final List<yt.Client> _fallback;
+  YT.VideoInfo _playback;
+  InnerTubeClient _client;
+  final List<InnerTubeClient> _fallback;
 }
 
 /// YouTube says this computer is asking too often; nothing more will work
@@ -134,7 +151,7 @@ const _maximumPlaylistPages = 10000;
 
 /// The client that replaces a playback client whose player response says
 /// the video is unplayable.
-const _unplayableAlternative = {yt.Client.embeddedWeb: yt.Client.creatorWeb, yt.Client.visionOS: yt.Client.tv};
+const _unplayableAlternative = {InnerTubeClient.WEB_EMBEDDED: InnerTubeClient.WEB_CREATOR, InnerTubeClient.VISIONOS: InnerTubeClient.TV};
 
 /// YouTube for the app's whole life: one session, started on first use (or
 /// by [warmUp] at launch) and shared by everything that asks YouTube. A
@@ -151,7 +168,7 @@ final class YouTubeService {
 
   Future<YouTube> session(CancellationToken token) async {
     if (_session case final session?) return session;
-    final starting = _starting ??= YouTube.start(_http, _life)
+    final starting = _starting ??= traced(_log, 'start session', () => YouTube.start(_http, _life))
       .then((session) => _session = session)
       .whenComplete(() => _starting = null);
     return starting.asCancellable(token);
@@ -174,13 +191,12 @@ final class YouTubeService {
 
 /// One YouTube session: one YouTube.js runtime, reused for every request.
 final class YouTube {
-  YouTube._(this._engine, this._session);
+  YouTube._(this._innertube);
 
-  final yt.YouTubei _engine;
-  final yt.Session _session;
+  final Innertube _innertube;
 
   /// Without a signed-in cookie, visionOS gives plain, unthrottled streams.
-  final _playbackClient = yt.Client.visionOS;
+  final _playbackClient = InnerTubeClient.VISIONOS;
 
   /// The first rate limit: after it, no more player requests this session.
   RateLimited? _limited;
@@ -188,54 +204,73 @@ final class YouTube {
   /// Starts YouTube.js and opens a session. [http] carries every request.
   static Future<YouTube> start(HttpClient http, CancellationToken token) async {
     final continuations = <String>{};
-    final fetch = yt.httpClientFetch(http);
-    final engine = await yt.startYouTubei((request, token) {
-      final url = Uri.parse(request.url);
-      if (!_allowedHost(url)) throw StateError('unexpected YouTube API host ${url.host}');
-      final body = request.body;
-      if (url.path.contains('/youtubei/v1/browse') && body != null) {
-        final continuation = _jsonMap(body)['continuation'];
-        // A repeated token would page forever.
-        if (continuation is String && !continuations.add(continuation)) throw StateError('repeated YouTube continuation');
-      }
-      return fetch(request, token);
-    }, token: token);
-    try {
-      final session = await yt.initialize(
-        engine,
-        const yt.SessionOptions(lang: 'en', location: 'US', timezone: 'UTC', failFast: true, retrievePlayer: true),
-        token: token,
-      );
-      return YouTube._(engine, session);
-    } catch (_) {
-      await yt.closeYouTubei(engine);
-      rethrow;
-    }
+    final fetch = httpClientFetch(http);
+    final innertube = await Innertube.create(
+      lang: 'en',
+      location: 'US',
+      timezone: 'UTC',
+      fail_fast: true,
+      retrieve_player: true,
+      // The session data and the parsed player, kept as YouTube.js keeps them.
+      cache: UniversalCache(true, '${(await getApplicationCacheDirectory()).path}/youtube'),
+      log: _logJs,
+      fetch: (request, token) {
+        final url = Uri.parse(request.url);
+        if (!_allowedHost(url)) throw StateError('unexpected YouTube API host ${url.host}');
+        final body = request.body;
+        if (url.path.contains('/youtubei/v1/browse') && body != null) {
+          final continuation = _jsonMap(body)['continuation'];
+          // A repeated token would page forever.
+          if (continuation is String && !continuations.add(continuation)) throw StateError('repeated YouTube continuation');
+        }
+        return traced(
+          _httpLog,
+          '${request.method} ${url.host}${url.path}',
+          () => fetch(request, token),
+          describe: (r) => '${r.status}, ${r.body.length} bytes',
+        );
+      },
+      token: token,
+    );
+    return YouTube._(innertube);
   }
 
-  Future<void> close() => yt.closeYouTubei(_engine);
+  Future<void> close() => _innertube.close();
 
   /// The title and artwork of what the listener added, and for a channel
   /// its `/channel/UC…` URL.
-  Future<Resolved> resolve(SourceRef source, CancellationToken token) async {
+  Future<Resolved> resolve(SourceRef source, CancellationToken token) =>
+    traced(_log, 'resolve ${source.kind.name} ${source.id}', () => _resolve(source, token), describe: (r) => r.title);
+
+  Future<Resolved> _resolve(SourceRef source, CancellationToken token) async {
     final id = source.id;
     switch (source.kind) {
       case SourceRefKind.video:
-        final (info, reason) = await _playerInfo(id, yt.Client.web, token);
+        final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token);
         if (reason != null) throw StateError(reason);
-        final title = info.basicInfo.title.trim();
-        return Resolved(url: source.url, title: title.isEmpty ? 'YouTube video $id' : title, artworkUrl: _thumbnail(info.basicInfo.thumbnail));
+        final title = info!.basic_info.title?.trim() ?? '';
+        return Resolved(url: source.url, title: title.isEmpty ? 'YouTube video $id' : title, artworkUrl: _thumbnail(info.basic_info.thumbnail));
       case SourceRefKind.playlist:
         final page = await _playlistHead(id, token);
-        unawaited(yt.release(_engine, [page.handle]));
-        return Resolved(url: source.url, title: page.title, artworkUrl: _thumbnail(page.thumbnails));
+        return Resolved(url: source.url, title: page.info.title ?? '', artworkUrl: _thumbnail(page.info.thumbnails));
       case SourceRefKind.channel:
-        final channel = await yt.channel(_engine, source.url, token: token);
-        if (!_channelId.hasMatch(channel.id)) throw StateError('YouTube returned no channel for ${source.url}');
+        // A handle, /c/ or /user/ link resolves to the channel's id first.
+        var channelId = _channelUrl.firstMatch(source.url)?[1];
+        if (channelId == null) {
+          final endpoint = await _innertube.resolveURL(source.url, token: token);
+          channelId = switch (endpoint.payload) {
+            {'browseId': final String id} when id.startsWith('UC') => id,
+            _ => throw StateError('Not a YouTube channel: ${source.url}'),
+          };
+        }
+        final metadata = (await _innertube.getChannel(channelId, token: token)).metadata;
+        final resolved = (metadata.external_id ?? '').isNotEmpty ? metadata.external_id! : channelId;
+        if (!_channelId.hasMatch(resolved)) throw StateError('YouTube returned no channel for ${source.url}');
+        final title = metadata.title?.trim() ?? '';
         return Resolved(
-          url: 'https://www.youtube.com/channel/${channel.id}',
-          title: channel.title.trim().isEmpty ? channel.id : channel.title,
-          artworkUrl: _thumbnail(channel.thumbnails),
+          url: 'https://www.youtube.com/channel/$resolved',
+          title: title.isEmpty ? resolved : title,
+          artworkUrl: _thumbnail(metadata.avatar.isNotEmpty ? metadata.avatar : metadata.thumbnail),
         );
     }
   }
@@ -243,10 +278,10 @@ final class YouTube {
   /// What YouTube's search finds for [query] that can become a feed, in
   /// YouTube's order: no Shorts shelves, live streams or mixes.
   Future<List<SearchResult>> search(String query, CancellationToken token) async {
-    final items = await yt.search(_engine, query, token: token);
+    final search = await traced(_log, 'search “$query”', () => _innertube.search(query, token: token), describe: (s) => '${s.results.length} items');
     final results = <SearchResult>[];
     final seen = <String>{};
-    for (final item in items) {
+    for (final item in search.results) {
       if (_searchResult(item) case final result? when seen.add(result.url)) results.add(result);
     }
     return results;
@@ -262,40 +297,44 @@ final class YouTube {
   };
 
   Future<Snapshot> _videoSnapshot(String id, CancellationToken token) async {
-    final (info, _) = await _playerInfo(id, yt.Client.web, token);
-    final title = info.basicInfo.title.trim();
+    final (info, _) = await _playerInfo(id, InnerTubeClient.WEB, token);
+    final title = info?.basic_info.title?.trim() ?? '';
     return Snapshot(
       title: title.isEmpty ? 'YouTube video $id' : title,
-      artworkUrl: _thumbnail(info.basicInfo.thumbnail),
-      videos: [Video(id: id, title: title.isEmpty ? 'YouTube video $id' : title, durationSeconds: _seconds(info.basicInfo.duration))],
+      artworkUrl: _thumbnail(info?.basic_info.thumbnail ?? const []),
+      videos: [Video(id: id, title: title.isEmpty ? 'YouTube video $id' : title, durationSeconds: _seconds(info?.basic_info.duration))],
       canRemove: false,
     );
   }
 
-  Future<yt.Playlist> _playlistHead(String id, CancellationToken token) async {
-    final page = await yt.playlistHead(_engine, id, token: token);
+  /// The first page, with the videos YouTube marks unavailable listed
+  /// rather than hidden (`wgYCCAA=`): a video missing from the listing is
+  /// gone from the playlist.
+  Future<YT.Playlist> _playlistHead(String id, CancellationToken token) async {
+    final response = await _innertube.actions.execute('/browse', {'browseId': 'VL$id', 'params': 'wgYCCAA='}, token: token);
+    final page = await YT.Playlist.create(_innertube.actions, response, token: token);
     _validPlaylist(page);
-    if (page.title.trim().isEmpty) throw StateError('YouTube playlist missing title');
+    if ((page.info.title ?? '').trim().isEmpty) throw StateError('YouTube playlist missing title');
     return page;
   }
 
   Future<Snapshot> _playlistSnapshot(String id, CancellationToken token) async {
     var page = await _playlistHead(id, token);
-    final title = page.title;
-    final artwork = _thumbnail(page.thumbnails);
+    final title = page.info.title ?? '';
+    final artwork = _thumbnail(page.info.thumbnails);
     final videos = <Video>[];
     final seen = <String>{};
     var canRemove = true;
     for (var pages = 1; ; pages++) {
       if (pages > _maximumPlaylistPages) throw StateError('YouTube playlist exceeds the scan limit');
       _validPlaylist(page);
-      if (page.alerts.isNotEmpty) canRemove = false;
+      if (page.page.alerts.isNotEmpty) canRemove = false;
       for (final item in page.items) {
         final video = _playlistVideo(item);
         if (seen.add(video.id)) videos.add(video);
       }
-      if (!page.hasContinuation) break;
-      page = await yt.continuation(_engine, page, token: token);
+      if (!page.has_continuation) break;
+      page = await page.getContinuation(token: token);
     }
     return Snapshot(title: title, artworkUrl: artwork, videos: videos, canRemove: canRemove);
   }
@@ -303,9 +342,10 @@ final class YouTube {
   /// The video's metadata and audio stream, or the reason it can't be had
   /// (private, removed, live). Throws [RateLimited] once YouTube throttles.
   Future<(Media?, String?)> media(String id, {required bool channel, required CancellationToken token}) async {
-    final (metadata, reason) = await _playerInfo(id, yt.Client.web, token);
+    final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token);
     if (reason != null) return (null, reason);
-    if (metadata.basicInfo.isLive || metadata.basicInfo.isUpcoming) return (null, _liveReason);
+    final metadata = info!;
+    if (metadata.basic_info.is_live == true || metadata.basic_info.is_upcoming == true) return (null, _liveReason);
 
     var client = _playbackClient;
     var (playback, playbackReason) = await _playerInfo(id, client, token);
@@ -316,22 +356,22 @@ final class YouTube {
     }
     if (playbackReason != null) throw StateError('YouTube playback failed for $id: $playbackReason');
 
-    final audio = _preferredAudio(playback.formats);
+    final audio = _preferredAudio(_formats(playback!));
     if (audio == null) throw StateError('YouTube returned no downloadable audio for $id');
     final contentType = _contentType(audio);
-    final title = metadata.basicInfo.title.trim();
+    final title = metadata.basic_info.title?.trim() ?? '';
     return (
       Media._(
         id: id,
         title: title.isEmpty ? id : title,
-        description: metadata.basicInfo.shortDescription,
+        description: metadata.basic_info.short_description ?? '',
         publishedAt: _publication(metadata, channel: channel),
-        durationSeconds: _seconds(metadata.basicInfo.duration),
+        durationSeconds: _seconds(metadata.basic_info.duration),
         contentType: contentType,
         audio: await _stream(audio, playback.cpn, client, token),
         playback: playback,
         client: client,
-        fallback: [if (client == yt.Client.visionOS) yt.Client.tv],
+        fallback: [if (client == InnerTubeClient.VISIONOS) InnerTubeClient.TV],
       ),
       null,
     );
@@ -342,22 +382,22 @@ final class YouTube {
   /// False when there is nothing left to try.
   Future<bool> fallback(Media media, CancellationToken token) async {
     final refused = media.audio.format;
-    final others = media._playback.formats.where((f) => f.handle != refused.handle && _sameRendition(refused, f) && _usable(f));
+    final others = _formats(media._playback).where((f) => !identical(f, refused) && _sameRendition(refused, f) && _usable(f));
     if (others.firstOrNull case final format?) {
       media.audio = await _stream(format, media._playback.cpn, media._client, token);
       return true;
     }
     while (media._fallback.isNotEmpty) {
       final client = media._fallback.removeAt(0);
-      final yt.VideoInfo info;
+      final YT.VideoInfo? info;
       final String? reason;
       try {
         (info, reason) = await _playerInfo(media.id, client, token);
       } on SignInRequired {
         continue;
       }
-      if (reason != null) continue;
-      final audio = _preferredAudio(info.formats);
+      if (reason != null || info == null) continue;
+      final audio = _preferredAudio(_formats(info));
       if (audio == null || _contentType(audio) != media.contentType) continue;
       media
         .._playback = info
@@ -368,19 +408,24 @@ final class YouTube {
     return false;
   }
 
-  /// A player response, or the reason the video is unavailable.
-  Future<(yt.VideoInfo, String?)> _playerInfo(String id, yt.Client client, CancellationToken token) async {
+  /// A player response, or the reason the video is unavailable (and, when
+  /// YouTube answered with an error, no response).
+  Future<(YT.VideoInfo?, String?)> _playerInfo(String id, InnerTubeClient client, CancellationToken token) async {
     if (_limited case final limited?) throw limited;
-    final yt.VideoInfo info;
+    final YT.VideoInfo info;
     try {
-      info = await yt.videoInfo(_engine, id, client, token: token);
-    } on yt.YouTubeiException catch (e) {
-      if (e.playabilityStatus case final status? when status.status == 'ERROR') {
-        return (_emptyInfo, _unavailable(status));
-      }
+      info = await traced(
+        _log,
+        'player $id as ${client.name}',
+        () => _innertube.getBasicInfo(id, client: client, token: token),
+        describe: (info) => info.playability_status?.status ?? 'no status',
+      );
+    } on InnertubeError catch (e) {
+      final status = YT.IPlayabilityStatus.fromJson(e.info) ?? YT.IPlayabilityStatus.fromJson((e.info as Map?)?['playability_status']);
+      if (status != null && status.status == 'ERROR') return (null, _unavailable(status));
       rethrow;
     }
-    final status = info.playabilityStatus;
+    final status = info.playability_status;
     if (status == null) throw StateError('YouTube player response missing playability status');
     if (status.status != 'OK') {
       return switch (status.status) {
@@ -391,31 +436,32 @@ final class YouTube {
         _ => throw StateError('YouTube could not resolve $id (${status.status}): ${status.reason}'),
       };
     }
-    if (info.basicInfo.id != id) throw StateError('YouTube metadata video ID differs from the requested video');
+    if (info.basic_info.id != id) throw StateError('YouTube metadata video ID differs from the requested video');
     return (info, null);
   }
 
   /// A skip reason, except a rate limit, which says nothing about the video
   /// and stops the whole session.
-  String _unavailable(yt.PlayabilityStatus status) {
+  String _unavailable(YT.IPlayabilityStatus status) {
     final reason = _reasonText(status);
     if (!reason.replaceAll('’', "'").contains(_rateLimitNotice)) return reason;
     throw _limited ??= RateLimited(reason);
   }
 
-  Future<MediaStream> _stream(yt.Format format, String cpn, yt.Client client, CancellationToken token) async {
-    final resolved = Uri.parse(await yt.decipher(_engine, format, token: token));
+  Future<MediaStream> _stream(Misc.Format format, String cpn, InnerTubeClient client, CancellationToken token) async {
+    final player = _innertube.session.player;
+    final resolved = Uri.parse(await traced(_log, 'decipher itag ${format.itag}', () => format.decipher(player, token: token)));
     final url = resolved.replace(queryParameters: {...resolved.queryParametersAll, 'cpn': cpn});
+    // The media servers expect the user agent of the client that asked.
     final agent = switch (client) {
-      yt.Client.visionOS => _session.visionOSUserAgent,
-      yt.Client.tv => _session.tvUserAgent,
-      _ => _session.userAgent,
+      InnerTubeClient.VISIONOS || InnerTubeClient.TV => Constants.CLIENTS[client.name]!['USER_AGENT']! as String,
+      _ => _innertube.session.user_agent ?? '',
     };
-    final length = format.contentLength;
+    final length = format.content_length;
     final identity = [
       format.itag,
-      format.mimeType,
-      length == null || length.isNaN ? 'None' : length.toStringAsFixed(0),
+      format.mime_type,
+      length?.toString() ?? 'None',
       ?url.queryParameters['xtags'],
     ].join(':');
     return MediaStream(url: url, userAgent: agent, identity: identity, format: format);
@@ -448,58 +494,125 @@ final class SourceRef {
 }
 
 final _videoId = RegExp(r'^[\w-]{11}$');
+final _views = RegExp(r'^\d[\d.,]*\s?[KMB]?( views?)?$');
+final _length = RegExp(r'^\d+(:\d\d){1,2}$');
+final _liveBadge = RegExp(r'^(LIVE|UPCOMING|PREMIERE)', caseSensitive: false);
 final _channelId = RegExp(r'^UC[\w-]{22}$');
+final _channelUrl = RegExp(r'^https://www\.youtube\.com/channel/(UC[\w-]{22})$');
 
-/// An empty player response, for a video YouTube answered with an error.
-final _emptyInfo = yt.VideoInfo(
-  basicInfo: const yt.BasicInfo(id: '', title: '', duration: null, shortDescription: '', thumbnail: [], isLive: false, isUpcoming: false),
-  playabilityStatus: null,
-  publishDate: '',
-  uploadDate: '',
-  cpn: '',
-  formats: const [],
-);
+/// What a lockup's or video's thumbnail badges say (`1:02:03`, `15 videos`,
+/// `LIVE`).
+List<String> _badges(YTNodes.YTNode? image) => [
+  if (image case YTNodes.ThumbnailView(:final overlays))
+    for (final overlay in overlays)
+      ...switch (overlay) {
+        YTNodes.ThumbnailOverlayBadgeView(:final badges) || YTNodes.ThumbnailBottomOverlayView(:final badges) =>
+          badges.map((b) => b.text).where((t) => t.isNotEmpty),
+        _ => const <String>[],
+      },
+];
 
-SearchResult? _searchResult(yt.SearchItem item) {
-  final title = item.title.trim();
-  if (title.isEmpty) return null;
-  String? clean(String text) => text.trim().isEmpty ? null : text.trim();
-  switch (item.type) {
-    case 'Video' when _videoId.hasMatch(item.id) && !item.isLive && !item.isUpcoming:
+/// The parts of a lockup's metadata rows; a video's byline can sit on an
+/// avatar stack instead of in the text.
+List<List<String>> _metadataRows(YTNodes.LockupView lockup) => [
+  for (final row in lockup.metadata?.metadata?.metadata_rows ?? const <YTNodes.MetadataRow>[])
+    [
+      for (final part in row.metadata_parts ?? const <YTNodes.MetadataPart>[])
+        switch ((part.text?.toString(), part.avatar_stack?.text?.toString())) {
+          (final text?, _) when text.isNotEmpty => text,
+          (_, final stack?) when stack.isNotEmpty => stack,
+          _ => '',
+        },
+    ],
+];
+
+SearchResult? _searchResult(YTNodes.YTNode node) {
+  String? clean(String? text) => text == null || text.trim().isEmpty ? null : text.trim();
+  switch (node) {
+    case YTNodes.Video(:final video_id, :final is_live, :final is_upcoming) when _videoId.hasMatch(video_id) && !is_live && is_upcoming != true:
+      final title = node.title.toString().trim();
+      if (title.isEmpty) return null;
+      final views = clean(node.short_view_count?.toString());
       return SearchResult(
         kind: SourceRefKind.video,
-        id: item.id,
-        url: 'https://www.youtube.com/watch?v=${item.id}',
+        id: video_id,
+        url: 'https://www.youtube.com/watch?v=$video_id',
         title: title,
-        details: [?clean(item.author), ?clean(item.duration), if (clean(item.viewCount) case final v?) v.endsWith('views') ? v : '$v views'],
-        thumbnailUrl: _thumbnail(item.thumbnails),
+        details: [?clean(node.author?.name), ?clean(node.duration?.text), if (views != null) views.endsWith('views') ? views : '$views views'],
+        thumbnailUrl: _thumbnail(node.thumbnails),
       );
-    case 'Channel' when _channelId.hasMatch(item.id):
-      final texts = [item.subscriberCount, item.videoCount].map((t) => t.trim());
+    case YTNodes.Channel(:final id) when _channelId.hasMatch(id):
+      final title = node.author?.name.trim() ?? '';
+      if (title.isEmpty) return null;
+      final texts = [node.subscriber_count?.toString() ?? '', node.video_count?.toString() ?? ''].map((t) => t.trim());
       return SearchResult(
         kind: SourceRefKind.channel,
-        id: item.id,
-        url: 'https://www.youtube.com/channel/${item.id}',
+        id: id,
+        url: 'https://www.youtube.com/channel/$id',
         title: title,
         details: [
           ...texts.where((t) => t.startsWith('@')),
           ...texts.where((t) => t.contains('subscriber')),
         ],
-        thumbnailUrl: _thumbnail(item.thumbnails),
+        thumbnailUrl: _thumbnail(node.author?.thumbnails ?? const []),
       );
-    // Mixes (RD…) are made up per listener and never end.
-    case 'LockupView' when item.contentType == 'PLAYLIST' && item.id.isNotEmpty && !item.id.startsWith('RD'):
-      return SearchResult(
-        kind: SourceRefKind.playlist,
-        id: item.id,
-        url: 'https://www.youtube.com/playlist?list=${item.id}',
-        title: title,
-        details: [
-          ?clean(item.metadataRows.firstOrNull?.firstOrNull ?? ''),
-          ...item.badges.where((b) => b.contains(RegExp(r'\d'))),
-        ],
-        thumbnailUrl: _thumbnail(item.thumbnails),
-      );
+    // YouTube now lists most videos and channels as lockups: the details
+    // sit in rows of parts and the length in a thumbnail badge.
+    case YTNodes.LockupView(:final content_type, content_id: final id?, :final content_image):
+      final title = node.metadata?.title?.toString().trim() ?? '';
+      if (title.isEmpty) return null;
+      // A channel's lockup shows an avatar where others show a thumbnail.
+      final image = switch (content_image) {
+        YTNodes.CollectionThumbnailView(:final primary_thumbnail) => primary_thumbnail,
+        _ => content_image,
+      };
+      final thumbnails = switch ((image, content_image)) {
+        (YTNodes.ThumbnailView(image: final thumbnails), _) => thumbnails,
+        (_, YTNodes.DecoratedAvatarView(:final avatar?)) => avatar.image,
+        _ => const <Misc.Thumbnail>[],
+      };
+      final badges = _badges(image);
+      final rows = _metadataRows(node);
+      final parts = [for (final part in rows.firstOrNull ?? const <String>[]) ?clean(part)];
+      switch (content_type) {
+        case 'VIDEO' when _videoId.hasMatch(id) && !badges.any(_liveBadge.hasMatch):
+          final views = parts.where(_views.hasMatch).firstOrNull;
+          return SearchResult(
+            kind: SourceRefKind.video,
+            id: id,
+            url: 'https://www.youtube.com/watch?v=$id',
+            title: title,
+            details: [
+              ?parts.where((p) => !_views.hasMatch(p) && !p.contains('ago')).firstOrNull,
+              ?badges.where(_length.hasMatch).firstOrNull,
+              if (views != null) views.endsWith('views') ? views : '$views views',
+            ],
+            thumbnailUrl: _thumbnail(thumbnails),
+          );
+        case 'CHANNEL' when _channelId.hasMatch(id):
+          return SearchResult(
+            kind: SourceRefKind.channel,
+            id: id,
+            url: 'https://www.youtube.com/channel/$id',
+            title: title,
+            details: [...parts.where((p) => p.startsWith('@')), ...parts.where((p) => p.contains('subscriber'))],
+            thumbnailUrl: _thumbnail(thumbnails),
+          );
+        // Mixes (RD…) are made up per listener and never end.
+        case 'PLAYLIST' when id.isNotEmpty && !id.startsWith('RD'):
+          return SearchResult(
+            kind: SourceRefKind.playlist,
+            id: id,
+            url: 'https://www.youtube.com/playlist?list=$id',
+            title: title,
+            details: [
+              ?clean(rows.firstOrNull?.firstOrNull),
+              ...badges.where((b) => b.contains(RegExp(r'\d'))),
+            ],
+            thumbnailUrl: _thumbnail(thumbnails),
+          );
+      }
+      return null;
     default:
       return null;
   }
@@ -520,33 +633,38 @@ Map<String, Object?> _jsonMap(List<int> body) {
   }
 }
 
-void _validPlaylist(yt.Playlist page) {
-  if (!page.isComplete) throw StateError('YouTube playlist could not be parsed completely; no changes were made');
-  for (final alert in page.alerts) {
-    if (!const {'Alert', 'AlertWithButton'}.contains(alert.type) || !const {'INFO', 'WARNING'}.contains(alert.alertType)) {
-      throw StateError('YouTube could not list this playlist');
-    }
+void _validPlaylist(YT.Playlist page) {
+  if (!page.is_complete) throw StateError('YouTube playlist could not be parsed completely; no changes were made');
+  for (final alert in page.page.alerts) {
+    final type = switch (alert) {
+      YTNodes.Alert(:final alert_type) || YTNodes.AlertWithButton(:final alert_type) => alert_type,
+      _ => null,
+    };
+    if (type != 'INFO' && type != 'WARNING') throw StateError('YouTube could not list this playlist');
   }
 }
 
-Video _playlistVideo(yt.PlaylistItem item) {
-  if (!_videoId.hasMatch(item.id)) throw StateError('Playlist contains an unidentified unavailable item');
-  var seconds = _seconds(item.durationSeconds);
-  switch (item.type) {
-    case 'PlaylistVideo':
+Video _playlistVideo(YTNodes.YTNode item) {
+  final (id, title, seconds) = switch (item) {
+    YTNodes.PlaylistVideo(:final id, :final title, :final duration) => (id, title.toString(), _seconds(duration.seconds)),
+    YTNodes.LockupView(:final content_id, :final metadata, :final content_image) => (
+      content_id ?? '',
+      metadata?.title?.toString() ?? '',
+      _badges(content_image).map(_badgeSeconds).nonNulls.firstOrNull,
+    ),
+    _ => ('', '', null),
+  };
+  if (!_videoId.hasMatch(id)) throw StateError('Playlist contains an unidentified unavailable item');
+  switch (item) {
+    case YTNodes.PlaylistVideo():
       break;
-    case 'LockupView' when item.contentType == 'VIDEO' || item.contentType == 'SHORT':
-      for (final badge in item.durationBadges) {
-        if (_badgeSeconds(badge) case final value?) {
-          seconds = value;
-          break;
-        }
-      }
+    case YTNodes.LockupView(:final content_type) when content_type == 'VIDEO' || content_type == 'SHORT':
+      break;
     default:
       throw StateError('Unsupported playlist item; listing is incomplete');
   }
-  final title = item.title.trim();
-  return Video(id: item.id, title: title.isEmpty ? 'YouTube video ${item.id}' : title, durationSeconds: seconds);
+  final trimmed = title.trim();
+  return Video(id: id, title: trimmed.isEmpty ? 'YouTube video $id' : trimmed, durationSeconds: seconds);
 }
 
 /// `1:02:03` or `4:05` as seconds.
@@ -562,21 +680,25 @@ int? _badgeSeconds(String value) {
   return total > 0 ? total : null;
 }
 
-int? _seconds(double? value) {
+int? _seconds(num? value) {
   if (value == null || value.isNaN || value.isInfinite || value <= 0) return null;
   return value.ceil();
 }
 
-String _reasonText(yt.PlayabilityStatus status) {
+/// The reason YouTube gave, with the detail its error screen adds.
+String _reasonText(YT.IPlayabilityStatus status) {
   final reason = status.reason.trim();
-  final detail = status.subreason.trim();
+  final detail = switch (status.error_screen) {
+    YTNodes.PlayerErrorMessage(:final subreason, :final reason) => (subreason.text ?? reason.text ?? '').trim(),
+    _ => '',
+  };
   if (detail.isNotEmpty && detail != reason) return reason.isEmpty ? detail : '$reason: $detail';
   return reason.isEmpty ? 'YouTube playback unavailable' : reason;
 }
 
 /// The largest thumbnail, as an https URL.
-String? _thumbnail(List<yt.Thumbnail> thumbnails) {
-  yt.Thumbnail? best;
+String? _thumbnail(List<Misc.Thumbnail> thumbnails) {
+  Misc.Thumbnail? best;
   for (final t in thumbnails) {
     if (best == null || t.width * t.height >= best.width * best.height) best = t;
   }
@@ -593,23 +715,28 @@ final _webpThumbnail = RegExp(r'^https://i\.ytimg\.com/vi_webp/([A-Za-z0-9_-]{11
 
 /// When the video came out: its upload date for a channel, its publish date
 /// otherwise, whichever there is.
-DateTime _publication(yt.VideoInfo info, {required bool channel}) {
-  final (first, second) = channel ? (info.uploadDate, info.publishDate) : (info.publishDate, info.uploadDate);
+DateTime _publication(YT.VideoInfo info, {required bool channel}) {
+  final microformat = info.page.firstOrNull?.microformat;
+  final (publish, upload) = microformat is YTNodes.PlayerMicroformat ? (microformat.publish_date, microformat.upload_date) : ('', '');
+  final (first, second) = channel ? (upload, publish) : (publish, upload);
   final date = first.isNotEmpty ? first : second;
   return DateTime.tryParse(date)?.toUtc() ?? DateTime.now().toUtc();
 }
 
-bool _usable(yt.Format f) =>
-  f.drmFamilies.isEmpty && !f.isTypeOTF && (f.url.isNotEmpty || f.cipher.isNotEmpty || f.signatureCipher.isNotEmpty);
+/// Every stream the player response lists.
+List<Misc.Format> _formats(YT.VideoInfo info) => [...?info.streaming_data?.formats, ...?info.streaming_data?.adaptive_formats];
 
-bool _isAAC(yt.Format f) => f.mimeType.contains('mp4a.40.');
+bool _usable(Misc.Format f) =>
+  f.drm_families.isEmpty && !f.is_type_otf && [f.url, f.cipher, f.signature_cipher].any((s) => s != null && s.isNotEmpty);
+
+bool _isAAC(Misc.Format f) => f.mime_type.contains('mp4a.40.');
 
 /// The default audio track's best audio-only format, AAC before Opus.
-yt.Format? _preferredAudio(List<yt.Format> formats) {
-  yt.Format? audio;
+Misc.Format? _preferredAudio(List<Misc.Format> formats) {
+  Misc.Format? audio;
   for (final f in formats) {
-    if (!_usable(f) || !f.hasAudio || f.hasVideo || (f.audioTrack != null && !f.audioTrack!.audioIsDefault)) continue;
-    if (!_isAAC(f) && !f.mimeType.startsWith('audio/webm')) continue;
+    if (!_usable(f) || !f.has_audio || f.has_video || (f.audio_track != null && !f.audio_track!.audio_is_default)) continue;
+    if (!_isAAC(f) && !f.mime_type.startsWith('audio/webm')) continue;
     if (audio == null ||
       (_isAAC(f) && !_isAAC(audio)) ||
       (_isAAC(f) == _isAAC(audio) && f.bitrate > audio.bitrate)) {
@@ -619,10 +746,10 @@ yt.Format? _preferredAudio(List<yt.Format> formats) {
   return audio;
 }
 
-String _contentType(yt.Format f) => _isAAC(f) ? 'audio/mp4' : 'audio/webm';
+String _contentType(Misc.Format f) => _isAAC(f) ? 'audio/mp4' : 'audio/webm';
 
-bool _sameRendition(yt.Format a, yt.Format b) {
-  if (a.itag != b.itag || a.mimeType != b.mimeType) return false;
-  if (a.audioTrack == null || b.audioTrack == null) return a.audioTrack == null && b.audioTrack == null;
-  return a.audioTrack!.id == b.audioTrack!.id;
+bool _sameRendition(Misc.Format a, Misc.Format b) {
+  if (a.itag != b.itag || a.mime_type != b.mime_type) return false;
+  if (a.audio_track == null || b.audio_track == null) return a.audio_track == null && b.audio_track == null;
+  return a.audio_track!.id == b.audio_track!.id;
 }
