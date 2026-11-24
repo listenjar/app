@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
@@ -213,8 +214,36 @@ void control(AppServices? s, Map<String, String> parameters) {
       final kind = PointerDeviceKind.values.byName(parameters['kind'] ?? 'touch');
       final ms = int.tryParse(parameters['ms'] ?? '') ?? 300;
       unawaited(_drag(Offset(at('x'), at('y')), Offset(at('dx'), at('dy')), Duration(milliseconds: ms), kind));
+    case 'key':
+      // A `key` (up, down, left, right, space, enter, escape or tab) pressed
+      // and let go, to whatever has focus.
+      final (physical, logical) = switch (parameters['key']) {
+        'up' => (PhysicalKeyboardKey.arrowUp, LogicalKeyboardKey.arrowUp),
+        'down' => (PhysicalKeyboardKey.arrowDown, LogicalKeyboardKey.arrowDown),
+        'left' => (PhysicalKeyboardKey.arrowLeft, LogicalKeyboardKey.arrowLeft),
+        'right' => (PhysicalKeyboardKey.arrowRight, LogicalKeyboardKey.arrowRight),
+        'space' => (PhysicalKeyboardKey.space, LogicalKeyboardKey.space),
+        'enter' => (PhysicalKeyboardKey.enter, LogicalKeyboardKey.enter),
+        'escape' => (PhysicalKeyboardKey.escape, LogicalKeyboardKey.escape),
+        'tab' => (PhysicalKeyboardKey.tab, LogicalKeyboardKey.tab),
+        final key => throw ArgumentError('key $key? up, down, left, right, space, enter, escape or tab'),
+      };
+      _press(physical, logical);
     case final action:
-      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open, download or drag');
+      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open, download, drag or key');
+  }
+}
+
+/// [logical] down and up, through the focus tree as a keyboard's would go.
+void _press(PhysicalKeyboardKey physical, LogicalKeyboardKey logical) {
+  final handler = ServicesBinding.instance.keyEventManager.keyMessageHandler ?? (throw StateError('no key handler'));
+  final keyboard = HardwareKeyboard.instance;
+  for (final event in <KeyEvent>[
+    KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero),
+    KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero),
+  ]) {
+    keyboard.handleKeyEvent(event);
+    handler(KeyMessage([event], null));
   }
 }
 

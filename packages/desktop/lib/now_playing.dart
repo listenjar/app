@@ -979,72 +979,162 @@ final class _ChapterNav extends StatelessWidget {
 }
 
 /// A video's chapters: where each starts and what it is, the one playing
-/// marked. Choosing one plays from there.
-final class _ChapterList extends StatelessWidget {
+/// marked. Choosing one plays from there; with the list focused, up and down
+/// play the chapter before or after.
+final class _ChapterList extends StatefulWidget {
   const _ChapterList({required this.player, required this.chapters});
   final Player player;
   final List<Chapter> chapters;
 
+  @override
+  State<_ChapterList> createState() => _ChapterListState();
+}
+
+final class _ChapterListState extends State<_ChapterList> {
+  final _focus = FocusNode(debugLabel: 'Chapters');
+  late var _rows = _keys();
+
+  /// The chapter the keys last went to, until the player gets there: a held
+  /// key repeats faster than a seek lands.
+  int? _going;
+
+  List<GlobalKey> _keys() => [for (final _ in widget.chapters) GlobalKey()];
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_redraw);
+    FocusManager.instance.addHighlightModeListener(_highlight);
+  }
+
+  @override
+  void didUpdateWidget(_ChapterList old) {
+    super.didUpdateWidget(old);
+    if (old.chapters.length != widget.chapters.length) _rows = _keys();
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_highlight);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _redraw() => setState(() {});
+
+  void _highlight(FocusHighlightMode _) {
+    if (_focus.hasFocus) _redraw();
+  }
+
   Future<void> _play(Chapter chapter) async {
+    final player = widget.player;
     await player.seek(chapter.start);
     if (!player.playing) await player.play();
   }
 
+  KeyEventResult _key(FocusNode _, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    final step = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowUp => -1,
+      LogicalKeyboardKey.arrowDown => 1,
+      _ => 0,
+    };
+    if (step == 0) return KeyEventResult.ignored;
+    final chapters = widget.chapters;
+    final from = _going ?? chapterAt(chapters, widget.player.position);
+    final to = (from + step).clamp(0, chapters.length - 1);
+    if (to != from) unawaited(_go(to, step));
+    return KeyEventResult.handled;
+  }
+
+  Future<void> _go(int i, int step) async {
+    _going = i;
+    if (_rows[i].currentContext case final row?) {
+      unawaited(Scrollable.ensureVisible(
+        row,
+        duration: brand.quick,
+        curve: brand.easeOutExpo,
+        alignmentPolicy: step < 0 ? ScrollPositionAlignmentPolicy.keepVisibleAtStart : ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      ));
+    }
+    await _play(widget.chapters[i]);
+    if (_going == i) _going = null;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final chapters = widget.chapters;
     final text = Theme.of(context).textTheme;
-    return StreamBuilder<int>(
-      stream: player.positionStream.map((p) => chapterAt(chapters, p)).distinct(),
-      initialData: chapterAt(chapters, player.position),
-      builder: (context, snapshot) {
-        final playing = snapshot.data ?? -1;
-        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          for (final (i, c) in chapters.indexed)
-            Semantics(
-              button: true,
-              selected: i == playing,
-              child: Material(
-                type: MaterialType.transparency,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  hoverColor: brand.inkTile,
-                  onTap: () => unawaited(_play(c)),
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      color: i == playing ? brand.inkLine : brand.inkLine.withValues(alpha: 0),
+    final timeStyle = text.bodyMedium!.copyWith(fontWeight: FontWeight.w600, height: 1.45, fontFeatures: const [FontFeature.tabularFigures()]);
+    // The times share one column as wide as the longest, so every title starts
+    // the same gap after its time, an hour long or not.
+    final painter = TextPainter(
+      text: TextSpan(text: chapters.map((c) => clock(c.start)).reduce((a, b) => b.length > a.length ? b : a), style: timeStyle),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    final timeWidth = painter.width.ceilToDouble() + 16;
+    painter.dispose();
+    // The ring only for the keyboard: a click focuses the list too.
+    final ring = _focus.hasFocus && FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+    return Focus(
+      focusNode: _focus,
+      onKeyEvent: _key,
+      child: Listener(
+        onPointerDown: (_) => _focus.requestFocus(),
+        child: StreamBuilder<int>(
+          stream: widget.player.positionStream.map((p) => chapterAt(chapters, p)).distinct(),
+          initialData: chapterAt(chapters, widget.player.position),
+          builder: (context, snapshot) {
+            final playing = snapshot.data ?? -1;
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              for (final (i, c) in chapters.indexed)
+                Semantics(
+                  key: _rows[i],
+                  button: true,
+                  selected: i == playing,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: InkWell(
+                      // One stop for the whole list: the arrows move within it.
+                      canRequestFocus: false,
                       borderRadius: BorderRadius.circular(12),
+                      hoverColor: brand.inkTile,
+                      onTap: () => unawaited(_play(c)),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          color: i == playing ? brand.inkLine : brand.inkLine.withValues(alpha: 0),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.fromBorderSide(ring && i == playing ? brand.focusSide : brand.focusSideOff),
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          SizedBox(
+                            width: timeWidth,
+                            child: Text(
+                              clock(c.start),
+                              style: timeStyle.copyWith(color: i == playing ? brand.accentLight : brand.snowSoft),
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              c.title,
+                              style: text.bodyMedium!.copyWith(
+                                color: brand.snow,
+                                fontWeight: i == playing ? FontWeight.w600 : FontWeight.w400,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                        ]),
+                      ),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      SizedBox(
-                        width: 64,
-                        child: Text(
-                          clock(c.start),
-                          style: text.bodyMedium!.copyWith(
-                            color: i == playing ? brand.accentLight : brand.snowSoft,
-                            fontWeight: FontWeight.w600,
-                            height: 1.45,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          c.title,
-                          style: text.bodyMedium!.copyWith(
-                            color: brand.snow,
-                            fontWeight: i == playing ? FontWeight.w600 : FontWeight.w400,
-                            height: 1.45,
-                          ),
-                        ),
-                      ),
-                    ]),
                   ),
                 ),
-              ),
-            ),
-        ]);
-      },
+            ]);
+          },
+        ),
+      ),
     );
   }
 }

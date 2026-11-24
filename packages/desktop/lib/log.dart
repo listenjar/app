@@ -33,8 +33,10 @@
 //                          unfollow (`show`), move (a `show` on this
 //                          device to the Cloud, or a Cloud `feed` here),
 //                          open (a `feed` or `show`
-//                          id, `settings` or `nowPlaying`) or download
-//                          (`episode`)
+//                          id, `settings` or `nowPlaying`), download
+//                          (`episode`) or key (`key` up, down, left,
+//                          right, space, enter, escape or tab, to
+//                          whatever has focus)
 // SEVERE records and uncaught errors are reported as Flutter errors, so
 // they show where runtime errors show (the MCP's `get_runtime_errors`).
 import 'dart:async';
