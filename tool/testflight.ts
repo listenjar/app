@@ -2,7 +2,8 @@
 // tool/package-ios.sh exported, waits for App Store Connect to process it,
 // says what's new (the released commit's subject), adds it to the external
 // "Public" group, whose public link takes up to 10,000 testers, and submits it
-// to Beta App Review, after which that group can install it.
+// to Beta App Review, after which that group can install it. Each step it finds
+// already done it skips, so a rerun picks up where a failed one stopped.
 //
 //   node tool/testflight.ts <ipa>
 //
@@ -57,16 +58,22 @@ const whatsNew = `ListenJar ${version} (${build})\n\n${git("log", "-1", "--forma
 const [app] = await list(`/v1/apps?filter[bundleId]=${bundleId}&fields[apps]=bundleId`)
 if (!app) throw new Error(`No App Store Connect app for ${bundleId}`)
 
-console.log(`Uploading ${ipa} (${version} build ${build})`)
-execFileSync("xcrun", ["altool", "--upload-package", ipa, "--api-key", keyId, "--api-issuer", issuer, "--p8-file-path", keyPath],
-  { stdio: "inherit" })
+const find = async () => (await list(`/v1/builds?filter[app]=${app.id}&filter[version]=${build}`
+  + `&filter[preReleaseVersion.version]=${version}&fields[builds]=processingState,version`))[0]
+
+let uploaded = await find()
+if (uploaded) {
+  console.log(`${version} build ${build} is already on App Store Connect`)
+} else {
+  console.log(`Uploading ${ipa} (${version} build ${build})`)
+  execFileSync("xcrun", ["altool", "--upload-package", ipa, "--api-key", keyId, "--api-issuer", issuer, "--p8-file-path", keyPath],
+    { stdio: "inherit" })
+}
 
 // Processing usually takes 5–20 minutes.
 const deadline = Date.now() + 90 * 60_000
-let uploaded: Resource | undefined
 for (;;) {
-  ;[uploaded] = await list(`/v1/builds?filter[app]=${app.id}&filter[version]=${build}`
-    + `&filter[preReleaseVersion.version]=${version}&fields[builds]=processingState,version`)
+  uploaded = await find()
   const state = uploaded?.attributes.processingState
   console.log(`Build ${build}: ${state ?? "not listed yet"}`)
   if (state === "VALID") break
@@ -76,7 +83,8 @@ for (;;) {
 }
 const buildId = uploaded!.id
 
-const [localization] = await list(`/v1/builds/${buildId}/betaBuildLocalizations?filter[locale]=${locale}`)
+// The relationship takes no filters.
+const localization = (await list(`/v1/builds/${buildId}/betaBuildLocalizations`)).find(each => each.attributes.locale === locale)
 if (localization) {
   await api("PATCH", `/v1/betaBuildLocalizations/${localization.id}`,
     { data: { type: "betaBuildLocalizations", id: localization.id, attributes: { whatsNew } } })
@@ -85,11 +93,17 @@ if (localization) {
     relationships: { build: { data: { type: "builds", id: buildId } } } } })
 }
 
-const [external] = await list(`/v1/apps/${app.id}/betaGroups?filter[name]=${group}&filter[isInternalGroup]=false`)
+const external = (await list(`/v1/apps/${app.id}/betaGroups`))
+  .find(each => each.attributes.name === group && each.attributes.isInternalGroup === false)
 if (!external) throw new Error(`No external TestFlight group named ${group}`)
 await api("POST", `/v1/betaGroups/${external.id}/relationships/builds`, { data: [{ type: "builds", id: buildId }] })
 console.log(`Added build ${build} to ${group}`)
 
-await api("POST", "/v1/betaAppReviewSubmissions",
-  { data: { type: "betaAppReviewSubmissions", relationships: { build: { data: { type: "builds", id: buildId } } } } })
-console.log(`Submitted ${version} (${build}) to Beta App Review`)
+const submitted = (await api("GET", `/v1/builds/${buildId}/betaAppReviewSubmission`))?.data as Resource | null | undefined
+if (submitted) {
+  console.log(`${version} (${build}) is already in Beta App Review: ${submitted.attributes.betaReviewState}`)
+} else {
+  await api("POST", "/v1/betaAppReviewSubmissions",
+    { data: { type: "betaAppReviewSubmissions", relationships: { build: { data: { type: "builds", id: buildId } } } } })
+  console.log(`Submitted ${version} (${build}) to Beta App Review`)
+}
