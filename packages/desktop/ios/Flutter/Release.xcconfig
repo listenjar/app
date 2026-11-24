@@ -1,2 +1,5 @@
 #include "Generated.xcconfig"
 LISTENJAR_URL_SCHEME = listenjar
+// App Store signing for TestFlight: tool/package-ios.sh writes it for the
+// release build and removes it after; without it Xcode signs automatically.
+#include? "Signing.xcconfig"

@@ -123,17 +123,29 @@ Every push to master releases the app:
    attests each package's build provenance (`gh attestation verify <file> --repo
    listenjar/desktop`), uploads all five with
    their manifests, and only then makes the release the latest, whose appcasts the apps read.
+4. Beside them, the ios job sends the release to TestFlight for iPhone and iPad:
+   `desktop:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for
+   the App Store, and [tool/testflight.ts](tool/testflight.ts) uploads it, waits for App Store
+   Connect to process it, adds it to the external **Public** group and submits it to Beta App
+   Review. Anyone joins with the group's public link, up to 10,000 testers:
+   <https://testflight.apple.com/join/HHHDHV2a>; each build reaches them once Apple approves it,
+   and expires after 90 days. The GitHub release doesn't wait for the ios job. macOS stays on
+   the DMG above, one download link and Sparkle updates.
 
 Secrets live only in GitHub and, on a Mac, in `~/.secrets/listenjar`; never in this repo. On
 GitHub they are in the `desktop-release` environment, which only `v*` tags can use, so the
-macos, windows, android and publish jobs run only on a release tag; `moon run desktop-signing:restore`
+macos, windows, android, ios and publish jobs run only on a release tag; `moon run desktop-signing:restore`
 in the listenjar monorepo fills it from `~/.secrets/listenjar/desktop-signing`.
 
 - Secrets: `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_NOTARY_KEY_P8_BASE64`,
   `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID` (Developer ID signing and notarization),
   `MACOS_UPDATE_SEED_BASE64`, `WINDOWS_UPDATE_SEED_BASE64` (each updater's Ed25519 private seed),
   and `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` (the APK release key, a PKCS12
-  keystore whose store password is also the key's).
+  keystore whose store password is also the key's), and `IOS_DISTRIBUTION_P12_BASE64`,
+  `IOS_DISTRIBUTION_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` (the Apple Distribution
+  certificate and the App Store profile, renewed yearly), `APP_STORE_CONNECT_KEY_P8_BASE64`,
+  `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` (an Admin App Store Connect API
+  key, for TestFlight).
 - Variables: `MACOS_SIGNING_IDENTITY`, `MACOS_TEAM_ID`, `MACOS_UPDATE_PUBLIC_KEY`,
   `WINDOWS_UPDATE_PUBLIC_KEY` (the matching public keys, which the builds compile in), and
   `ANDROID_KEY_ALIAS` (the APK release key's alias).

@@ -84,6 +84,9 @@
 		<string>audio</string>
 		<string>fetch</string>
 	</array>
+	<!-- HTTPS and the system's own encryption only: TestFlight asks no export compliance questions. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- Feeds and episodes load from the address as given, http included, like AntennaPod. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
