@@ -1,9 +1,11 @@
 // A show: its cover, who makes it and what it's about, Follow, and every
-// episode, newest first, filtered to the unplayed or the downloaded. Opened
+// episode, newest first, filtered to the unplayed or the downloaded and
+// searchable by title and show notes. Opened
 // from the library, search or an episode; a show looked at from search is
 // in the library unfollowed until the listener follows it.
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -24,10 +26,19 @@ final class _ShowPageState extends State<ShowPage> {
   EpisodeFilter _filter = EpisodeFilter.all;
   bool _oldestFirst = false;
   bool _aboutOpen = false;
+  final _query = TextEditingController();
+  final _queryFocus = FocusNode();
 
   /// Long back catalogues show this many at first.
   static const _page = 100;
   int _shown = _page;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    _queryFocus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +53,8 @@ final class _ShowPageState extends State<ShowPage> {
             const EmptyState(title: 'This show is gone', body: 'It was removed from your library.'),
           ]);
         }
-        final episodes = s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst);
+        final episodes = s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst, query: _query.text);
+        final query = _query.text.trim();
         return PageBody(children: [
           if (Navigator.of(context).canPop()) backButton(context, 'Back'),
           _header(context, show),
@@ -58,6 +70,11 @@ final class _ShowPageState extends State<ShowPage> {
               padding: const EdgeInsets.symmetric(vertical: 24),
               child: Text(
                 switch (_filter) {
+                  _ when query.isNotEmpty => switch (_filter) {
+                    EpisodeFilter.all => 'No episodes match “$query”.',
+                    EpisodeFilter.unplayed => 'No unplayed episodes match “$query”.',
+                    EpisodeFilter.downloaded => 'No downloaded episodes match “$query”.',
+                  },
                   EpisodeFilter.all => 'This feed lists no episodes with audio.',
                   EpisodeFilter.unplayed => 'You’ve heard every episode.',
                   EpisodeFilter.downloaded => 'No episodes downloaded.',
@@ -223,15 +240,12 @@ final class _ShowPageState extends State<ShowPage> {
       );
     }
 
-    return Row(children: [
-      Expanded(
-        child: Wrap(spacing: 8, runSpacing: 8, children: [
-          chip(EpisodeFilter.all, 'All'),
-          chip(EpisodeFilter.unplayed, show.unplayed == 0 ? 'Unplayed' : 'Unplayed · ${show.unplayed}'),
-          chip(EpisodeFilter.downloaded, 'Downloaded'),
-        ]),
-      ),
-      Tooltip(
+    final chips = Wrap(spacing: 8, runSpacing: 8, children: [
+      chip(EpisodeFilter.all, 'All'),
+      chip(EpisodeFilter.unplayed, show.unplayed == 0 ? 'Unplayed' : 'Unplayed · ${show.unplayed}'),
+      chip(EpisodeFilter.downloaded, 'Downloaded'),
+    ]);
+    final sort = Tooltip(
         message: _oldestFirst ? 'Oldest first' : 'Newest first',
         child: TextButton.icon(
           style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm).copyWith(
@@ -241,8 +255,81 @@ final class _ShowPageState extends State<ShowPage> {
           icon: Icon(_oldestFirst ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 16),
           label: Text(_oldestFirst ? 'Oldest' : 'Newest'),
         ),
-      ),
+      );
+    if (MediaQuery.sizeOf(context).width < 640) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _searchField(context),
+        const SizedBox(height: 12),
+        Row(children: [Expanded(child: chips), sort]),
+      ]);
+    }
+    return Row(children: [
+      Expanded(child: chips),
+      const SizedBox(width: 12),
+      SizedBox(width: 240, child: _searchField(context)),
+      const SizedBox(width: 4),
+      sort,
     ]);
+  }
+
+  /// Narrows the episodes to those whose title or show notes hold every word typed.
+  Widget _searchField(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    void clear() => setState(() {
+      _query.clear();
+      _shown = _page;
+    });
+    return ListenableBuilder(
+      listenable: _queryFocus,
+      builder: (context, _) {
+        final focused = _queryFocus.hasFocus;
+        return AnimatedContainer(
+          duration: brand.quick,
+          curve: brand.easeOutExpo,
+          height: 34,
+          padding: const EdgeInsets.only(left: 12, right: 2),
+          decoration: ShapeDecoration(
+            color: brand.white,
+            shape: StadiumBorder(side: BorderSide(color: focused ? brand.accent.withValues(alpha: 0.6) : brand.line, width: focused ? 1.5 : 1)),
+          ),
+          child: Row(children: [
+            Icon(Icons.search_rounded, size: 18, color: focused ? brand.accent : brand.fgSoft),
+            const SizedBox(width: 8),
+            Expanded(
+              child: CallbackShortcuts(
+                bindings: {const SingleActivator(LogicalKeyboardKey.escape): clear},
+                child: TextField(
+                  controller: _query,
+                  focusNode: _queryFocus,
+                  onChanged: (_) => setState(() => _shown = _page),
+                  style: text.bodyMedium!.copyWith(height: 1.2),
+                  cursorColor: brand.accent,
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    hintText: 'Search episodes',
+                    hintStyle: text.bodyMedium!.copyWith(color: brand.fgSoft, height: 1.2),
+                  ),
+                ),
+              ),
+            ),
+            if (_query.text.isNotEmpty)
+              IconButton(
+                tooltip: 'Clear',
+                visualDensity: VisualDensity.compact,
+                iconSize: 16,
+                onPressed: () {
+                  clear();
+                  _queryFocus.requestFocus();
+                },
+                icon: const Icon(Icons.close_rounded, color: brand.fgSoft),
+              )
+            else
+              const SizedBox(width: 10),
+          ]),
+        );
+      },
+    );
   }
 
   Future<void> _unfollow(BuildContext context, Podcast show) async {

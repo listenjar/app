@@ -464,14 +464,23 @@ final class Library extends ChangeNotifier {
     _changed();
   }
 
-  /// [podcast]'s episodes, newest first unless [oldestFirst].
-  List<PodcastEpisode> episodes(int podcast, {EpisodeFilter filter = EpisodeFilter.all, bool oldestFirst = false}) {
-    final where = switch (filter) {
-      EpisodeFilter.all => 'e.podcast_id = ?',
-      EpisodeFilter.unplayed => 'e.podcast_id = ? and e.played = 0',
-      EpisodeFilter.downloaded => "e.podcast_id = ? and e.download_state != 'none'",
-    };
-    return _episodes(where, [podcast], oldestFirst ? 'e.published_at asc, e.id asc' : 'e.published_at desc, e.id desc');
+  /// [podcast]'s episodes, newest first unless [oldestFirst]; with a [query],
+  /// only those whose title or show notes hold every one of its words.
+  List<PodcastEpisode> episodes(int podcast, {EpisodeFilter filter = EpisodeFilter.all, bool oldestFirst = false, String query = ''}) {
+    final words = query.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final where = [
+      switch (filter) {
+        EpisodeFilter.all => 'e.podcast_id = ?',
+        EpisodeFilter.unplayed => 'e.podcast_id = ? and e.played = 0',
+        EpisodeFilter.downloaded => "e.podcast_id = ? and e.download_state != 'none'",
+      },
+      for (final _ in words) r"(e.title like ? escape '\' or e.description like ? escape '\')",
+    ].join(' and ');
+    final args = <Object?>[
+      podcast,
+      for (final w in words) ...List.filled(2, '%${w.replaceAllMapped(RegExp(r'[\\%_]'), (m) => '\\${m[0]}')}%'),
+    ];
+    return _episodes(where, args, oldestFirst ? 'e.published_at asc, e.id asc' : 'e.published_at desc, e.id desc');
   }
 
   PodcastEpisode? episode(int id) => _episodes('e.id = ?', [id]).firstOrNull;
