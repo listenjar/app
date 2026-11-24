@@ -124,7 +124,8 @@ Every push to master releases the app:
    listenjar/desktop`), uploads all five with
    their manifests, and only then makes the release the latest, whose appcasts the apps read
    (Android's reads `manifest-android.json`, and installs only an APK signed with its own key).
-4. Beside them, the ios job sends the release to TestFlight for iPhone and iPad:
+4. Beside them, the ios job sends the release to TestFlight for iPhone and iPad. It runs on
+   GitHub's `xcode-27` image, as App Store Connect takes only iOS 27 SDK builds from April 2027:
    `desktop:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for
    the App Store, and [tool/testflight.ts](tool/testflight.ts) uploads it, waits for App Store
    Connect to process it, adds it to the external **Public** group and submits it to Beta App

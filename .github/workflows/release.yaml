@@ -281,11 +281,12 @@ jobs:
   # Every release goes to TestFlight too, for iPhone and iPad: signed for the
   # App Store, added to the external "Public" group (its public link takes up
   # to 10,000 testers) and submitted to Beta App Review (tool/testflight.ts).
-  # The GitHub release doesn't wait for it.
+  # The GitHub release doesn't wait for it. It runs on the Xcode 27 image, as
+  # App Store Connect takes only iOS 27 SDK builds from April 2027 (ITMS-90725).
   ios:
     if: github.ref_type == 'tag'
     needs: generate
-    runs-on: macos-26
+    runs-on: xcode-27
     environment: desktop-release
     env:
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
