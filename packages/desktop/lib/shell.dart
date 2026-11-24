@@ -183,7 +183,9 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final navigator = _navigators[section]!.currentState;
       if (fresh) navigator?.popUntil((r) => r.isFirst);
-      navigator?.push(_page(page));
+      // iOS slides it in as its own pages do, so an edge swipe takes it
+      // back; the fade has no back gesture.
+      navigator?.push(defaultTargetPlatform == TargetPlatform.iOS ? pageRoute(page) : _page(page));
     });
   }
 
