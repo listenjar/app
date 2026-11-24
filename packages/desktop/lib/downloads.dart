@@ -13,6 +13,7 @@ import 'dart:io';
 import 'package:background_downloader/background_downloader.dart';
 import 'package:cancellation_token/cancellation_token.dart';
 
+import 'faststart.dart';
 import 'library.dart';
 import 'log.dart';
 import 'rss.dart' show userAgent;
@@ -25,12 +26,6 @@ final _storageLog = Logger('storage');
 /// How often the storage rules run while the app is open, besides after
 /// each change they depend on.
 const _tidyEvery = Duration(hours: 1);
-
-/// What YouTube's media servers want with a stream request.
-Map<String, String> youtubeHeaders(MediaStream stream) => {
-  'Origin': 'https://www.youtube.com',
-  'User-Agent': stream.userAgent,
-};
 
 const _group = 'episodes';
 const _folder = 'episodes';
@@ -209,7 +204,10 @@ final class Downloads {
       }
       final name = '${episode.id}${media.contentType == 'audio/webm' ? '.webm' : '.m4a'}';
       await Directory('${_library.directory.path}/$_folder').create(recursive: true);
-      await part.rename('${_library.directory.path}/$_folder/$name');
+      // A regular M4A rather than YouTube's fragments, which AVPlayer plays
+      // at twice the length, the second half silent (faststart.dart).
+      final rewritten = media.contentType == 'audio/mp4' ? await faststart(part, merged) : null;
+      await (rewritten ?? part).rename('${_library.directory.path}/$_folder/$name');
       await journal.forget(key);
       _library.setDownload(episode.id, DownloadState.done, path: '$_folder/$name', progress: 1);
       unawaited(tidyDownloads(_library, this));

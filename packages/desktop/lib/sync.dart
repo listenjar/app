@@ -9,7 +9,8 @@
 // 3. For every video the feed lacks: resolve it, add it (createEpisode).
 //    Audio is stored once per video, so if anyone's feed has it already the
 //    episode is live and that's all. Otherwise download it on this computer
-//    (transfer.dart), upload it (uploads.dart: createUpload, a PUT straight
+//    (transfer.dart), rewrite YouTube's AAC as a regular M4A (faststart.dart),
+//    upload it (uploads.dart: createUpload, a PUT straight
 //    to R2, completeEpisode), delete the file.
 //
 // A free listener's single video is all the backend takes from them; a plan
@@ -28,6 +29,7 @@ import 'package:cancellation_token/cancellation_token.dart';
 import 'package:http/http.dart' as http;
 
 import 'backend/api.dart';
+import 'faststart.dart';
 import 'links.dart';
 import 'transfer.dart';
 import 'uploads.dart';
@@ -439,23 +441,31 @@ final class SyncEngine {
           }
         }
 
-        show('Uploading');
-        await uploadThrough(
-          _mediaHttp,
-          await UploadFile.fromFile(file, media.contentType),
-          presign: (request) async {
-            try {
-              return await _api.createUpload(feedId: feed.id, episodeId: episode.id, body: request);
-            } on ApiStatusException catch (e) {
-              // 409: another computer uploaded it first, and the episode is live.
-              if (e.statusCode == HttpStatus.conflict) return null;
-              throw PlanLimit.of(e) ?? e;
-            }
-          },
-          complete: () => _api.completeEpisode(feedId: feed.id, episodeId: episode.id),
-          progress: (d, t) => show('Uploading', d, t),
-          token: token,
-        );
+        // A regular M4A rather than YouTube's fragments, which AVPlayer (and
+        // so Apple Podcasts) plays at twice the length (faststart.dart).
+        show('Preparing');
+        final rewritten = media.contentType == 'audio/mp4' ? await faststart(file, token) : null;
+        try {
+          show('Uploading');
+          await uploadThrough(
+            _mediaHttp,
+            await UploadFile.fromFile(rewritten ?? file, media.contentType),
+            presign: (request) async {
+              try {
+                return await _api.createUpload(feedId: feed.id, episodeId: episode.id, body: request);
+              } on ApiStatusException catch (e) {
+                // 409: another computer uploaded it first, and the episode is live.
+                if (e.statusCode == HttpStatus.conflict) return null;
+                throw PlanLimit.of(e) ?? e;
+              }
+            },
+            complete: () => _api.completeEpisode(feedId: feed.id, episodeId: episode.id),
+            progress: (d, t) => show('Uploading', d, t),
+            token: token,
+          );
+        } finally {
+          await rewritten?.delete();
+        }
       }
       await journal.forget(key);
       status.added++;
