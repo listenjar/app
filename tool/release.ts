@@ -196,7 +196,7 @@ async function api(endpoint: string, method = "GET", body?: object, allowMissing
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
   if (response.status === 404 && allowMissing) return null
-  if (!response.ok) throw new Error(`GitHub ${method} ${endpoint}: ${response.status}`)
+  if (!response.ok) throw new Error(`GitHub ${method} ${endpoint}: ${response.status} ${await response.text()}`)
   return response.json()
 }
 
