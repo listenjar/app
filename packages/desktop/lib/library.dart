@@ -876,6 +876,52 @@ final class Library extends ChangeNotifier {
     if (put.isNotEmpty) _changed();
   }
 
+  /// Keeps [podcast], a ListenJar Cloud show whose feed is gone, on this
+  /// device instead: the YouTube playlist or channel at [source], or with
+  /// none a podcast of the listener's own. Its episodes become the YouTube
+  /// videos they are, streaming from there; where the listener was, Up
+  /// Next and downloads stay. [artworkUrl], when given, replaces the
+  /// Cloud's, which went with the feed. False, and nothing changes, when
+  /// [source] is followed here already.
+  bool keepOnDevice(int podcast, {required String? source, String? artworkUrl}) {
+    final there = source == null ? null : podcastByUrl(source);
+    if (there != null && there.followed) return false;
+    final now = DateTime.now();
+    _db.execute('begin');
+    try {
+      // Once followed here and let go: this takes its place.
+      if (there != null) _db.execute('delete from podcasts where id = ?', [there.id]);
+      _db.execute('''
+        update podcasts set kind = ?, feed_url = ?, link = ?, author = coalesce(?, author),
+          artwork_url = coalesce(?, artwork_url), cloud_feed_id = null, etag = null, last_modified = null,
+          refresh_error = null, refreshed_at = ?
+        where id = ?
+      ''', [
+        source == null ? 'own' : 'youtubeFeed', source ?? 'listenjar:own:${now.microsecondsSinceEpoch}', source,
+        source == null ? 'Podcast of your own' : null, artworkUrl, now.millisecondsSinceEpoch, podcast,
+      ]);
+      for (final e in episodes(podcast)) {
+        final id = e.videoId;
+        if (id == null) {
+          _db.execute('delete from episodes where id = ?', [e.id]);
+          continue;
+        }
+        // As a playlist's refresh and an own podcast's videos have them, so
+        // neither adds it again.
+        _db.execute(
+          'update episodes set guid = ?, youtube_id = ?, link = ?, audio_url = null, audio_type = null, audio_bytes = null where id = ?',
+          ['yt:$id', id, _watchUrl(id), e.id],
+        );
+      }
+      _db.execute('commit');
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    }
+    _changed();
+    return true;
+  }
+
   /// Forgets what was carried for feeds the listener no longer has.
   void forgetCarried(Set<String> live) {
     for (final r in _db.select('select distinct feed_id from carried')) {

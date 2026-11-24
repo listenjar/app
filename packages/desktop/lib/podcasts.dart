@@ -66,6 +66,27 @@ final class Podcasts extends ChangeNotifier {
   /// playlists and channels takes, on this device as in the Cloud; null
   /// while the account isn't known yet. Set where the account is.
   bool? Function() paid = () => null;
+
+  /// Whether [podcast], a YouTube playlist or channel on this device, gets
+  /// no new videos for want of a plan; what it has still plays.
+  bool paused(Podcast podcast) => podcast.kind == PodcastKind.youtubeFeed && paid() == false;
+
+  /// The plan is known, or came back: playlists and channels on this
+  /// device catch up on what they missed while paused.
+  void planChanged() {
+    notifyListeners();
+    switch (paid()) {
+      case true:
+        for (final show in library.podcasts.where((p) => p.kind == PodcastKind.youtubeFeed)) {
+          unawaited(refresh(show));
+        }
+        unawaited(_forgetCloudArtwork());
+      case false:
+        unawaited(_keepCloudArtwork());
+      case null:
+    }
+  }
+
   final Downloads _downloads;
   final YouTubeService _youtube;
   final _http = HttpClient()
@@ -102,8 +123,10 @@ final class Podcasts extends ChangeNotifier {
 
   void followShow(Podcast podcast) => library.follow(podcast.id);
 
-  /// Stops following [podcast]; its downloads go with it.
+  /// Stops following [podcast]; its downloads and the artwork kept here go
+  /// with it.
   Future<void> unfollow(Podcast podcast) async {
+    await _deleteArtwork(podcast);
     for (final e in library.episodes(podcast.id, filter: EpisodeFilter.downloaded)) {
       await _downloads.delete(e);
     }
@@ -141,18 +164,13 @@ final class Podcasts extends ChangeNotifier {
   /// Refreshes [podcast]'s feed and downloads its new episodes if it's set
   /// to. Failures are kept on the show, not thrown.
   Future<void> refresh(Podcast podcast) async {
+    // A playlist or channel here waits for a plan ([paused]), or for the
+    // account to be known.
+    if (podcast.kind == PodcastKind.youtubeFeed && paid() != true) return;
     if (!podcast.refreshes || !refreshing.add(podcast.id)) return;
     notifyListeners();
     try {
       if (podcast.kind == PodcastKind.youtubeFeed) {
-        switch (paid()) {
-          case null:
-            return;
-          case false:
-            library.refreshFailed(podcast.id, 'Following YouTube playlists and channels takes a plan');
-            return;
-          case true:
-        }
         await _refreshYouTube(podcast, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
         return;
       }
@@ -248,7 +266,7 @@ final class Podcasts extends ChangeNotifier {
     // A new name each time, so the old picture isn't shown from cache.
     final file = File('${dir.path}/own-${own.id}-${DateTime.now().millisecondsSinceEpoch}.jpg');
     await file.writeAsBytes(await podcastArtwork(picture));
-    await _deleteOwnArtwork(own);
+    await _deleteArtwork(own);
     library.setArtwork(own.id, file.uri.toString());
   }
 
@@ -273,17 +291,12 @@ final class Podcasts extends ChangeNotifier {
     }
   }
 
-  Future<void> _deleteOwnArtwork(Podcast own) async {
-    if (own.artworkUrl case final url? when url.startsWith('file:')) {
+  /// Deletes the artwork kept here for [show], if any.
+  Future<void> _deleteArtwork(Podcast show) async {
+    if (show.artworkUrl case final url? when url.startsWith('file:')) {
       final file = File.fromUri(Uri.parse(url));
       if (file.path.startsWith(library.directory.path) && await file.exists()) await file.delete();
     }
-  }
-
-  /// Deletes [own], a podcast of the listener's own on this device.
-  Future<void> deleteOwn(Podcast own) async {
-    await _deleteOwnArtwork(own);
-    await unfollow(own);
   }
 
   // YouTube playlists and channels, on this device.
@@ -352,13 +365,18 @@ final class Podcasts extends ChangeNotifier {
 
   /// Follows each of the signed-in listener's ListenJar feeds once it has an
   /// RSS address, and lets go of ones they removed. Signed out, the shows
-  /// stay: their addresses still work in any podcast app.
-  Future<void> followCloud(List<Feed> feeds) async {
+  /// stay: their addresses still work in any podcast app. Without a plan,
+  /// a playlist, channel or podcast of their own the cleanup removed stays
+  /// on this device ([keepOnDevice]); one they removed here ([removed])
+  /// goes.
+  Future<void> followCloud(List<Feed> feeds, {Set<String> removed = const {}}) async {
     final live = {for (final f in feeds) f.id};
     library.forgetCarried(live);
     for (final show in library.podcasts.where((p) => p.cloudFeedId != null && !live.contains(p.cloudFeedId))) {
+      if (paid() == false && !removed.contains(show.cloudFeedId) && await keepOnDevice(show)) continue;
       await unfollow(show);
     }
+    if (paid() == false) unawaited(_keepCloudArtwork());
     for (final feed in feeds) {
       final rss = feed.rssUrl;
       if (rss == null) continue;
@@ -375,6 +393,60 @@ final class Podcasts extends ChangeNotifier {
       } catch (e) {
         _log.warning('Couldn’t follow ListenJar feed ${feed.id}', e);
       }
+    }
+  }
+
+  /// Keeps [show], a ListenJar Cloud playlist, channel or podcast of the
+  /// listener's own whose feed is gone, on this device, with the artwork
+  /// [_keepCloudArtwork] kept; false for a single video, which goes as on
+  /// the free plan.
+  Future<bool> keepOnDevice(Podcast show) async {
+    final feedId = show.cloudFeedId!;
+    final link = parseYouTubeLink(show.link ?? '');
+    if (link?.kind == SourceKind.video) return false;
+    // A playlist or channel, or with no YouTube link a podcast of their own.
+    final source = link?.url;
+    final kept = _cloudArtwork(feedId);
+    String? artwork;
+    if (await kept.exists()) {
+      final dir = Directory('${library.directory.path}/artwork');
+      final file = await kept.rename('${dir.path}/own-${show.id}-${DateTime.now().millisecondsSinceEpoch}.jpg');
+      artwork = file.uri.toString();
+    }
+    if (library.keepOnDevice(show.id, source: source, artworkUrl: artwork)) {
+      _log.info('Kept ListenJar feed $feedId on this device as show ${show.id}');
+      return true;
+    }
+    if (artwork != null) await File.fromUri(Uri.parse(artwork)).delete();
+    return false;
+  }
+
+  /// Where the artwork of the ListenJar feed [feedId] is kept while there's
+  /// no plan: the cleanup deletes the feed's own with it.
+  File _cloudArtwork(String feedId) => File('${library.directory.path}/artwork/cloud-$feedId.jpg');
+
+  /// Keeps the artwork of each ListenJar playlist, channel and podcast of
+  /// the listener's own here, for [keepOnDevice].
+  Future<void> _keepCloudArtwork() async {
+    for (final show in library.podcasts) {
+      final feedId = show.cloudFeedId;
+      if (feedId == null || show.artworkUrl == null) continue;
+      if (parseYouTubeLink(show.link ?? '')?.kind == SourceKind.video) continue;
+      final file = _cloudArtwork(feedId);
+      if (await file.exists()) continue;
+      final picture = await artworkBytes(show.artworkUrl);
+      if (picture == null) continue;
+      await file.parent.create(recursive: true);
+      await file.writeAsBytes(picture, flush: true);
+    }
+  }
+
+  /// On a plan again: the feeds stay, and so does their artwork.
+  Future<void> _forgetCloudArtwork() async {
+    final dir = Directory('${library.directory.path}/artwork');
+    if (!await dir.exists()) return;
+    await for (final f in dir.list()) {
+      if (f is File && f.uri.pathSegments.last.startsWith('cloud-')) await f.delete();
     }
   }
 

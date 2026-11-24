@@ -535,6 +535,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.2"
+  json_annotation:
+    dependency: transitive
+    description:
+      name: json_annotation
+      sha256: "2a743920d81b7910627f68ee2c9ac1fc0bfee32b9fc3403587d7c6791ca12f80"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.12.0"
   just_audio:
     dependency: transitive
     description:
@@ -727,6 +735,38 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.0"
+  passkeys_android:
+    dependency: transitive
+    description:
+      name: passkeys_android
+      sha256: "2b070609a4278a07e653b4404f2cc2e525718c3fc19bd2b4dc52f09083f0705b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.15.0"
+  passkeys_darwin:
+    dependency: transitive
+    description:
+      name: passkeys_darwin
+      sha256: "83e4efcd1841f2031206cc9c9c5d30d6859e3624e1892c87fd100e97f612fb86"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.4.8"
+  passkeys_platform_interface:
+    dependency: transitive
+    description:
+      name: passkeys_platform_interface
+      sha256: "1a4a39920a737dfacfb7d4bb8f03bb0d95e9fdb6c3ff2010cfeb7fc5d087eeb1"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.11.0"
+  passkeys_windows:
+    dependency: transitive
+    description:
+      name: passkeys_windows
+      sha256: "1b5baee872a9b3cc66fb41e43d5c5bd1d38b2ded0ab57a9fb9dd632acb047176"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.6"
   path:
     dependency: transitive
     description:

@@ -1,6 +1,6 @@
 // Who is signed in: the token kept in the system credential store, the
 // user it belongs to, and the ListenJar API client that sends it
-// (signin.dart has the browser round trip). One per process; the window
+// (signin.dart has the ways to sign in). One per process; the window
 // signs in and out through it, and Feeds (feeds.dart) follows it. No
 // widgets here.
 import 'dart:async';
@@ -8,13 +8,19 @@ import 'dart:async';
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:logging/logging.dart';
 
 import 'backend/api.dart';
 import 'config.dart';
-import 'signin.dart' hide signIn;
-import 'signin.dart' as browser show signIn;
+import 'signin.dart' hide signInWithGoogle, signInWithPasskey, signInWithPassword, signUp, requestPasswordLink;
+import 'signin.dart' as auth;
+
+final _log = Logger('account');
 
 const callTimeout = Duration(seconds: 30);
+
+/// The ways to sign in, as listenjar.com's sign-in page has them.
+enum SignInMethod { google, passkey, password }
 
 final class Account extends ChangeNotifier {
   final _config = currentConfig();
@@ -26,11 +32,12 @@ final class Account extends ChangeNotifier {
   late final PublicApiClient api = apiClient(_config.api, _http, () => _token);
 
   /// Null while signed out. [restoring] covers reading the kept token at
-  /// start, [signingIn] the browser round trip.
+  /// start, [signingIn] the sign-in under way and how, which its token
+  /// cancels.
   User? user;
   Object? authError;
   bool restoring = true;
-  CancellationToken? signingIn;
+  ({SignInMethod method, CancellationToken token})? signingIn;
 
   /// Cancelled with the account, and after [callTimeout].
   CancellationToken timeout() => _life.merge(TimeoutCancellationToken(callTimeout));
@@ -83,22 +90,41 @@ final class Account extends ChangeNotifier {
   bool _refreshing = false;
   DateTime _refreshed = DateTime.fromMillisecondsSinceEpoch(0);
 
-  /// Runs the browser round trip, at most once at a time, opening its page
-  /// with [open], and keeps the token.
-  Future<void> signIn(Future<void> Function(Uri) open) async {
+  /// Signs in with Google, opening its page in the browser with [open].
+  Future<void> signInWithGoogle(Future<void> Function(Uri) open) =>
+    _signIn(SignInMethod.google, (token) => auth.signInWithGoogle(api, open, token));
+
+  /// Signs in with a passkey from the platform's prompt.
+  Future<void> signInWithPasskey() => _signIn(SignInMethod.passkey, (token) => auth.signInWithPasskey(api, token));
+
+  Future<void> signInWithPassword(String email, String password) =>
+    _signIn(SignInMethod.password, (token) => auth.signInWithPassword(api, email, password, token));
+
+  /// Emails a sign-up link; false when the address or password won't do.
+  Future<bool> signUp(String email, String password) => auth.signUp(api, email, password, timeout());
+
+  /// Emails a link that sets the password; false when the address won't do.
+  Future<bool> requestPasswordLink(String email) => auth.requestPasswordLink(api, email, timeout());
+
+  /// Runs one sign-in at a time and keeps the token it gets.
+  Future<void> _signIn(SignInMethod method, Future<Session> Function(CancellationToken) how) async {
     if (signingIn != null) return;
     final token = CancellationToken();
-    signingIn = token;
+    signingIn = (method: method, token: token);
     authError = null;
     notifyListeners();
     try {
-      final session = await browser.signIn(api, _config.web, open, _life.merge(token));
+      final session = await how(_life.merge(token));
       await saveToken(session.token);
       _token = session.token;
       user = session.user;
     } on CancelledException {
       // Cancelled, or the account closed.
-    } catch (e) {
+    } on SignInRefused catch (e) {
+      _log.info('${method.name} sign-in refused: ${e.runtimeType}');
+      authError = e;
+    } catch (e, stack) {
+      _log.warning('${method.name} sign-in failed', e, stack);
       authError = e;
     }
     signingIn = null;

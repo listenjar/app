@@ -269,6 +269,9 @@ MyApplication* my_application_new() {
   // corresponding .desktop file. This ensures better integration by allowing
   // the application to be recognized beyond its binary name.
   g_set_prgname(kApplicationId);
+  // What GTK and the desktop show as the app's name, which would otherwise
+  // fall back to the application ID.
+  g_set_application_name("ListenJar");
 
   // Unique: a second launch activates the first instance and exits.
   return MY_APPLICATION(g_object_new(my_application_get_type(),

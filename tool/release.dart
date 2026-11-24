@@ -10,6 +10,10 @@
 // `build` here (ListenJar-<version>-linux-x64.tar.gz, -android.apk), and
 // tool/release.ts signs the updates, writes the appcasts and publishes.
 //
+// Android: `build android` refuses an APK not signed with the release key
+// whose certificate passkeys.ts lists (android/app/build.gradle.kts signs
+// with it): Android updates an app only with the key it was installed with.
+//
 // Versions: packages/desktop/pubspec.yaml holds the base, X.Y.Z+BUILD. Each
 // master push gets the next patch above the newest vX.Y.Z tag (or the base, if
 // it is newer) and the next build number (Android's versionCode and the
@@ -166,11 +170,52 @@ Future<void> _build(String platform) async {
         staged.deleteSync(recursive: true);
       }
     case 'android':
-      File('${_app.path}/build/app/outputs/flutter-apk/app-release.apk').copySync('${_out.path}/$name.apk');
+      final apk = '${_app.path}/build/app/outputs/flutter-apk/app-release.apk';
+      _checkSigner(apk);
+      File(apk).copySync('${_out.path}/$name.apk');
   }
   for (final file in _out.listSync().whereType<File>()) {
     stdout.writeln('Packaged ${file.path} (${file.lengthSync()} bytes)');
   }
+}
+
+// Android signing ------------------------------------------------------------
+
+/// The release certificate's SHA-256 as lowercase hex, from passkeys.ts,
+/// which also lets the app's passkeys through.
+String _releaseCertificate() {
+  final passkeys = File('${_root.path}/passkeys.ts').readAsStringSync();
+  final fingerprints = RegExp(r'"((?:[0-9A-F]{2}:){31}[0-9A-F]{2})"').allMatches(passkeys).toList();
+  if (fingerprints.length != 1) throw StateError('passkeys.ts needs exactly one Android certificate SHA-256');
+  return fingerprints.single.group(1)!.replaceAll(':', '').toLowerCase();
+}
+
+/// Fails unless [apk] verifies and its only signer is the release certificate.
+void _checkSigner(String apk) {
+  final certificate = _releaseCertificate();
+  final sdk = Platform.environment['ANDROID_HOME'] ?? Platform.environment['ANDROID_SDK_ROOT'];
+  final tools = sdk == null ? null : Directory('$sdk/build-tools');
+  final versions = tools != null && tools.existsSync() ? tools.listSync().whereType<Directory>().toList() : <Directory>[];
+  if (versions.isEmpty) throw StateError('No Android build-tools (apksigner) under ANDROID_HOME');
+  String name(Directory d) => d.path.split(Platform.pathSeparator).last;
+  versions.sort((a, b) => _compareVersions(name(a), name(b)));
+  final apksigner = '${versions.last.path}/apksigner';
+  final output = _run(apksigner, ['verify', '--print-certs', apk]);
+  final signers = RegExp(r'certificate SHA-256 digest: ([0-9a-f]{64})').allMatches(output).map((m) => m.group(1)).toSet();
+  if (signers.length != 1 || signers.single != certificate) {
+    throw StateError('$apk is signed by ${signers.join(', ')}, not the release certificate $certificate');
+  }
+  stdout.writeln('Signed with the release certificate $certificate');
+}
+
+int _compareVersions(String a, String b) {
+  final x = a.split(RegExp(r'[.-]')).map((p) => int.tryParse(p) ?? -1).toList();
+  final y = b.split(RegExp(r'[.-]')).map((p) => int.tryParse(p) ?? -1).toList();
+  for (var i = 0; i < max(x.length, y.length); i++) {
+    final c = (i < x.length ? x[i] : 0).compareTo(i < y.length ? y[i] : 0);
+    if (c != 0) return c;
+  }
+  return 0;
 }
 
 // processes ------------------------------------------------------------------

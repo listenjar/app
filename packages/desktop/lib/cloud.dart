@@ -17,12 +17,10 @@ import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'account.dart';
 import 'backend/api.dart';
 import 'feeds.dart';
-import 'marks.dart';
 import 'menu.dart';
 import 'plans.dart';
 import 'podcast.dart';
@@ -32,14 +30,10 @@ import 'library.dart' show Podcast;
 import 'links.dart' show parseYouTubeLink;
 import 'shared_links.dart' show CloudOwn, LocalOwn, mayFollowInCloud, mayMakePodcast, newOwnPodcast;
 import 'shell.dart' show PageBody, backButton;
+import 'sign_in_form.dart';
 import 'sync.dart';
 import 'theme.dart' as brand;
 import 'ui.dart' show Navigation, Services, tell;
-
-/// Opens the browser to sign in; the account says how it went.
-Future<void> signIn(Account account) => account.signIn((url) async {
-  if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw StateError('open the browser');
-});
 
 /// One ListenJar feed, pushed onto a section's stack: what went wrong
 /// syncing, then its page (podcast.dart). Gone once it is removed.
@@ -238,7 +232,13 @@ Future<Podcast> feedToDevice(Feeds feeds, Podcasts podcasts, Feed feed) async {
   if (library.podcasts.where((p) => p.cloudFeedId == feed.id).firstOrNull case final cloud?) {
     library.copyListening(cloud.id, show.id);
   }
-  await feeds.remove(feed);
+  // Still in the Cloud: the show here goes, or it would be there twice.
+  try {
+    await feeds.remove(feed);
+  } catch (_) {
+    await podcasts.unfollow(show);
+    rethrow;
+  }
   return show;
 }
 
@@ -256,24 +256,25 @@ Future<Feed> ownToCloud(Feeds feeds, Podcasts podcasts, Podcast show) async {
       await feeds.addVideo(feed, 'https://www.youtube.com/watch?v=$id', TimeoutCancellationToken(const Duration(minutes: 2)));
     }
   } catch (_) {
-    await feeds.remove(feed);
+    await feeds.remove(feed).catchError((_) {});
     rethrow;
   }
   library.carry(show.id, feed.id);
-  await podcasts.deleteOwn(show);
+  await podcasts.unfollow(show);
   return feeds.feeds.where((f) => f.id == feed.id).firstOrNull ?? feed;
 }
 
 /// [feed], a podcast of the listener's own in ListenJar Cloud, as one on
 /// this device: its artwork and videos, dated when they were added there;
 /// where the listener was comes along, and the feed and its uploads are
-/// removed.
+/// removed. Until they are, nothing here waits on the network, so the show
+/// is never in both places for long.
 Future<Podcast> ownToDevice(Feeds feeds, Podcasts podcasts, Feed feed) async {
   final episodes = (await feeds.episodes(feed))..sort((a, b) => a.publishedAt.compareTo(b.publishedAt));
+  // Fetched now: removing the feed removes its artwork too.
   final picture = await podcasts.artworkBytes(feed.imageUrl);
   final library = podcasts.library;
   final show = library.createOwn(feed.title);
-  if (picture != null) await podcasts.setOwnArtwork(show, picture);
   for (final e in episodes) {
     library.addOwnVideo(
       show.id,
@@ -290,7 +291,19 @@ Future<Podcast> ownToDevice(Feeds feeds, Podcasts podcasts, Feed feed) async {
   if (library.podcasts.where((p) => p.cloudFeedId == feed.id).firstOrNull case final cloud?) {
     library.copyListening(cloud.id, show.id);
   }
-  await feeds.remove(feed);
+  // Still in the Cloud: the show here goes, or it would be there twice.
+  try {
+    await feeds.remove(feed);
+  } catch (_) {
+    await podcasts.unfollow(show);
+    rethrow;
+  }
+  // Moved; a picture that won't come along doesn't undo that.
+  if (picture != null) {
+    try {
+      await podcasts.setOwnArtwork(show, picture);
+    } catch (_) {}
+  }
   return library.podcast(show.id)!;
 }
 
@@ -600,50 +613,23 @@ final class _AccountPanelState extends State<AccountPanel> {
   }
 
   Widget _signIn(TextTheme text, Account account) {
-    final (title, body, action) = switch (account) {
-      Account(restoring: true) => ('Signing in…', null, null),
-      Account(signingIn: final token?) => (
-        'Finish in your browser',
-        'Allow the app on the page that opened. It comes back here when you do.',
-        TextButton(style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm), onPressed: token.cancel, child: const Text('Cancel')),
-      ),
-      _ => (
-        'Your YouTube, as podcasts',
-        'Follow YouTube playlists and channels, or gather any videos into a podcast of your own. '
-          'ListenJar keeps them as podcast feeds in the cloud, so new episodes reach your Library and any podcast app you use. '
-          'This device fetches them from YouTube and uploads them; the plans pay for the storage.',
-        brand.accentShadow(
-          enabled: true,
-          child: TextButton.icon(
-            style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
-            onPressed: () => unawaited(signIn(account)),
-            iconAlignment: IconAlignment.end,
-            icon: const Arrow(),
-            label: const Text('Sign in with your browser'),
-          ),
-        ),
-      ),
-    };
+    if (account.restoring) return Text('Signing in…', style: text.titleMedium);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: text.titleMedium),
-      if (body != null) ...[
-        const SizedBox(height: 6),
-        Text(body, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
-      ],
-      if (account.authError case final error?) ...[
-        const SizedBox(height: 14),
-        Text(failure('Couldn’t sign in', error, other: 'Try again.'), style: text.bodyMedium!.copyWith(color: brand.danger)),
-      ],
-      if (action != null || !account.restoring) ...[
-        const SizedBox(height: 18),
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          ?action,
-          if (!account.restoring && account.signingIn == null)
-            TextButton(
-              style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-              onPressed: () => _plans('ListenJar Cloud plans'),
-              child: const Text('See plans'),
-            ),
+      SignInForm(account: account, describe: (error) => failure('Couldn’t sign in', error, other: 'Try again.')),
+      if (account.signingIn == null) ...[
+        const SizedBox(height: 20),
+        const Divider(color: brand.line, height: 1),
+        const SizedBox(height: 16),
+        Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 8, children: [
+          Text(
+            'This device fetches videos from YouTube and uploads them; the plans pay for the storage.',
+            style: text.bodySmall!.copyWith(color: brand.fgSoft),
+          ),
+          TextButton(
+            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+            onPressed: () => _plans('ListenJar Cloud plans'),
+            child: const Text('See plans'),
+          ),
         ]),
       ],
     ]);

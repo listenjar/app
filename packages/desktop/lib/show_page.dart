@@ -16,6 +16,7 @@ import 'artwork.dart' show artworkExtensions;
 import 'cloud.dart' show CloudShowPage, failure, moveToCloud;
 import 'library.dart';
 import 'menu.dart';
+import 'plans.dart' show showPlans;
 import 'shared_links.dart' show LocalOwn;
 import 'shell.dart';
 import 'theme.dart' as brand;
@@ -51,7 +52,7 @@ final class _ShowPageState extends State<ShowPage> {
   Widget build(BuildContext context) {
     final s = Services.of(context);
     return ListenableBuilder(
-      listenable: Listenable.merge([s.library, s.podcasts, s.feeds]),
+      listenable: Listenable.merge([s.library, s.podcasts, s.feeds, s.account]),
       builder: (context, _) {
         final show = s.library.podcast(widget.podcastId);
         // One of the listener's ListenJar feeds: its page says how each
@@ -69,7 +70,10 @@ final class _ShowPageState extends State<ShowPage> {
         return PageBody(children: [
           if (Navigator.of(context).canPop()) backButton(context, 'Back'),
           _header(context, show),
-          if (show.refreshError case final error?) ...[
+          if (s.podcasts.paused(show)) ...[
+            const SizedBox(height: 16),
+            _paused(context),
+          ] else if (show.refreshError case final error?) ...[
             const SizedBox(height: 16),
             problem(context, 'Couldn’t refresh this show: $error'),
           ],
@@ -122,6 +126,34 @@ final class _ShowPageState extends State<ShowPage> {
           ],
         ]);
       },
+    );
+  }
+
+  /// A playlist or channel here without a plan: what it has still plays,
+  /// and new videos wait until there's a plan again.
+  Widget _paused(BuildContext context) {
+    final signedIn = Services.of(context).account.user != null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        const Icon(Icons.pause_circle_outline_rounded, size: 18, color: brand.accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'New videos are paused: following playlists and channels takes a plan. Everything here still plays.',
+            style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.fg),
+          ),
+        ),
+        const SizedBox(width: 8),
+        TextButton(
+          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          onPressed: signedIn
+            ? () => unawaited(showPlans(context, title: 'Keep getting new videos'))
+            : Navigation.of(context).openSettings,
+          child: Text(signedIn ? 'See plans' : 'Sign in'),
+        ),
+      ]),
     );
   }
 
@@ -423,7 +455,7 @@ final class _ShowPageState extends State<ShowPage> {
     );
     if (sure != true || !context.mounted) return;
     final navigator = Navigator.of(context);
-    await (show.isOwn ? s.podcasts.deleteOwn(show) : s.podcasts.unfollow(show));
+    await s.podcasts.unfollow(show);
     if (navigator.canPop()) navigator.pop();
   }
 

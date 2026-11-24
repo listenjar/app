@@ -84,7 +84,16 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     widget.links.addListener(_linksArrived);
     // Links from the launch wait for the first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) => _linksArrived());
+    // The macOS app menu's Settings… (macos/Runner/AppDelegate.swift) closes
+    // Now Playing and any dialog over the shell first.
+    _menu.setMethodCallHandler((call) async {
+      if (call.method != 'settings' || !mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      openSettings();
+    });
   }
+
+  static const _menu = MethodChannel('listenjar/menu');
 
   bool _opening = false;
 
@@ -106,6 +115,7 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   @override
   void dispose() {
     widget.links.removeListener(_linksArrived);
+    _menu.setMethodCallHandler(null);
     if (_navigation.target == this) _navigation.target = null;
     _lifecycle.dispose();
     search.dispose();

@@ -124,6 +124,18 @@ tasks:
     options:
       cache: true
       runInCI: false
+  reinstall:
+    description: >-
+      Build the release macOS app with Sparkle's update key, sign it with this Mac's Developer ID
+      (not notarized) and replace /Applications/ListenJar.app with it (tool/reinstall-macos.sh).
+    deps: [~:codegen, ~:scripts]
+    script: tool/reinstall-macos.sh
+    inputs: []
+    options:
+      cache: false
+      runInCI: false
+      outputStyle: stream
+      os: macos
   package-macos:
     description: >-
       Build the release macOS app with Sparkle's update key and package it as a DMG
@@ -166,7 +178,9 @@ tasks:
       runInCI: true
       os: linux
   package-android:
-    description: Build and package build/release/ListenJar-<version>-android.apk (debug signed for now).
+    description: >-
+      Build and package build/release/ListenJar-<version>-android.apk, signed with the release key
+      and checked against passkeys.ts (tool/release.dart).
     deps: [~:codegen, ~:scripts]
     command: dart tool/release.dart build android
     inputs: []

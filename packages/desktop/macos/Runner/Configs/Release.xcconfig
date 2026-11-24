@@ -3,3 +3,6 @@
 
 // The URL scheme the sign-in page opens the app with (appScheme in lib/config.dart).
 LISTENJAR_URL_SCHEME = listenjar
+
+// The app's bundle ID (Debug.xcconfig has the dev build's).
+LISTENJAR_BUNDLE_ID = com.listenjar.desktop

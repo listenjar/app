@@ -8,13 +8,36 @@ info:
     `/public.yaml`.
 
 
-    Signing in (RFC 8252, loopback redirect with PKCE): the app listens on
-    `http://127.0.0.1:<port>/callback` and opens
-    `https://listenjar.com/desktop/authorize?redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`
-    in the browser. The person signs in there and allows the app; the browser
-    comes back to the app's address with `code` and `state` (or
-    `error=access_denied`), and the app trades the code for a token with
-    `createDesktopToken`. It sends the token as `Authorization: Bearer <token>`.
+    Signing in: the app signs in by itself, in the same three ways as
+    listenjar.com, each into the same account (a user is their email), and
+    each answering a `Session` whose token lasts a year. It sends the token as
+    `Authorization: Bearer <token>`.
+
+
+    - Google (RFC 8252, loopback redirect with PKCE): the app listens on
+      `http://127.0.0.1:<port>/`, asks `desktopGoogleAuthUrl` for Google's
+      address with that redirect, its `state` and its PKCE challenge, and opens
+      it in the browser. Google comes back to the app's address with `code`
+      and `state` (or `error=access_denied`), and the app trades the code with
+      `signInWithGoogle`. Google never shows in a web view.
+
+    - Email and password: `signInWithPassword`. `signUp` and
+      `requestPasswordLink` email a link that opens on listenjar.com, which
+      makes the account or sets its password; the person then signs in here
+      with that password.
+
+    - Passkeys: the platform's own passkey prompt (macOS and iOS with the
+      `webcredentials:listenjar.com` Associated Domain, Android's Credential
+      Manager, Windows Hello) answers `passkeySignInOptions`, and
+      `signInWithPasskey` checks the answer. The passkeys are listenjar.com's,
+      so one made on the website signs in here too.
+
+
+    The app used to sign in through the browser instead: it opens
+    `https://listenjar.com/desktop/authorize?redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`,
+    the person signs in there and allows the app, and the browser comes back
+    to the app's loopback address with a code for `createDesktopToken`. That
+    still works.
 
 
     Feeds: the listener's feeds are under `/me/feeds`. The app adds a YouTube
@@ -399,6 +422,186 @@ paths:
           description: The token is missing, revoked or expired.
         "404":
           description: The listener has no such episode.
+  /desktop/google/url:
+    get:
+      operationId: desktopGoogleAuthUrl
+      summary: Google's authorization URL for the app to open in the browser
+      description: >-
+        For the "ListenJar desktop" Google client, which asks for `openid
+        profile email` and sends the browser back to `redirectUri`, the app's
+        loopback address. The app keeps `state` and the PKCE verifier behind
+        `codeChallenge` (S256) until Google does.
+      security: []
+      parameters:
+        - name: redirectUri
+          in: query
+          required: true
+          description: "`http://127.0.0.1:<port>/`, `http://[::1]:<port>/` or `http://localhost:<port>/`."
+          schema:
+            type: string
+            format: uri
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: codeChallenge
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The URL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUrl"
+        "400":
+          description: A parameter is missing, or the redirect isn't a loopback address with a port.
+  /desktop/google:
+    post:
+      operationId: signInWithGoogle
+      summary: Trade Google's authorization code for the app's token
+      description: >-
+        Exchanges the code with Google, reads the person's Google account and
+        signs into its user: the one it signed in before, else the one with its
+        verified email, else a new one.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleSignIn"
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: Google refused the code, or the account has no verified email.
+  /desktop/password:
+    post:
+      operationId: signInWithPassword
+      summary: Sign in with an email and password
+      description: >-
+        Ten wrong passwords for an address within 15 minutes, on the website
+        or here, and it answers 429 until the oldest is that old.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordSignIn"
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: No email or password.
+        "401":
+          description: >-
+            No account with that email and password: none at all, one that
+            signs in only with Google or passkeys, or a wrong password.
+        "429":
+          description: Too many wrong passwords for the address lately.
+  /desktop/signups:
+    post:
+      operationId: signUp
+      summary: Start a password sign-up
+      description: >-
+        Emails the address a link to listenjar.com, valid for 24 hours, that
+        makes the account with this password; the person then signs in here
+        with it. An address that has an account gets an email saying so
+        instead, with a link that sets a password. At most three emails of
+        either kind go to an address in 10 minutes. The answer is the same
+        either way, so it never tells who has an account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignUp"
+      responses:
+        "202":
+          description: An email is on its way, whether or not the address has an account.
+        "400":
+          description: Not an email address, or the password is shorter than 8 or longer than 256 characters.
+  /desktop/password-resets:
+    post:
+      operationId: requestPasswordLink
+      summary: Email a link that sets the account's password
+      description: >-
+        Emails the address, if it has an account, a link to listenjar.com,
+        valid for an hour, that sets a new password, or a first one for an
+        account that signs in only with Google or passkeys. Setting it signs
+        the account out everywhere, this app too. At most three go to an
+        address in 10 minutes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordLinkRequest"
+      responses:
+        "202":
+          description: Sent if the address has an account.
+        "400":
+          description: Not an email address.
+  /desktop/passkey/options:
+    post:
+      operationId: passkeySignInOptions
+      summary: Options for signing in with any passkey
+      description: >-
+        PublicKeyCredentialRequestOptionsJSON for the platform's passkey
+        prompt, with `rpId` (listenjar.com; localhost in development) and no
+        credentials listed, so it offers every ListenJar passkey it has. The
+        challenge works once, for five minutes.
+      security: []
+      responses:
+        "200":
+          description: PublicKeyCredentialRequestOptionsJSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnJson"
+  /desktop/passkey:
+    post:
+      operationId: signInWithPasskey
+      summary: Sign in with a passkey
+      description: >-
+        Takes the platform's answer as AuthenticationResponseJSON. Its client
+        data must be signed for `https://<rpId>` (macOS, iOS, Windows) or by
+        an Android build that listenjar.com's assetlinks.json lists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAuthnJson"
+      responses:
+        "200":
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: Not a WebAuthn answer.
+        "401":
+          description: >-
+            The passkey belongs to no account (removed, perhaps), or the
+            answer doesn't check out.
   /desktop/token:
     post:
       operationId: createDesktopToken
@@ -677,6 +880,59 @@ components:
           description: Bearer token for the app. It lasts a year.
         user:
           $ref: "#/components/schemas/User"
+    AuthUrl:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+    GoogleSignIn:
+      type: object
+      required: [code, codeVerifier, redirectUri]
+      properties:
+        code:
+          type: string
+          description: The `code` Google added to the redirect.
+        codeVerifier:
+          type: string
+          description: The PKCE verifier behind the `codeChallenge` of `desktopGoogleAuthUrl`.
+        redirectUri:
+          type: string
+          format: uri
+          description: The `redirectUri` of `desktopGoogleAuthUrl`.
+    PasswordSignIn:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    SignUp:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 256
+    PasswordLinkRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    WebAuthnJson:
+      type: object
+      description: >-
+        A WebAuthn options or credential object in its JSON form (WebAuthn
+        Level 3), as SimpleWebAuthn's server takes and gives them.
+      additionalProperties: true
     DesktopTokenRequest:
       type: object
       required: [code, codeVerifier, redirectUri]

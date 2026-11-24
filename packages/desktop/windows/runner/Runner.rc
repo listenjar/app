@@ -98,9 +98,15 @@ BEGIN
             VALUE "FileDescription", "ListenJar" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "listenjar" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.listenjar. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 ListenJar. All rights reserved." "\0"
             VALUE "OriginalFilename", "listenjar.exe" "\0"
+#ifdef _DEBUG
+            // path_provider keeps the app's data under CompanyName\ProductName
+            // in AppData: debug builds keep theirs apart from a release's.
+            VALUE "ProductName", "ListenJar Dev" "\0"
+#else
             VALUE "ProductName", "ListenJar" "\0"
+#endif
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

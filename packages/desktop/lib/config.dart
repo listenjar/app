@@ -6,14 +6,16 @@ import 'package:flutter/foundation.dart';
 /// directory and YouTube (README.md): no telemetry, tracing or crash reports.
 typedef Config = ({Uri api, Uri web});
 
-/// Release builds.
+/// Release and profile builds.
 final prodConfig = (api: Uri.parse('https://api.listenjar.com'), web: Uri.parse('https://listenjar.com'));
 
 /// Debug builds: the backend's and the website's local dev servers
 /// (`moon run dev` in the listenjar monorepo).
 final devConfig = (api: Uri.parse('http://localhost:8787'), web: Uri.parse('http://localhost:3000'));
 
-Config currentConfig() => kReleaseMode ? prodConfig : devConfig;
+// The same switch as the token's storage (signin.dart), [appScheme] and each
+// platform's app ID: a debug build is a separate app from a release.
+Config currentConfig() => kDebugMode ? devConfig : prodConfig;
 
 /// The URL scheme the app opens on: the sign-in callback page in the browser
 /// links to `<scheme>://sign-in` to bring the app back to the front. Debug

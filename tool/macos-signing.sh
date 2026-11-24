@@ -2,8 +2,8 @@
 # For the release workflow's macOS job (.github/workflows/release.yaml):
 # `setup` imports the Developer ID certificate and an App Store Connect API
 # key from the desktop-release environment's secrets into a throwaway
-# keychain, with a notarytool profile, and hands tool/package-macos.sh their
-# names; `cleanup` deletes the keychain and the files and restores the
+# keychain, with a notarytool profile, writes out the provisioning profile,
+# and hands tool/package-macos.sh their names; `cleanup` deletes the keychain and the files and restores the
 # keychain list.
 set -euo pipefail
 
@@ -40,6 +40,12 @@ while IFS= read -r previous; do keychains+=("$previous"); done < "$directory/key
 security list-keychains -d user -s "${keychains[@]}"
 security find-identity -v -p codesigning "$keychain" | grep -F "\"$MACOS_SIGNING_IDENTITY\"" > /dev/null
 xcrun notarytool store-credentials listenjar-desktop-notary --keychain "$keychain" --key "$directory/notary.p8" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" > /dev/null
+# The provisioning profile for passkeys (tool/sign-macos.sh), once the
+# environment has one.
+if [[ -n "${MACOS_PROVISIONING_PROFILE_BASE64:-}" ]]; then
+  printf '%s' "$MACOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$directory/developer-id.provisionprofile"
+  printf 'LISTENJAR_PROVISIONING_PROFILE=%s\n' "$directory/developer-id.provisionprofile" >> "${GITHUB_ENV:?}"
+fi
 {
   printf 'LISTENJAR_SIGNING_IDENTITY=%s\n' "$MACOS_SIGNING_IDENTITY"
   printf 'LISTENJAR_SIGNING_KEYCHAIN=%s\n' "$keychain"

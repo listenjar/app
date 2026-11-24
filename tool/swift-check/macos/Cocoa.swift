@@ -12,7 +12,6 @@ open class NSApplication: NSResponder {
   public enum ActivationPolicy { case regular, accessory, prohibited }
   @discardableResult open func setActivationPolicy(_ policy: ActivationPolicy) -> Bool { true }
   open func activate() {}
-  open func activate(ignoringOtherApps flag: Bool) {}
 }
 
 public let NSApp = NSApplication()

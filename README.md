@@ -57,9 +57,10 @@ Flutter 3.50 and [oasmith](https://github.com/responsibleapi/oasmith), and [aube
 for the YouTube.js bundle, all pinned in [mise.toml](mise.toml). Initialize submodules recursively first.
 
 ```sh
-moon run desktop:dev     # macOS against backend:dev on :8787, hot reloads on save (tool/dev.dart)
-moon run desktop:build   # release macOS app in packages/desktop/build/macos
-moon run desktop:check   # flutter analyze
+moon run desktop:dev       # macOS against backend:dev on :8787, hot reloads on save (tool/dev.dart)
+moon run desktop:build     # release macOS app in packages/desktop/build/macos
+moon run desktop:reinstall # it, Developer ID signed, into /Applications
+moon run desktop:check     # flutter analyze
 ```
 
 `desktop:codegen` (public.yaml → `lib/backend`, [pricing](pricing) → `lib/pricing`) and `desktop:scripts` (packages/youtubejs →
@@ -108,22 +109,33 @@ Every push to master releases the app:
    every platform on its own runner into `build/release/`: `desktop:package-macos` (a Developer
    ID signed, notarized DMG; [tool/package-macos.sh](tool/package-macos.sh)),
    [tool/package-windows.ps1](tool/package-windows.ps1) (an Inno Setup installer),
-   `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK, signed with the debug
-   key for now).
+   `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK signed with the
+   permanent release key, which [tool/release.dart](tool/release.dart) checks).
 3. [tool/release.ts](tool/release.ts) signs the DMG and the installer for the updaters
    (Ed25519), writes `appcast-macos.xml` and `appcast-windows-x64.xml`, uploads all four with
    their manifests, and only then makes the release the latest, whose appcasts the apps read.
 
 Secrets live only in GitHub and, on a Mac, in `~/.secrets/listenjar`; never in this repo. On
 GitHub they are in the `desktop-release` environment, which only `v*` tags can use, so the
-macos, windows and publish jobs run only on a release tag; `moon run desktop-signing:restore`
+macos, windows, android and publish jobs run only on a release tag; `moon run desktop-signing:restore`
 in the listenjar monorepo fills it from `~/.secrets/listenjar/desktop-signing`.
 
 - Secrets: `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_NOTARY_KEY_P8_BASE64`,
-  `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID` (Developer ID signing and notarization), and
-  `MACOS_UPDATE_SEED_BASE64`, `WINDOWS_UPDATE_SEED_BASE64` (each updater's Ed25519 private seed).
-- Variables: `MACOS_SIGNING_IDENTITY`, `MACOS_TEAM_ID`, and `MACOS_UPDATE_PUBLIC_KEY`,
-  `WINDOWS_UPDATE_PUBLIC_KEY` (the matching public keys, which the builds compile in).
+  `MACOS_NOTARY_KEY_ID`, `MACOS_NOTARY_ISSUER_ID` (Developer ID signing and notarization),
+  `MACOS_UPDATE_SEED_BASE64`, `WINDOWS_UPDATE_SEED_BASE64` (each updater's Ed25519 private seed),
+  and `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` (the APK release key, a PKCS12
+  keystore whose store password is also the key's).
+- Variables: `MACOS_SIGNING_IDENTITY`, `MACOS_TEAM_ID`, `MACOS_UPDATE_PUBLIC_KEY`,
+  `WINDOWS_UPDATE_PUBLIC_KEY` (the matching public keys, which the builds compile in), and
+  `ANDROID_KEY_ALIAS` (the APK release key's alias).
+
+Android updates an installed app only with an APK signed by the same key, so that key never
+changes, and release builds are signed with nothing else: debug builds with the debug key,
+release builds ([build.gradle.kts](packages/desktop/android/app/build.gradle.kts)) with the
+keystore `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` name, or on
+a Mac without them with `~/.secrets/listenjar/desktop-signing/android`'s; with neither, a release
+build fails. `desktop:package-android` also refuses an APK whose certificate isn't the one
+[passkeys.ts](passkeys.ts) lists.
 
 This repo builds on its own, without the monorepo: [mise.toml](mise.toml) pins every tool the
 DMG and the APK need (Flutter, Node, aube, oasmith, moon, Java and the Android SDK; Xcode aside),

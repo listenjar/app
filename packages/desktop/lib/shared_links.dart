@@ -18,7 +18,6 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'backend/api.dart' show Feed, Plan, SourceKind;
-import 'cloud.dart' show signIn;
 import 'library.dart' show Podcast;
 import 'config.dart' show appScheme;
 import 'links.dart';
@@ -370,7 +369,7 @@ Future<void> _guard(BuildContext context, Future<void> Function() action) async 
 }
 
 /// Offers to sign in; yes closes Now Playing, if it's open, for Settings,
-/// where the account says how signing in goes, and opens the browser.
+/// whose account panel has the ways to sign in.
 Future<void> _askToSignIn(BuildContext context, {required String title, required String body}) async {
   final text = Theme.of(context).textTheme;
   final navigation = Navigation.of(context);
@@ -395,10 +394,8 @@ Future<void> _askToSignIn(BuildContext context, {required String title, required
     ),
   );
   if (go != true || !context.mounted) return;
-  final account = Services.of(context).account;
   root.popUntil((route) => route.isFirst);
   navigation.openSettings();
-  await signIn(account);
 }
 
 sealed class _Where {

@@ -62,6 +62,9 @@ final class Feeds extends ChangeNotifier {
   final _http = HttpClient()..connectionTimeout = const Duration(seconds: 30);
 
   List<Feed> feeds = const [];
+
+  /// Feeds the listener removed here, rather than the cleanup.
+  final removed = <String>{};
   Object? feedsError;
   Future<void>? _loading;
   bool get loading => _loading != null;
@@ -290,18 +293,14 @@ final class Feeds extends ChangeNotifier {
     return updated;
   }
 
-  /// Removes the feed and everything uploaded to it.
+  /// Removes the feed and everything uploaded to it; throws when it
+  /// couldn't, and the feed stays.
   Future<void> remove(Feed feed) async {
-    try {
-      await _account.api.deleteFeed(feedId: feed.id).asCancellable(_timeout());
-      feeds = feeds.where((f) => f.id != feed.id).toList();
-      _sync?.updateFeeds(feeds);
-      _madeRoom();
-    } on CancelledException {
-      return;
-    } catch (e) {
-      feedsError = e;
-    }
+    await _account.api.deleteFeed(feedId: feed.id).asCancellable(_timeout());
+    removed.add(feed.id);
+    feeds = feeds.where((f) => f.id != feed.id).toList();
+    _sync?.updateFeeds(feeds);
+    _madeRoom();
     notifyListeners();
   }
 

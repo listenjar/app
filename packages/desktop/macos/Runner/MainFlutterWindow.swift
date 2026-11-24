@@ -45,6 +45,9 @@ class MainFlutterWindow: NSWindow {
     // Links opened with the app (AppDelegate.swift).
     SharedLinks.shared = SharedLinks(messenger: flutterViewController.engine.binaryMessenger)
 
+    // The app menu's Settings… (AppDelegate.swift).
+    AppMenu.shared = AppMenu(messenger: flutterViewController.engine.binaryMessenger)
+
     // In-app updates (AppDelegate.swift).
     Updates.shared = Updates(messenger: flutterViewController.engine.binaryMessenger)
 

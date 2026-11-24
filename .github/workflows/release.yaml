@@ -5,7 +5,9 @@
 # tool/package-windows.ps1 on Windows), `node tool/release.ts prepare` signs
 # the macOS and Windows packages for their updaters and writes their appcasts
 # (lib/updates.dart), and publish uploads all four platforms and only then
-# makes the release the latest, which is what the updaters read.
+# makes the release the latest, which is what the updaters read. The APK is
+# signed with the one permanent release key (tool/release.dart checks it
+# against passkeys.ts).
 #
 # The signing secrets and variables live in the desktop-release environment,
 # which only v* tags can use (apps/desktop-signing in listenjar/listenjar
@@ -77,6 +79,7 @@ jobs:
           MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.MACOS_PROVISIONING_PROFILE_BASE64 }}
         run: bash tool/macos-signing.sh setup
       # https://github.com/actions/runner-images/issues/14924
       - name: Fetch notarization tickets over TCP
@@ -201,6 +204,9 @@ jobs:
   android:
     needs: generate
     runs-on: ubuntu-24.04
+    environment: desktop-release
+    env:
+      ANDROID_KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -215,7 +221,19 @@ jobs:
           version: ${{ env.MISE_VERSION }}
           install_args: flutter node aube github:responsibleapi/oasmith aqua:moonrepo/moon java android-sdk
       - run: flutter pub get --enforce-lockfile
-      - run: moon run desktop:package-android
+      - name: Write the release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          printenv ANDROID_KEYSTORE_BASE64 | base64 --decode > "$RUNNER_TEMP/release.p12"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+      - name: Build, sign with the release key and package the APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: moon run desktop:package-android
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
       - name: Write its manifest
         run: >-
           node tool/release.ts prepare android

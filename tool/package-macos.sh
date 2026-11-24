@@ -10,6 +10,8 @@
 #                                and staple the app and the DMG
 #   LISTENJAR_NOTARY_PROFILE     notarytool's keychain profile for that
 #   LISTENJAR_SIGNING_KEYCHAIN   the keychain holding both (tool/macos-signing.sh)
+#   LISTENJAR_PROVISIONING_PROFILE  embedded for listenjar.com's passkeys
+#                                (tool/sign-macos.sh)
 #
 # Without an identity the app keeps its ad-hoc signature: enough to try the
 # DMG and updates on this Mac, not to hand out.

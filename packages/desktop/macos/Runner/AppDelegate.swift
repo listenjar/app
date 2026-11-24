@@ -37,17 +37,37 @@ class AppDelegate: FlutterAppDelegate {
     showWindow()
   }
 
+  /// Settings… in the app menu (MainMenu.xib), which reaches the app
+  /// delegate along the responder chain: the window, back if hidden, opens
+  /// Settings (lib/shell.dart).
+  @objc func openSettings(_ sender: Any?) {
+    showWindow()
+    AppMenu.shared?.openSettings()
+  }
+
   private func showWindow() {
     NSApp.setActivationPolicy(.regular)
     if let window = mainFlutterWindow {
       window.deminiaturize(nil)
       window.makeKeyAndOrderFront(nil)
     }
-    if #available(macOS 14.0, *) {
-      NSApp.activate()
-    } else {
-      NSApp.activate(ignoringOtherApps: true)
-    }
+    NSApp.activate()
+  }
+}
+
+/// The app menu's items that Dart answers, for lib/shell.dart.
+final class AppMenu {
+  /// Made with the window (MainFlutterWindow.swift).
+  static var shared: AppMenu?
+
+  private let channel: FlutterMethodChannel
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "listenjar/menu", binaryMessenger: messenger)
+  }
+
+  func openSettings() {
+    channel.invokeMethod("settings", arguments: nil)
   }
 }
 
@@ -144,12 +164,13 @@ final class Updates: NSObject {
   }
 
   /// "Check for Updates…" under About in the app menu, as Mac apps have it.
-  /// Sparkle's controller enables it only while a check can start.
+  /// Sparkle's controller enables it only while a check can start; a build
+  /// without an updater shows it disabled.
   func addMenuItem() {
-    guard let controller, let menu = NSApp.mainMenu?.items.first?.submenu else { return }
+    guard let menu = NSApp.mainMenu?.items.first?.submenu else { return }
     // SPUStandardUpdaterController's checkForUpdates(_:), by name, which
     // tool/swift-check can follow on Linux, where #selector can't.
-    let item = NSMenuItem(title: "Check for Updates…", action: NSSelectorFromString("checkForUpdates:"), keyEquivalent: "")
+    let item = NSMenuItem(title: "Check for Updates…", action: controller == nil ? nil : NSSelectorFromString("checkForUpdates:"), keyEquivalent: "")
     item.target = controller
     menu.insertItem(item, at: min(1, menu.numberOfItems))
   }

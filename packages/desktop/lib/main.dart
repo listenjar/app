@@ -47,6 +47,12 @@ Future<void> main([List<String> arguments = const []]) async {
   final library = await Library.open();
   final downloads = Downloads(library, youtube);
   final podcasts = Podcasts(library, downloads, youtube)..paid = () => account.restoring ? null : account.user?.plan == Plan.paid;
+  var wasPaid = podcasts.paid();
+  account.addListener(() {
+    if (podcasts.paid() == wasPaid) return;
+    wasPaid = podcasts.paid();
+    podcasts.planChanged();
+  });
   final player = await Player.start(library, youtube, downloads);
   unawaited(downloads.start());
   CloudShows(account, feeds, podcasts);
@@ -281,7 +287,7 @@ final class CloudShows {
     if (mapEquals(now, _seen)) return;
     final before = _seen;
     _seen = now;
-    unawaited(_podcasts.followCloud(_feeds.feeds).then((_) async {
+    unawaited(_podcasts.followCloud(_feeds.feeds, removed: _feeds.removed).then((_) async {
       for (final MapEntry(key: id, value: (_, count)) in now.entries) {
         final was = before[id];
         if (was != null && was.$2 != count) await _podcasts.cloudPublished(id);

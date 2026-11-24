@@ -3,3 +3,9 @@
 
 // The URL scheme the sign-in page opens the app with (appScheme in lib/config.dart).
 LISTENJAR_URL_SCHEME = listenjar-dev
+
+// Debug builds are their own app: their own sandbox container (library,
+// downloads, the local backend's token) and Keychain, so a dev build never
+// writes into an installed release's data. AppInfo.xcconfig and the Share
+// extension take their bundle IDs from it.
+LISTENJAR_BUNDLE_ID = com.listenjar.desktop.dev

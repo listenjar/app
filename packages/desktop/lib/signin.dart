@@ -1,8 +1,15 @@
-// Signing in follows RFC 8252 (OAuth for native apps): the app listens on a
-// loopback port, opens listenjar.com/desktop/authorize in the browser, where
-// the person signs in and allows the app, and the browser comes back to the
-// port with a one-time code. The app trades the code, with the PKCE verifier
-// only it knows, for its own token (POST /desktop/token in public.yaml).
+// Signing in, by the app itself, in the three ways listenjar.com has
+// (public.yaml): Google, an email and password, and passkeys. Each answers a
+// session whose token the system credential store keeps.
+//
+// Google follows RFC 8252 (OAuth for native apps): the app listens on a
+// loopback port, opens Google in the browser for the "ListenJar desktop"
+// client, and Google comes back to the port with a one-time code, which the
+// API trades, with the PKCE verifier only the app knows, for the app's
+// token. Passkeys are listenjar.com's, through the platform's own prompt
+// (package:passkeys' platform halves): macOS and iOS with the app's
+// Associated Domain, Android's Credential Manager and Windows Hello. Linux
+// has none.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -12,13 +19,16 @@ import 'package:cancellation_token/cancellation_token.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:passkeys_platform_interface/passkeys_platform_interface.dart';
+import 'package:passkeys_platform_interface/types/types.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'backend/api.dart';
 import 'config.dart';
 
-/// How long the app waits for the browser.
+/// How long the app waits for the browser, or the passkey prompt.
 const signInTimeout = Duration(minutes: 10);
 
 /// The token's key in the system credential store.
@@ -28,10 +38,48 @@ const _tokenKey = 'api-token';
 // provisioning, so unsigned and ad-hoc builds can keep the token too.
 const _storage = FlutterSecureStorage(mOptions: MacOsOptions(usesDataProtectionKeychain: false));
 
-final class AccessDenied implements Exception {
+/// Why the API or the person said no, each with what to say about it.
+sealed class SignInRefused implements Exception {
+  const SignInRefused();
+}
+
+/// Cancel on Google's page.
+final class AccessDenied extends SignInRefused {
   const AccessDenied();
   @override
   String toString() => 'access was not allowed in the browser';
+}
+
+/// Google refused the code, or the account has no verified email.
+final class GoogleRefused extends SignInRefused {
+  const GoogleRefused();
+}
+
+/// No account with that email and password.
+final class WrongPassword extends SignInRefused {
+  const WrongPassword();
+}
+
+/// Ten wrong passwords for the address in 15 minutes.
+final class TooManyPasswords extends SignInRefused {
+  const TooManyPasswords();
+}
+
+/// The passkey belongs to no account, or its answer didn't check out.
+final class UnknownPasskey extends SignInRefused {
+  const UnknownPasskey();
+}
+
+/// The platform has no ListenJar passkey to offer.
+final class NoPasskey extends SignInRefused {
+  const NoPasskey();
+}
+
+/// The platform won't use listenjar.com's passkeys for this build: one
+/// without the Associated Domain, or a development build, whose passkeys are
+/// localhost's.
+final class PasskeysUnavailable extends SignInRefused {
+  const PasskeysUnavailable();
 }
 
 /// The API client, sending `Authorization: Bearer` while [token] has one.
@@ -84,11 +132,20 @@ String _randomString() {
   return base64Url.encode([for (var i = 0; i < 32; i++) random.nextInt(256)]).replaceAll('=', '');
 }
 
-/// Runs the browser round trip and returns the app's new session. [open]
-/// shows a URL in the default browser.
-Future<Session> signIn(
+/// [call]'s answer, or [refused] for the [status] it answers.
+Future<T> _refusing<T>(Future<T> call, int status, SignInRefused refused) async {
+  try {
+    return await call;
+  } on ApiStatusException catch (e) {
+    if (e.statusCode == status) throw refused;
+    rethrow;
+  }
+}
+
+/// Signs in with Google: opens Google's page with [open] in the default
+/// browser and waits for it to come back to the app's loopback address.
+Future<Session> signInWithGoogle(
   PublicApiClient api,
-  Uri web,
   Future<void> Function(Uri) open,
   CancellationToken cancellation,
 ) async {
@@ -101,12 +158,12 @@ Future<Session> signIn(
   // send the browser elsewhere (RFC 8252 section 8.3).
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   try {
-    final redirectUri = 'http://127.0.0.1:${server.port}/callback';
+    final redirectUri = 'http://127.0.0.1:${server.port}/';
     final code = CancellableCompleter<String>(token);
     server.listen((request) async {
       final query = request.uri.queryParameters;
       final response = request.response;
-      if (request.method != 'GET' || request.uri.path != '/callback') {
+      if (request.method != 'GET' || request.uri.path != '/') {
         response.statusCode = HttpStatus.notFound;
       } else if (query['state'] != state) {
         response
@@ -117,27 +174,127 @@ Future<Session> signIn(
         final denied = query['error'] != null || value.isEmpty;
         response.headers.contentType = ContentType.html;
         response.write(denied
-          ? _callbackPage('Not signed in', 'You chose Cancel, so the app isn’t signed in. Sign in again from the app.')
-          : _callbackPage('Back to ListenJar', 'The app is signed in. You can close this tab.'));
+          ? _callbackPage('Not signed in', 'You chose Cancel on Google’s page, so the app isn’t signed in. Sign in again from the app.')
+          : _callbackPage('Back to ListenJar', 'The app is finishing signing you in. You can close this tab.'));
         if (!code.isCompleted) denied ? code.completeError(const AccessDenied()) : code.complete(value);
       }
       await response.close();
     });
 
-    await open(web.resolve('/desktop/authorize').replace(queryParameters: {
-      'redirect_uri': redirectUri,
-      'code_challenge': challenge,
-      'code_challenge_method': 'S256',
-      'state': state,
-    }));
-    return await api.createDesktopToken(body: DesktopTokenRequest(
-      code: await code.future,
-      codeVerifier: verifier,
-      redirectUri: redirectUri,
-    )).asCancellable(token);
+    final google = await api
+      .desktopGoogleAuthUrl(redirectUri: redirectUri, state: state, codeChallenge: challenge)
+      .asCancellable(token);
+    await open(Uri.parse(google.url));
+    return await _refusing(
+      api.signInWithGoogle(body: GoogleSignIn(code: await code.future, codeVerifier: verifier, redirectUri: redirectUri)),
+      HttpStatus.badRequest,
+      const GoogleRefused(),
+    ).asCancellable(token);
   } finally {
     await server.close(force: true);
   }
+}
+
+/// Signs in with an email and password.
+Future<Session> signInWithPassword(PublicApiClient api, String email, String password, CancellationToken token) async {
+  try {
+    return await api.signInWithPassword(body: PasswordSignIn(email: email.trim(), password: password)).asCancellable(token);
+  } on ApiStatusException catch (e) {
+    throw switch (e.statusCode) {
+      HttpStatus.badRequest || HttpStatus.unauthorized => const WrongPassword(),
+      HttpStatus.tooManyRequests => const TooManyPasswords(),
+      _ => e,
+    };
+  }
+}
+
+/// Emails [email] a link that makes its account with [password], or, when
+/// it has one, a link that sets its password. False when the API refused
+/// the address or the password's length.
+Future<bool> signUp(PublicApiClient api, String email, String password, CancellationToken token) =>
+  _accepted(api.signUp(body: SignUp(email: email.trim(), password: password)), token);
+
+/// Emails [email], if it has an account, a link that sets its password.
+Future<bool> requestPasswordLink(PublicApiClient api, String email, CancellationToken token) =>
+  _accepted(api.requestPasswordLink(body: PasswordLinkRequest(email: email.trim())), token);
+
+Future<bool> _accepted(Future<void> call, CancellationToken token) async {
+  try {
+    await call.asCancellable(token);
+    return true;
+  } on ApiStatusException catch (e) {
+    if (e.statusCode == HttpStatus.badRequest) return false;
+    rethrow;
+  }
+}
+
+/// Whether this device has a passkey prompt the app can use. The app's
+/// minimums (macOS 15, iOS 18, Android 9 / API 28) all have one, but there
+/// it serves only listenjar.com, and only to a build listenjar.com vouches
+/// for (/.well-known/apple-app-site-association, assetlinks.json): a debug
+/// build signs in to localhost, which none of them will. Windows needs
+/// Windows Hello's WebAuthn.
+Future<bool> passkeysAvailable() async {
+  if (kIsWeb) return false;
+  if (Platform.isMacOS || Platform.isIOS || Platform.isAndroid) return !kDebugMode;
+  if (!Platform.isWindows) return false;
+  try {
+    return (await PasskeysPlatform.instance.getAvailability()).hasPasskeySupport;
+  } on PlatformException {
+    return false;
+  }
+}
+
+/// The platform's answer to listenjar.com's [options], or the
+/// [SignInRefused] its refusal means.
+Future<AuthenticateResponseType> _passkeyAnswer(WebAuthnJson options, CancellationToken token) async {
+  final platform = PasskeysPlatform.instance;
+  try {
+    return await platform
+      .authenticate(AuthenticateRequestType.fromJson(
+        Map<String, dynamic>.of(options),
+        preferImmediatelyAvailableCredentials: false,
+      ))
+      .asCancellable(token, onCancel: () => unawaited(platform.cancelCurrentAuthenticatorOperation()));
+  } on PlatformException catch (e) {
+    throw switch (e.code) {
+      // A build signed without its provisioning profile (tool/sign-macos.sh)
+      // has no application identifier to match the Associated Domain to.
+      'failed' when e.message?.contains('application identifier') ?? false => const PasskeysUnavailable(),
+      'cancelled' || 'user-cancelled' => const CancelledException(),
+      'android-no-credential' || 'no-credentials-available' || 'not-found' => const NoPasskey(),
+      'domain-not-associated' ||
+      'deviceNotSupported' ||
+      'android-passkey-unsupported' ||
+      'not-supported' => const PasskeysUnavailable(),
+      _ => e,
+    };
+  }
+}
+
+/// Signs in with a passkey the platform offers for listenjar.com. Cancelling
+/// the prompt cancels [cancellation]'s wait as if the person pressed Cancel.
+Future<Session> signInWithPasskey(PublicApiClient api, CancellationToken cancellation) async {
+  final token = cancellation.merge(TimeoutCancellationToken(signInTimeout));
+  final options = await api.passkeySignInOptions().asCancellable(token);
+  final answer = await _passkeyAnswer(options, token);
+  // AuthenticationResponseJSON, as SimpleWebAuthn's server takes it.
+  return _refusing(
+    api.signInWithPasskey(body: {
+      'id': answer.id,
+      'rawId': answer.rawId,
+      'type': 'public-key',
+      'response': {
+        'clientDataJSON': answer.clientDataJSON,
+        'authenticatorData': answer.authenticatorData,
+        'signature': answer.signature,
+        if (answer.userHandle.isNotEmpty) 'userHandle': answer.userHandle,
+      },
+      'clientExtensionResults': <String, Object?>{},
+    }),
+    HttpStatus.unauthorized,
+    const UnknownPasskey(),
+  ).asCancellable(token);
 }
 
 /// The page the browser lands on, in listenjar.com's look (DESIGN.md): the
