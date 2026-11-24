@@ -22,8 +22,9 @@ class AppDelegate: FlutterAppDelegate {
 
   // The sign-in page in the browser opens $(LISTENJAR_URL_SCHEME)://sign-in
   // (Info.plist). LaunchServices activates the app; bring the window back
-  // too, even from the Dock. A $(LISTENJAR_URL_SCHEME)://open?url=… link
-  // goes on to lib/shared_links.dart.
+  // too, even from the Dock. A $(LISTENJAR_URL_SCHEME)://open?url=… link,
+  // which the Share menu sends (ShareExtension/), goes on to
+  // lib/shared_links.dart.
   override func application(_ application: NSApplication, open urls: [URL]) {
     super.application(application, open: urls)
     urls.filter { $0.host == "open" }.forEach { SharedLinks.shared?.open($0.absoluteString) }
