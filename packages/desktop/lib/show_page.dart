@@ -390,6 +390,9 @@ final class _ShowPageState extends State<ShowPage> {
                 child: TextField(
                   controller: _query,
                   focusNode: _queryFocus,
+                  // A tap anywhere else puts the keyboard away; Flutter only
+                  // does that for a mouse on a phone, not a finger.
+                  onTapOutside: (_) => _queryFocus.unfocus(),
                   onChanged: (_) => setState(() => _shown = _page),
                   style: text.bodyMedium!.copyWith(height: 1.2),
                   cursorColor: brand.accent,
@@ -403,7 +406,8 @@ final class _ShowPageState extends State<ShowPage> {
               ),
             ),
             if (_query.text.isNotEmpty)
-              IconButton(
+              // Part of the field: clearing keeps the keyboard up.
+              TextFieldTapRegion(child: IconButton(
                 tooltip: 'Clear',
                 visualDensity: VisualDensity.compact,
                 iconSize: 16,
@@ -412,7 +416,7 @@ final class _ShowPageState extends State<ShowPage> {
                   _queryFocus.requestFocus();
                 },
                 icon: const Icon(Icons.close_rounded, color: brand.fgSoft),
-              )
+              ))
             else
               const SizedBox(width: 10),
           ]),

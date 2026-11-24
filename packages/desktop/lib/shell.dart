@@ -456,6 +456,13 @@ final class PageBody extends StatelessWidget {
       child: ListView(
         controller: controller,
         primary: controller == null,
+        // Scrolling on a phone puts the keyboard away, as iOS and Android
+        // pages do. Not on a computer: a trackpad's scroll is a drag too,
+        // and would take focus out of the field being typed in.
+        keyboardDismissBehavior: switch (defaultTargetPlatform) {
+          TargetPlatform.iOS || TargetPlatform.android => ScrollViewKeyboardDismissBehavior.onDrag,
+          _ => ScrollViewKeyboardDismissBehavior.manual,
+        },
         padding: EdgeInsets.fromLTRB(gutter, mac && width >= wideWidth ? 40 : 24, gutter, 40),
         children: [
           // Every page starts at the same left edge; a narrower one ends
