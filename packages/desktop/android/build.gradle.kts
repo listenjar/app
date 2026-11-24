@@ -1,7 +1,8 @@
 allprojects {
     repositories {
         google()
-        mavenCentral()
+        // Maven Central, through Google's mirror (settings.gradle.kts).
+        maven("https://maven-central.storage-download.googleapis.com/maven2/")
     }
 }
 

@@ -5,12 +5,19 @@
 //
 //   https://github.com/listenjar/desktop/releases/latest/download/appcast-<platform>.xml
 //
+// Android's (lib/apk_updates.dart) reads its manifest from there instead,
+// manifest-android.json: the build it compares, the APK's name, length and
+// SHA-256.
+//
 // pubspec.yaml's `version: X.Y.Z+N` is the release: tag vX.Y.Z, shown as
 // X.Y.Z, and N is the build number both updaters compare, so N only grows
 // (`dart tool/release.dart prepare` reserves each). macOS and Windows sign
 // their payload with their own Ed25519 seed, and the apps carry the matching
-// public key (macos/Runner/Info.plist, windows/runner/updates.h); Linux and
-// Android, which update elsewhere, only get a manifest with the hash.
+// public key (macos/Runner/Info.plist, windows/runner/updates.h). Android
+// needs no key of its own: Android installs an update only when it is signed
+// with the installed app's key, the one release key (passkeys.ts), and the
+// app checks the certificates before it hands the APK over. Linux, which
+// updates elsewhere, only gets a manifest with the hash.
 //
 //   node tool/release.ts identity [tag]
 //   node tool/release.ts prepare <platform> <payload> <directory>
@@ -230,7 +237,7 @@ async function publish(directory: string) {
   if (remote.sha !== release.commit) throw new Error("The remote tag no longer points at the built commit")
   const notes = `ListenJar ${release.version}
 
-macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK. On macOS and Windows ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it.
+macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK. On macOS, Windows and Android ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it, and Android installs only an APK signed with the same key as the installed app.
 
 The Windows installer has no Authenticode publisher certificate yet, so SmartScreen may warn about it.
 

@@ -1,9 +1,11 @@
 // Links shared to ListenJar from other apps, and what it does with them.
 //
-// They arrive on the `listenjar/links` channel from each platform's runner:
-// Android's share sheet (MainActivity.kt), a `<scheme>://open?url=…` link on
-// every platform, and a second launch with the link as its argument (Linux,
-// Windows). A first launch on Linux and Windows passes it to main().
+// Each platform's runner holds them until Dart takes them: Android's share
+// sheet and links opened with the app wait in SharedLinks.java, which Dart
+// calls over JNI; a `<scheme>://open?url=…` link waits in SharedLinks.swift
+// on iOS, over FFI, and in macOS's runner, on the `listenjar/links` channel.
+// Linux and Windows pass a link as an argument: a first launch's to main(),
+// a second launch's on that channel.
 //
 // A YouTube channel or playlist takes a paid plan: followed on this device,
 // streaming from YouTube, or as a ListenJar Cloud feed, as the listener
@@ -12,9 +14,13 @@
 // their own instead, on this device or in the Cloud. Any other link goes to search, which knows
 // podcast feeds.
 import 'dart:async';
+import 'dart:ffi';
+import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/services.dart';
+import 'package:jni/jni.dart';
+import 'package:objective_c/objective_c.dart' as objc;
 import 'package:material_ui/material_ui.dart';
 
 import 'backend/api.dart' show Feed, Plan, SourceKind;
@@ -23,6 +29,8 @@ import 'config.dart' show appScheme;
 import 'links.dart';
 import 'log.dart';
 import 'plans.dart' show askNewPodcast, showPlans;
+import 'shared_links.g.dart' as android;
+import 'shared_links_ios.g.dart' as ios;
 import 'sync.dart' show PlanLimit;
 import 'theme.dart' as brand;
 import 'ui.dart';
@@ -35,6 +43,49 @@ final class IncomingLinks extends ChangeNotifier {
     for (final argument in arguments) {
       _take(argument);
     }
+    if (Platform.isAndroid) {
+      _listenAndroid();
+    } else if (Platform.isIOS) {
+      _listenIOS();
+    } else {
+      _listenChannel();
+    }
+  }
+
+  static const _channel = MethodChannel('listenjar/links');
+  final _waiting = <Uri>[];
+
+  // SharedLinks.java pings from the activity, on the main thread, which is
+  // also the UI thread: the ping comes here as a message (async), after the
+  // activity's callback returns. take() is quick enough for that thread.
+  void _listenAndroid() {
+    void arrived() {
+      final links = android.SharedLinks.take()!;
+      for (final link in links.asDart()) {
+        _take(link!.toDartString(releaseOriginal: true));
+      }
+      links.release();
+    }
+
+    android.SharedLinks.listen(android.SharedLinks$Listener.implement(
+      android.$SharedLinks$Listener(arrived: arrived, arrived$async: true),
+    ));
+  }
+
+  // SharedLinks.swift pings on the main thread, which is the UI thread; the
+  // ping comes here as a message, after the scene callback returns. The
+  // callable lives as long as the app, as SharedLinks keeps it.
+  void _listenIOS() {
+    final arrived = NativeCallable<Void Function()>.listener(() {
+      for (final link in ios.LJSharedLinks.take().asDart()) {
+        _take(objc.NSString.as(link).toDartString());
+      }
+    });
+    ios.LJSharedLinks.listen(arrived.nativeFunction);
+  }
+
+  // macOS's runner, and a second launch on Linux and Windows.
+  void _listenChannel() {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'open' && call.arguments is String) _take(call.arguments as String);
     });
@@ -44,9 +95,6 @@ final class IncomingLinks extends ChangeNotifier {
       onError: (Object _) {}, // No runner side on this platform.
     ));
   }
-
-  static const _channel = MethodChannel('listenjar/links');
-  final _waiting = <Uri>[];
 
   Uri? next() => _waiting.isEmpty ? null : _waiting.removeAt(0);
 

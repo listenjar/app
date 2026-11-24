@@ -97,6 +97,26 @@ tasks:
     options:
       cache: false
       runInCI: false
+  jnigen:
+    description: >-
+      Regenerate the JNI bindings Dart calls the Android app's Java helpers through, after changing
+      one: packages/desktop/lib/apk_installer.g.dart (ApkInstaller.java, for the updater in
+      lib/apk_updates.dart) and lib/shared_links.g.dart (SharedLinks.java, for lib/shared_links.dart).
+    script: cd packages/desktop && dart run tool/jnigen.dart
+    inputs: []
+    options:
+      cache: false
+      outputStyle: stream
+  ffigen-ios:
+    description: >-
+      Regenerate packages/desktop/lib/shared_links_ios.g.dart, the Objective-C bindings
+      lib/shared_links.dart calls ios/Runner/SharedLinks.swift through, after changing that file.
+    script: cd packages/desktop && dart run tool/ffigen.dart
+    inputs: []
+    options:
+      cache: false
+      outputStyle: stream
+      os: macos
   ffigen:
     description: Regenerate packages/youtubei/lib/src/bindings.g.dart from native/bridge.h after changing it.
     deps: [~:scripts]

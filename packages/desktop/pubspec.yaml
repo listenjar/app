@@ -43,10 +43,15 @@ dependencies:
   passkeys_darwin: ^0.4.8
   passkeys_platform_interface: ^2.11.0
   passkeys_windows: ^0.1.6
+  jni: ^1.2.1
+  jni_flutter: ^1.1.0
+  objective_c: ^9.6.4
 dev_dependencies:
   flutter_driver:
     sdk: flutter
   flutter_lints: ^6.0.0
+  jnigen: ^1.1.0
+  ffigen: ^23.0.0
 
 flutter:
   uses-material-design: true

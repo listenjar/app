@@ -250,7 +250,8 @@ class _AppState extends State<App> {
             : child!,
           // Light only, like listenjar.com: paper is the ground (DESIGN.md).
           theme: brand.theme(),
-          home: Shell(links: widget.links),
+          // Android asks about updates over the window (updates.dart).
+          home: UpdatePrompt(child: Shell(links: widget.links)),
         ),
       ),
     );

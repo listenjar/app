@@ -10,10 +10,27 @@ pluginManagement {
 
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
+    // Google's repositories only: Maven Central through Google's mirror of
+    // it, which also serves plugins before the Plugin Portal, which would
+    // redirect their jars to Maven Central. Maven Central rate-limits GitHub's
+    // runners (429) and refuses some networks outright (403).
     repositories {
         google()
-        mavenCentral()
+        maven("https://maven-central.storage-download.googleapis.com/maven2/")
         gradlePluginPortal()
+    }
+}
+
+// Every plugin's own mavenCentral(), in its repositories and its buildscript's,
+// resolves through the same mirror (tool/maven-mirror.gradle does this for
+// Gradle builds outside the app's).
+gradle.beforeProject {
+    for (handler in listOf(repositories, buildscript.repositories)) {
+        handler.withType(MavenArtifactRepository::class.java).configureEach {
+            if (url.toString().startsWith("https://repo.maven.apache.org/maven2")) {
+                setUrl("https://maven-central.storage-download.googleapis.com/maven2/")
+            }
+        }
     }
 }
 

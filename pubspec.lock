@@ -121,6 +121,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.1"
+  cli_config:
+    dependency: transitive
+    description:
+      name: cli_config
+      sha256: ac20a183a07002b700f0c25e61b7ee46b23c309d76ab7b7640a028f18e4d99ec
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.0"
   cli_util:
     dependency: transitive
     description:
@@ -527,6 +535,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.0"
+  jnigen:
+    dependency: transitive
+    description:
+      name: jnigen
+      sha256: c9fce4b87efac8c7af9b34cf5f63c8f408bdab3e5e521b651e81716587be1d19
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   js:
     dependency: transitive
     description:

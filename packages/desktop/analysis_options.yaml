@@ -8,4 +8,8 @@ analyzer:
     - linux/**
     - android/**
     - lib/backend/**
+    # JNIgen's (tool/jnigen.dart) and FFIgen's (tool/ffigen.dart).
+    - lib/apk_installer.g.dart
+    - lib/shared_links.g.dart
+    - lib/shared_links_ios.g.dart
     - ios/**

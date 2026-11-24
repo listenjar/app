@@ -122,7 +122,8 @@ Every push to master releases the app:
    (Ed25519), writes `appcast-macos.xml`, `appcast-windows-x64.xml` and `appcast-windows-arm64.xml`,
    attests each package's build provenance (`gh attestation verify <file> --repo
    listenjar/desktop`), uploads all five with
-   their manifests, and only then makes the release the latest, whose appcasts the apps read.
+   their manifests, and only then makes the release the latest, whose appcasts the apps read
+   (Android's reads `manifest-android.json`, and installs only an APK signed with its own key).
 4. Beside them, the ios job sends the release to TestFlight for iPhone and iPad:
    `desktop:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for
    the App Store, and [tool/testflight.ts](tool/testflight.ts) uploads it, waits for App Store
@@ -155,9 +156,11 @@ changes, and release builds are signed with nothing else: debug builds with the 
 release builds ([build.gradle.kts](packages/desktop/android/app/build.gradle.kts)) with the
 keystore `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` name, or on
 a Mac without them with `~/.secrets/listenjar/desktop-signing/android`'s; with neither, a release
-build fails. Where Maven Central turns Gradle away (429 on GitHub's runners, 403 on some
-networks), `cp tool/maven-mirror.gradle ~/.gradle/init.d/` resolves it through Google's mirror,
-as the release workflow does. `desktop:package-android` also refuses an APK whose certificate isn't the one
+build fails. The app's Gradle build resolves everything from Google's repositories
+([settings.gradle.kts](packages/desktop/android/settings.gradle.kts)): Maven Central only through
+Google's mirror, as Maven Central turns Gradle away (429 on GitHub's runners, 403 on some
+networks). `cp tool/maven-mirror.gradle ~/.gradle/init.d/` does the same for every other Gradle
+build, as the release workflow does. `desktop:package-android` also refuses an APK whose certificate isn't the one
 [passkeys.ts](passkeys.ts) lists.
 
 This repo builds on its own, without the monorepo: [mise.toml](mise.toml) pins every tool the

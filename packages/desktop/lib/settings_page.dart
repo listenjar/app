@@ -137,8 +137,8 @@ final class SettingsPage extends StatelessWidget {
     settingRow(context, title, body, const Icon(Icons.chevron_right_rounded, color: brand.fgSoft), onTap: onTap);
 }
 
-/// Sparkle's and WinSparkle's own preferences (updates.dart). A build without
-/// an update key says so instead.
+/// Sparkle's, WinSparkle's and Android's update preferences (updates.dart).
+/// A build without an update key says so instead.
 final class _Updates extends StatelessWidget {
   const _Updates();
 
@@ -159,7 +159,7 @@ final class _Updates extends StatelessWidget {
         settingRow(
           context,
           'Check for updates',
-          '${version}ListenJar also looks once a day.',
+          state.status ?? '${version}ListenJar also looks once a day.',
           const Icon(Icons.chevron_right_rounded, color: brand.fgSoft),
           onTap: state.canCheck ? () => unawaited(checkForUpdates()) : null,
         ),

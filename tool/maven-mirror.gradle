@@ -1,16 +1,24 @@
-// Gradle init script: resolves Maven Central through Google's mirror of it,
-// for the app and every plugin's own mavenCentral(). Maven Central rate-limits
-// GitHub's runners (429) and refuses some networks outright (403). The release
-// workflow's android job installs it into ~/.gradle/init.d; do the same on a
-// machine Maven Central turns away.
+// Gradle init script: resolves everything from Google's repositories, for a
+// Gradle build outside the app's own (packages/desktop/android/settings.gradle.kts
+// does the same for the app): Maven Central through Google's mirror of it, and
+// Gradle plugins from that mirror before the Plugin Portal, which redirects
+// their jars to Maven Central. Maven Central rate-limits GitHub's runners
+// (429) and refuses some networks outright (403). tool/jnigen.dart builds
+// JNIgen's ApiSummarizer with it: `gradle -I tool/maven-mirror.gradle`.
+def central = "https://maven-central.storage-download.googleapis.com/maven2/"
 def mirror = { RepositoryHandler repositories ->
     repositories.withType(MavenArtifactRepository).configureEach { repository ->
         if (repository.url.toString().startsWith("https://repo.maven.apache.org/maven2")) {
-            repository.url = "https://maven-central.storage-download.googleapis.com/maven2/"
+            repository.url = central
         }
     }
 }
 beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        google()
+        maven { url central }
+        gradlePluginPortal()
+    }
     mirror(settings.pluginManagement.repositories)
     mirror(settings.dependencyResolutionManagement.repositories)
 }
