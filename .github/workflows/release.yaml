@@ -14,7 +14,7 @@
 #
 # The signing secrets and variables live in the desktop-release environment,
 # which only v* tags can use (apps/desktop-signing in listenjar/listenjar
-# fills it from ~/.secrets/listenjar/desktop-signing; README.md's "Releases").
+# fills it from ~/.secrets/listenjar/desktop-signing; DEVELOPMENT.md's "Releases").
 name: Release
 on:
   push:

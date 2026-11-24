@@ -159,7 +159,7 @@ tasks:
   package-macos:
     description: >-
       Build the release macOS app with Sparkle's update key and package it as a DMG
-      (tool/package-macos.sh; README.md's Releases). Signs and notarizes when given a Developer ID.
+      (tool/package-macos.sh; DEVELOPMENT.md's Releases). Signs and notarizes when given a Developer ID.
     deps: [~:codegen, ~:scripts]
     script: tool/package-macos.sh
     inputs: []
@@ -189,7 +189,7 @@ tasks:
     options:
       cache: false
       runInCI: false
-  # Releases (README.md's Releases): .github/workflows/version.yaml runs
+  # Releases (DEVELOPMENT.md's Releases): .github/workflows/version.yaml runs
   # release-prepare on every push to master, which tags the next version, then
   # dispatches release.yaml on that tag, which runs package-<platform> on each
   # platform's runner into build/release/ (Windows runs tool/package-windows.ps1

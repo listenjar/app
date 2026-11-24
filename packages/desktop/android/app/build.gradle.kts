@@ -39,7 +39,7 @@ android {
     // never replace it. CI names it in ANDROID_KEYSTORE_PATH,
     // ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS; a Mac with
     // ~/.secrets/listenjar/desktop-signing/android needs none of them
-    // (README.md's "Releases").
+    // (DEVELOPMENT.md's "Releases").
     signingConfigs {
         create("release") {
             val secrets = File(System.getProperty("user.home"), ".secrets/listenjar/desktop-signing/android")
