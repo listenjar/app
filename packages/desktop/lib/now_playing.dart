@@ -85,7 +85,7 @@ final class _NowPlayingRoute extends PageRoute<void> {
     final nav = navigator!;
     final c = controller!;
     final height = subtreeContext?.size?.height ?? 0;
-    const flick = 700.0;
+    const flick = 400.0;
     final down = velocity > flick || (velocity > -flick && c.value < 2 / 3);
     if (down) {
       nav.pop();
