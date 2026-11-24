@@ -26,8 +26,9 @@ open class FlutterMethodChannel: NSObject {
 open class FlutterAppDelegate: NSResponder {
   public required override init() {}
   open var mainFlutterWindow: NSWindow?
-  // No applicationDidFinishLaunching(_:): FlutterAppDelegate.mm doesn't
-  // implement it, so a super call to it throws at run time.
+  // Swift sees this optional NSApplicationDelegate method, but
+  // FlutterAppDelegate.mm doesn't implement it: a super call throws.
+  open func applicationDidFinishLaunching(_ notification: Notification) {}
   open func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
   open func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { true }
   open func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { false }
