@@ -14,10 +14,11 @@ on:
 permissions:
   contents: read
 
-# One at a time; a newer push waits rather than cancelling a reservation.
+# One at a time, and a newer push cancels the one before it: only the newest
+# master commit gets a release.
 concurrency:
   group: version
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   prepare:
@@ -43,8 +44,10 @@ jobs:
       - name: Tag the next version
         id: version
         run: dart tool/release.dart prepare
+      # Still dispatches a tag already pushed when a newer push cancels this,
+      # so the newer push's release is what cancels it, as with any other.
       - name: Release the tag
-        if: steps.version.outputs.tag != ''
+        if: always() && steps.version.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}

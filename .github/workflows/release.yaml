@@ -22,9 +22,13 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# Only the newest release builds: version.yaml dispatches one per push to
+# master, in order, and each cancels the one before it. A publish already
+# under way finishes instead (see publish), and the newer run waits for it.
+# Branch dispatches, test builds that publish nothing, keep to their own group.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release-${{ github.ref_type }}
+  cancel-in-progress: true
 env:
   MISE_VERSION: '2026.11.11'
 jobs:
@@ -318,8 +322,16 @@ jobs:
         if: always()
         run: bash tool/ios-signing.sh cleanup
 
+  # always() keeps a publish that has started from being cancelled by a newer
+  # release (a cancel re-evaluates it with every build already succeeded),
+  # so it never leaves a half-uploaded draft; the result checks stand in for
+  # the default success() before it starts.
   publish:
-    if: github.ref_type == 'tag'
+    if: >-
+      always() && github.ref_type == 'tag'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+      && !contains(needs.*.result, 'skipped')
     needs: [macos, windows, linux, android]
     runs-on: ubuntu-24.04
     environment: desktop-release
