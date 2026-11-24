@@ -6,12 +6,39 @@
 // connects to for hot reload, logs, errors and the widget tree.
 //
 // Native code (packages/youtubei/native) is not hot reloadable; restart.
+//
+// Only one debug app runs at a time, from any checkout: this refuses to start
+// while another `desktop:dev` holds the lock in the temp directory, or while a
+// debug ListenJar.app is still running (from an IDE, or left behind by a
+// `desktop:dev` that was killed outright).
 import 'dart:async';
 import 'dart:io';
 
 Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent;
   final app = Directory('${root.path}/packages/desktop');
+
+  // Held until this process exits, however it exits: the OS drops the lock.
+  final lockFile = File('${Directory.systemTemp.path}/listenjar-desktop-dev.lock');
+  final lock = lockFile.openSync(mode: FileMode.append);
+  try {
+    lock.lockSync(FileLock.exclusive);
+  } on FileSystemException {
+    final holder = lockFile.readAsStringSync().trim();
+    stderr.writeln('desktop:dev is already running (pid $holder): use that one, or stop it first.');
+    exit(1);
+  }
+  lock
+    ..truncateSync(0)
+    ..writeStringSync('$pid')
+    ..flushSync();
+
+  final running = Process.runSync('pgrep', ['-f', '/Debug/ListenJar.app/Contents/MacOS/ListenJar']);
+  final apps = (running.stdout as String).trim().split('\n').where((line) => line.isNotEmpty);
+  if (apps.isNotEmpty) {
+    stderr.writeln('A debug ListenJar is already running (pid ${apps.join(', ')}): quit it first.');
+    exit(1);
+  }
   final pidFile = File('${Directory.systemTemp.path}/listenjar-desktop-${pid}.pid');
   final flutter = await Process.start(
     'flutter',
