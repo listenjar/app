@@ -640,6 +640,22 @@ paths:
                 $ref: "#/components/schemas/User"
         "401":
           description: The token is missing, revoked or expired.
+    delete:
+      operationId: deleteAccount
+      summary: Delete the account and everything of it
+      description: >-
+        Cancels every live Stripe subscription of the account at once, with
+        no refund, then deletes its feeds (their RSS, the audio nobody else
+        holds, their artwork), its sessions on every device, its sign-in
+        methods and the account itself. It can't be undone. Safe to retry:
+        a call that fails partway leaves the token working, and calling
+        again finishes the job; once the account is gone the token answers
+        401.
+      responses:
+        "204":
+          description: The account is deleted; the token no longer works.
+        "401":
+          description: The token is missing, revoked or expired, or the account is already deleted.
   /logout:
     post:
       operationId: logout

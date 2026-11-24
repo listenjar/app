@@ -396,6 +396,15 @@ final class Podcasts extends ChangeNotifier {
     }
   }
 
+  /// The account was deleted, and its feeds with it: lets go of every
+  /// ListenJar Cloud show, its downloads and the artwork kept for it.
+  Future<void> forgetCloud() async {
+    for (final show in library.podcasts.where((p) => p.cloudFeedId != null).toList()) {
+      await unfollow(show);
+    }
+    await _forgetCloudArtwork();
+  }
+
   /// Keeps [show], a ListenJar Cloud playlist, channel or podcast of the
   /// listener's own whose feed is gone, on this device, with the artwork
   /// [_keepCloudArtwork] kept; false for a single video, which goes as on

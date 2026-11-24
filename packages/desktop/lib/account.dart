@@ -148,6 +148,28 @@ final class Account extends ChangeNotifier {
     }
   }
 
+  /// Deleting an account removes every feed, its RSS, audio and artwork on
+  /// the server, which takes longer than an ordinary call.
+  static const _deleteTimeout = Duration(minutes: 3);
+
+  /// Deletes the account on the server, with everything of it, then forgets
+  /// it here as signing out does. The server's 401 means it is gone already.
+  /// Throws when the server couldn't: the listener stays signed in, and
+  /// asking again finishes the job.
+  Future<void> deleteAccount() async {
+    try {
+      await api.deleteAccount().asCancellable(_life.merge(TimeoutCancellationToken(_deleteTimeout)));
+    } on ApiStatusException catch (e) {
+      if (e.statusCode != 401) rethrow;
+    }
+    _log.info('account deleted');
+    user = null;
+    _token = null;
+    authError = null;
+    notifyListeners();
+    await forgetToken();
+  }
+
   /// Quiet once disposed: calls in flight then finish into nothing.
   @override
   void notifyListeners() {

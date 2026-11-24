@@ -15,6 +15,7 @@ import 'dart:math';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
+import 'package:logging/logging.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'account.dart';
@@ -23,6 +24,8 @@ import 'backend/api.dart';
 import 'sync.dart';
 import 'uploads.dart';
 import 'youtube.dart';
+
+final _log = Logger('feeds');
 
 const _addTimeout = Duration(minutes: 2);
 
@@ -95,7 +98,7 @@ final class Feeds extends ChangeNotifier {
       // the old plan refused goes again.
       unawaited(load().then((_) => _sync?.syncNow()));
     } else if (!signedIn && _sync != null) {
-      unawaited(_sync!.close());
+      _closed = _sync!.close();
       _sync = null;
       feeds = const [];
       feedsError = null;
@@ -106,6 +109,29 @@ final class Feeds extends ChangeNotifier {
     };
     // The summary reads the account too.
     notifyListeners();
+  }
+
+  /// The last sync's closing, since it stopped on sign-out.
+  Future<void> _closed = Future.value();
+
+  /// After the account is deleted: once its sync has stopped, forgets what
+  /// it kept on this device, its journal and the partial downloads waiting
+  /// to upload (sync.dart).
+  Future<void> forgetDeleted() async {
+    if (_account.user != null) return;
+    await _closed;
+    removed.clear();
+    final support = await getApplicationSupportDirectory();
+    for (final name in ['sync.sqlite', 'sync.sqlite-wal', 'sync.sqlite-shm', 'downloads']) {
+      final entity = FileSystemEntity.typeSync('${support.path}/$name') == FileSystemEntityType.directory
+        ? Directory('${support.path}/$name')
+        : File('${support.path}/$name');
+      try {
+        if (await entity.exists()) await entity.delete(recursive: true);
+      } on FileSystemException catch (e) {
+        _log.warning('Couldn’t delete $name', e);
+      }
+    }
   }
 
   /// Fetches the feeds and hands them to the sync, which syncs any new one;

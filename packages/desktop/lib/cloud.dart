@@ -491,7 +491,8 @@ final class StorageFullNotice extends StatelessWidget {
 }
 
 /// Settings' ListenJar Cloud: how to sign in, while nobody is; then who is,
-/// their plan and storage, syncing now and signing out.
+/// their plan and storage, syncing now, signing out and deleting the
+/// account ([deleteAccount]).
 final class AccountPanel extends StatefulWidget {
   const AccountPanel({super.key});
 
@@ -579,6 +580,18 @@ final class _AccountPanelState extends State<AccountPanel> {
           child: const Text('Sign out'),
         ),
       ]),
+      const SizedBox(height: 20),
+      const Divider(color: brand.line, height: 1),
+      const SizedBox(height: 12),
+      Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 4, children: [
+        Text('Deleting your account deletes everything in ListenJar Cloud.', style: soft),
+        TextButton.icon(
+          style: _dangerQuiet,
+          onPressed: () => unawaited(deleteAccount(context)),
+          icon: const Icon(Icons.delete_outline_rounded, size: 16),
+          label: const Text('Delete account…'),
+        ),
+      ]),
     ]);
   }
 
@@ -634,6 +647,144 @@ final class _AccountPanelState extends State<AccountPanel> {
         ]),
       ],
     ]);
+  }
+}
+
+/// A quiet button whose action can't be undone.
+final _dangerQuiet = brand.button(brand.Tone.quiet, brand.ButtonSize.sm).copyWith(
+  backgroundColor: const WidgetStatePropertyAll(Colors.transparent),
+  foregroundColor: const WidgetStatePropertyAll(brand.danger),
+  overlayColor: const WidgetStatePropertyAll(Color(0xFFFBECEB)),
+);
+
+/// The confirming button of [deleteAccount]'s question: the danger colour,
+/// a step darker on hover.
+final _dangerSolid = brand.button(brand.Tone.ink, brand.ButtonSize.sm).copyWith(
+  backgroundColor: WidgetStateProperty.resolveWith(
+    (states) => switch (states) {
+      _ when states.contains(WidgetState.disabled) => brand.danger.withValues(alpha: 0.6),
+      _ when states.contains(WidgetState.hovered) => const Color(0xFFBD3B33),
+      _ => brand.danger,
+    },
+  ),
+  foregroundColor: const WidgetStatePropertyAll(brand.white),
+);
+
+/// Asks, saying what goes with the account, then deletes it (account.dart):
+/// the server cancels the plan and deletes the feeds, their audio and
+/// artwork, and every way in. Then this device forgets the Cloud shows and
+/// what their sync kept, and is signed out. Nothing on this device that
+/// isn't the account's (shows followed here, downloads, Up Next) changes.
+Future<void> deleteAccount(BuildContext context) async {
+  final s = Services.of(context);
+  final user = s.account.user;
+  if (user == null) return;
+  final deleted = await showDialog<bool>(
+    context: context,
+    builder: (context) => _DeleteAccountDialog(account: s.account, user: user),
+  );
+  if (deleted != true) return;
+  await s.feeds.forgetDeleted();
+  await s.podcasts.forgetCloud();
+  if (context.mounted) tell(context, 'Your ListenJar account is deleted.');
+}
+
+final class _DeleteAccountDialog extends StatefulWidget {
+  const _DeleteAccountDialog({required this.account, required this.user});
+  final Account account;
+  final User user;
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+final class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  bool _deleting = false;
+  String? _error;
+
+  Future<void> _delete() async {
+    setState(() {
+      _deleting = true;
+      _error = null;
+    });
+    try {
+      await widget.account.deleteAccount();
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _deleting = false;
+        _error = failure('Your account wasn’t deleted', e, other: 'Nothing was lost. Try again.');
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final body = text.bodyMedium!;
+    final soft = body.copyWith(color: brand.fgSoft);
+    Widget point(String line) => Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 8, right: 10),
+          child: Container(width: 5, height: 5, decoration: const BoxDecoration(color: brand.danger, shape: BoxShape.circle)),
+        ),
+        Expanded(child: Text(line, style: soft)),
+      ]),
+    );
+    return PopScope(
+      canPop: !_deleting,
+      child: AlertDialog(
+        backgroundColor: brand.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
+        title: Text('Delete your ListenJar account?', style: text.titleLarge),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text.rich(
+                TextSpan(children: [
+                  TextSpan(text: widget.user.email, style: body.copyWith(fontWeight: FontWeight.w600)),
+                  const TextSpan(text: ' and everything in it go for good:'),
+                ]),
+                style: body,
+              ),
+              const SizedBox(height: 4),
+              point('your podcasts in ListenJar Cloud, their RSS feeds and audio, so podcast apps stop getting new episodes'),
+              point('your artwork, passkeys, password and connected Google'),
+              point('your sign-in on every device, the website’s too'),
+              if (widget.user.plan == Plan.paid) ...[
+                const SizedBox(height: 12),
+                Text('Your plan is cancelled now, with no refund for the time left.', style: body),
+              ],
+              const SizedBox(height: 12),
+              Text(
+                'Shows you follow on this device, your downloads and Up Next stay. This can’t be undone.',
+                style: body.copyWith(fontWeight: FontWeight.w600),
+              ),
+              if (_error case final error?) ...[
+                const SizedBox(height: 14),
+                Text(error, style: body.copyWith(color: brand.danger)),
+              ],
+            ]),
+          ),
+        ),
+        actions: [
+          TextButton(
+            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+            onPressed: _deleting ? null : () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            style: _dangerSolid,
+            onPressed: _deleting ? null : _delete,
+            child: Text(_deleting ? 'Deleting…' : 'Delete account'),
+          ),
+        ],
+      ),
+    );
   }
 }
 
