@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart' show RenderObject, RenderParagraph;
 import 'package:flutter/services.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html;
@@ -723,7 +724,8 @@ final _webAddress = RegExp(r'\b(?:https?://|www\.)[^\s<>"]+', caseSensitive: fal
 
 /// An episode's notes as the feed wrote them: paragraphs, lists, bold and
 /// links kept; scripts, styles and images dropped. Web addresses written
-/// as plain text are links too. A timestamp plays the episode from there.
+/// as plain text are links too; a long press or right-click on a link
+/// offers Copy link. A timestamp plays the episode from there.
 final class ShowNotes extends StatefulWidget {
   const ShowNotes({super.key, required this.html, this.episode, this.onInk = false});
   final String html;
@@ -736,6 +738,55 @@ final class ShowNotes extends StatefulWidget {
 
 final class _ShowNotesState extends State<ShowNotes> {
   final _recognizers = <TapGestureRecognizer>[];
+
+  /// Each link's address, by its span.
+  var _links = Expando<Uri>();
+  final _text = GlobalKey();
+
+  /// The link last pressed, for the selection menu's Copy link.
+  Uri? _pressed;
+
+  /// Notes which link, if any, a press landed on: a long press or a
+  /// right-click on it then offers to copy it.
+  void _pointerDown(PointerDownEvent event) {
+    _pressed = null;
+    RenderParagraph? paragraph;
+    void find(RenderObject node) {
+      if (paragraph != null) return;
+      if (node is RenderParagraph) {
+        paragraph = node;
+      } else {
+        node.visitChildren(find);
+      }
+    }
+
+    if (_text.currentContext?.findRenderObject() case final root?) find(root);
+    if (paragraph case final paragraph?) {
+      final at = paragraph.globalToLocal(event.position);
+      if (!(Offset.zero & paragraph.size).contains(at)) return;
+      final span = paragraph.text.getSpanForPosition(paragraph.getPositionForOffset(at));
+      if (span != null) _pressed = _links[span];
+    }
+  }
+
+  Widget _menu(BuildContext context, SelectableRegionState region) {
+    final link = _pressed;
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: region.contextMenuAnchors,
+      buttonItems: [
+        if (link != null)
+          ContextMenuButtonItem(
+            label: 'Copy link',
+            onPressed: () {
+              region.hideToolbar();
+              region.clearSelection();
+              unawaited(copyText(this.context, '$link', 'Link copied.'));
+            },
+          ),
+        ...region.contextMenuButtonItems,
+      ],
+    );
+  }
 
   @override
   void dispose() {
@@ -751,6 +802,7 @@ final class _ShowNotesState extends State<ShowNotes> {
       r.dispose();
     }
     _recognizers.clear();
+    _links = Expando<Uri>();
     final text = Theme.of(context).textTheme;
     final base = text.bodyMedium!.copyWith(color: widget.onInk ? brand.snow : brand.fg, height: 1.6);
     final source = widget.html.trim();
@@ -769,7 +821,13 @@ final class _ShowNotesState extends State<ShowNotes> {
     while (spans.isNotEmpty && spans.last is TextSpan && ((spans.last as TextSpan).text?.trim().isEmpty ?? false)) {
       spans.removeLast();
     }
-    return SelectionArea(child: Text.rich(TextSpan(children: spans, style: base)));
+    return SelectionArea(
+      contextMenuBuilder: _menu,
+      child: Listener(
+        onPointerDown: _pointerDown,
+        child: Text.rich(key: _text, TextSpan(children: spans, style: base)),
+      ),
+    );
   }
 
   static const _blocks = {'p', 'div', 'br', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'section', 'tr'};
@@ -810,17 +868,32 @@ final class _ShowNotesState extends State<ShowNotes> {
 
   bool _endsWithBreak(List<InlineSpan> out) => out.last is TextSpan && ((out.last as TextSpan).text?.endsWith('\n') ?? false);
 
-  /// A link: Apple Podcasts ones open here, the rest in the browser.
+  /// A link: Apple Podcasts and YouTube ones open here, the rest in the
+  /// browser.
   TextSpan _link(String label, Uri url, TextStyle style) {
     final color = widget.onInk ? brand.accentLight : brand.accent;
-    final r = TapGestureRecognizer()..onTap = () => unawaited(openWebLink(context, url));
+    // A long press copies, never opens: when the selection's own long press
+    // takes the gesture, its menu offers Copy link (_menu); when it doesn't,
+    // a held press lets go here.
+    DateTime? down;
+    final r = TapGestureRecognizer()
+      ..onTapDown = ((_) => down = DateTime.now())
+      ..onTapUp = ((_) {
+        if (down != null && DateTime.now().difference(down!) >= kLongPressTimeout) {
+          unawaited(copyText(context, '$url', 'Link copied.'));
+        } else {
+          unawaited(openWebLink(context, url));
+        }
+      });
     _recognizers.add(r);
-    return TextSpan(
+    final span = TextSpan(
       text: label,
       style: style.copyWith(color: color, decoration: TextDecoration.underline, decorationColor: color.withValues(alpha: 0.4)),
       recognizer: r,
       mouseCursor: SystemMouseCursors.click,
     );
+    _links[span] = url;
+    return span;
   }
 
   /// Plain text, with web addresses made into links and timestamps into
