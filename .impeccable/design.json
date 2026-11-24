@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-24T22:10:34.305171+00:00",
+  "title": "Design System: ListenJar app",
+  "extensions": {
+    "layerOf": "../../DESIGN.md",
+    "shadows": [
+      {
+        "name": "glass-clear",
+        "value": "rgb(14 15 20 / 0.40); blur 16px, saturate 1.5; ink-line hairline; no shadow",
+        "purpose": "Floating controls over artwork at rest."
+      },
+      {
+        "name": "glass-dark",
+        "value": "rgb(14 15 20 / 0.82); blur 16px, saturate 1.5; ink-line hairline; float shadow",
+        "purpose": "Title bar, tab pill and mini player over sleeves and Now Playing; floating controls over light artwork."
+      },
+      {
+        "name": "glass-light",
+        "value": "rgb(255 255 255 / 0.80); blur 16px, saturate 1.5; line hairline; soft shadow",
+        "purpose": "Title bar, tab pill and mini player over paper pages."
+      }
+    ],
+    "motion": [
+      {
+        "name": "finger",
+        "value": "tracks the finger's travel; settles by a spring started at release velocity",
+        "purpose": "Every fold: title bar (48px travel), tab pill and mini player (56px travel), Now Playing drag."
+      },
+      {
+        "name": "fold-tap",
+        "value": "360ms ease-out-expo",
+        "purpose": "Unfolding the tab pill from a tap or a page change, when no finger moves."
+      },
+      {
+        "name": "flight",
+        "value": "420ms ease-out-expo",
+        "purpose": "Artwork from a list into the sleeve hero; mini player into Now Playing."
+      },
+      {
+        "name": "label",
+        "value": "200ms ease-out-expo",
+        "purpose": "Play pill width following its label."
+      },
+      {
+        "name": "reduce-motion",
+        "value": "system reduce-motion",
+        "purpose": "Flights become a 150ms crossfade; folds settle without overshoot but still follow the finger."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "The Record Sleeve, Folding Into Glass",
+    "rules": [
+      "The Finger Rule",
+      "The Sleeve Is Ground Rule",
+      "The Sampled-Not-Picked Rule",
+      "The Title Passes Through Rule",
+      "The One Layer of Glass Rule",
+      "The Blur Is For Chrome Rule"
+    ]
+  }
+}

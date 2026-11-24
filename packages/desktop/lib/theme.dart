@@ -1,9 +1,12 @@
-// ListenJar's design system, the one listenjar.com uses: DESIGN.md at the
-// listeners root records it and apps/web/src/styles/app.css ships it. The app
-// is a working surface, so it takes the website's paper side (the dashboard):
-// warm paper ground, white panels with soft shadows, one periwinkle accent
-// for everything you can press, and the platform's own UI face set heavy and
-// tight for headings. Import as `brand`.
+// ListenJar's brand core, the one listenjar.com uses: DESIGN.md at the
+// listenjar root records it and apps/web/src/styles/app.css ships it. The
+// app's own layer on it is apps/desktop/DESIGN.md: paper pages take the
+// website's paper side (the dashboard: warm paper ground, white panels with
+// soft shadows), while show, episode and Now Playing pages are sleeves, their
+// artwork full-bleed over a ground sampled from it, under glass controls that
+// fold with the finger. One periwinkle accent for everything you can press,
+// and the platform's own UI face set heavy and tight for headings. Import as
+// `brand`.
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
