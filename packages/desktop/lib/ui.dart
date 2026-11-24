@@ -222,8 +222,9 @@ final class PlayButton extends StatelessWidget {
         final current = player.current?.id == episode.id;
         final playing = current && player.playing;
         final loading = current && player.loading;
-        final background = onInk ? brand.white : brand.ink;
-        final foreground = onInk ? brand.ink : brand.white;
+        final light = onInk || brand.Surface.of(context).onInk;
+        final background = light ? brand.white : brand.ink;
+        final foreground = light ? brand.ink : brand.white;
         return Tooltip(
           message: playing ? 'Pause' : (episode.started ? 'Resume' : 'Play'),
           waitDuration: const Duration(milliseconds: 500),
@@ -234,7 +235,7 @@ final class PlayButton extends StatelessWidget {
               style: IconButton.styleFrom(
                 backgroundColor: background,
                 foregroundColor: foreground,
-                hoverColor: onInk ? brand.paperDeep : const Color(0xFF23252D),
+                hoverColor: light ? brand.paperDeep : const Color(0xFF23252D),
                 shape: const CircleBorder(),
               ),
               onPressed: () {
@@ -299,15 +300,16 @@ final class DownloadButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final downloads = Services.of(context).downloads;
+    final p = brand.Surface.of(context);
     final (tip, icon, action) = switch (episode.downloadState) {
       DownloadState.none => (
         'Download',
-        const Icon(Icons.arrow_circle_down_rounded, size: 22, color: brand.fgSoft),
+        Icon(Icons.arrow_circle_down_rounded, size: 22, color: p.fgSoft),
         () => downloads.download(episode),
       ),
       DownloadState.queued => (
         'Waiting to download · Cancel',
-        const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: brand.fgFaint)),
+        SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: p.fgFaint)),
         () => downloads.delete(episode),
       ),
       DownloadState.downloading => (
@@ -317,20 +319,20 @@ final class DownloadButton extends StatelessWidget {
           child: CircularProgressIndicator(
             strokeWidth: 2.2,
             value: episode.downloadProgress > 0 ? episode.downloadProgress : null,
-            color: brand.accent,
-            backgroundColor: brand.paperDeep,
+            color: p.link,
+            backgroundColor: p.track,
           ),
         ),
         () => downloads.delete(episode),
       ),
       DownloadState.done => (
         'Downloaded · Delete download',
-        const Icon(Icons.check_circle_rounded, size: 22, color: brand.ok),
+        Icon(Icons.check_circle_rounded, size: 22, color: p.ok),
         () => downloads.delete(episode),
       ),
       DownloadState.failed => (
         '${episode.downloadError ?? 'The download failed'} · Try again',
-        const Icon(Icons.error_outline_rounded, size: 22, color: brand.danger),
+        Icon(Icons.error_outline_rounded, size: 22, color: p.danger),
         () => downloads.download(episode),
       ),
     };
@@ -339,7 +341,7 @@ final class DownloadButton extends StatelessWidget {
       waitDuration: const Duration(milliseconds: 400),
       child: IconButton(
         onPressed: () => unawaited(action()),
-        style: IconButton.styleFrom(hoverColor: brand.paperDeep),
+        style: IconButton.styleFrom(hoverColor: p.held),
         icon: icon,
       ),
     );
@@ -411,18 +413,23 @@ Future<void> shareLink(BuildContext context, String url, {String? title}) async 
 }
 
 final class EpisodeMenu extends StatelessWidget {
-  const EpisodeMenu({super.key, required this.episode, this.showLink = false, this.tone = MenuTone.paper});
+  const EpisodeMenu({super.key, required this.episode, this.showLink = false, this.tone});
   final PodcastEpisode episode;
   final bool showLink;
-  final MenuTone tone;
+
+  /// The surface's own when not given.
+  final MenuTone? tone;
 
   @override
-  Widget build(BuildContext context) => Dropdown(
-    tone: tone,
-    align: MenuAlign.end,
-    items: episodeActions(context, episode, showLink: showLink),
-    builder: (context, menu) => MoreButton(menu: menu, tone: tone),
-  );
+  Widget build(BuildContext context) {
+    final tone = this.tone ?? brand.Surface.of(context).menu;
+    return Dropdown(
+      tone: tone,
+      align: MenuAlign.end,
+      items: episodeActions(context, episode, showLink: showLink),
+      builder: (context, menu) => MoreButton(menu: menu, tone: tone),
+    );
+  }
 }
 
 // The episode row.
@@ -452,6 +459,7 @@ final class _EpisodeRowState extends State<EpisodeRow> {
   Widget build(BuildContext context) {
     final e = widget.episode;
     final text = Theme.of(context).textTheme;
+    final p = brand.Surface.of(context);
     final narrow = MediaQuery.sizeOf(context).width < 520;
     final progress = switch (e.duration) {
       final d? when e.started && d > Duration.zero => (e.position.inMilliseconds / d.inMilliseconds).clamp(0.0, 1.0),
@@ -464,7 +472,7 @@ final class _EpisodeRowState extends State<EpisodeRow> {
         duration: brand.quick,
         curve: brand.easeOutExpo,
         decoration: BoxDecoration(
-          color: _hover ? brand.mist : brand.mist.withValues(alpha: 0),
+          color: _hover ? p.hover : p.hover.withValues(alpha: 0),
           borderRadius: BorderRadius.circular(14),
         ),
         child: InkWell(
@@ -487,7 +495,7 @@ final class _EpisodeRowState extends State<EpisodeRow> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: text.bodySmall!.copyWith(
-                      color: brand.fgSoft,
+                      color: p.fgSoft,
                       fontSize: 13,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
@@ -498,7 +506,7 @@ final class _EpisodeRowState extends State<EpisodeRow> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: text.titleMedium!.copyWith(
-                      color: e.played ? brand.fgSoft : brand.fg,
+                      color: e.played ? p.fgSoft : p.fg,
                       fontSize: 15.5,
                       height: 1.3,
                     ),
@@ -510,7 +518,7 @@ final class _EpisodeRowState extends State<EpisodeRow> {
                       child: SizedBox(
                         width: 120,
                         height: 3,
-                        child: LinearProgressIndicator(value: progress, color: brand.accent, backgroundColor: brand.paperDeep),
+                        child: LinearProgressIndicator(value: progress, color: p.link, backgroundColor: p.track),
                       ),
                     ),
                   ],
@@ -531,23 +539,28 @@ final class _EpisodeRowState extends State<EpisodeRow> {
   }
 }
 
-/// A white panel of rows, the dashboard's list surface.
-Widget rowsPanel(List<Widget> rows) => DecoratedBox(
-  decoration: BoxDecoration(
-    color: brand.white,
-    borderRadius: BorderRadius.circular(brand.radiusTile + 4),
-    boxShadow: const [brand.shadowSoft],
-  ),
-  child: Padding(
-    padding: const EdgeInsets.all(6),
-    child: Column(children: [
-      for (final (i, row) in rows.indexed) ...[
-        if (i > 0) const Divider(height: 1, thickness: 1, indent: 12, endIndent: 12, color: brand.line),
-        row,
-      ],
-    ]),
-  ),
-);
+/// A panel of rows, the dashboard's list surface: white on paper with the
+/// soft shadow, a faint tile on ink with none (DESIGN.md "The
+/// Glow-Not-Border Rule").
+Widget rowsPanel(List<Widget> rows) => Builder(builder: (context) {
+  final p = brand.Surface.of(context);
+  return DecoratedBox(
+    decoration: BoxDecoration(
+      color: p.panel,
+      borderRadius: BorderRadius.circular(brand.radiusTile + 4),
+      boxShadow: p.onInk ? null : const [brand.shadowSoft],
+    ),
+    child: Padding(
+      padding: const EdgeInsets.all(6),
+      child: Column(children: [
+        for (final (i, row) in rows.indexed) ...[
+          if (i > 0) Divider(height: 1, thickness: 1, indent: 12, endIndent: 12, color: p.line),
+          row,
+        ],
+      ]),
+    ),
+  );
+});
 
 /// A section's heading, in the display voice, with an optional action.
 Widget sectionHeading(BuildContext context, String title, {Widget? action, double top = 32}) => Padding(
@@ -606,9 +619,9 @@ Widget problem(BuildContext context, String message, [Object? error]) => Tooltip
     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
     decoration: BoxDecoration(color: const Color(0x14D4483F), borderRadius: BorderRadius.circular(12)),
     child: Row(children: [
-      const Icon(Icons.error_outline_rounded, size: 18, color: brand.danger),
+      Icon(Icons.error_outline_rounded, size: 18, color: brand.Surface.of(context).danger),
       const SizedBox(width: 10),
-      Expanded(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.fg))),
+      Expanded(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.Surface.of(context).fg))),
     ]),
   ),
 );

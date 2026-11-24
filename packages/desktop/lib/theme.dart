@@ -159,7 +159,133 @@ ThemeData _theme() {
   );
 }
 
-enum Tone { accent, ink, quiet }
+/// The Two-Tone Rule (DESIGN.md "Colors"): every colour that carries text
+/// or state, for paper and for ink. Pages set theirs with [Surface];
+/// components take [Surface.of] instead of the paper constants, so the
+/// same row reads on a paper page and on a show's sleeve.
+final class Palette {
+  const Palette._({
+    required this.onInk,
+    required this.fg,
+    required this.fgSoft,
+    required this.fgFaint,
+    required this.link,
+    required this.line,
+    required this.hover,
+    required this.held,
+    required this.panel,
+    required this.track,
+    required this.field,
+    required this.ok,
+    required this.danger,
+  });
+
+  final bool onInk;
+  final Color fg;
+  final Color fgSoft;
+  final Color fgFaint;
+
+  /// The accent as text and icons: periwinkle on paper, light on ink.
+  final Color link;
+  final Color line;
+
+  /// A row or button under the pointer.
+  final Color hover;
+
+  /// A button held down, or holding its menu open.
+  final Color held;
+
+  /// The surface rows sit on.
+  final Color panel;
+
+  /// Empty progress and loading tracks.
+  final Color track;
+
+  /// Text fields.
+  final Color field;
+  final Color ok;
+  final Color danger;
+
+  static const paper = _paperPalette;
+  static const ink = _inkPalette;
+
+  MenuTone get menu => onInk ? MenuTone.ink : MenuTone.paper;
+}
+
+const _paperPalette = Palette._(
+  onInk: false,
+  fg: fg,
+  fgSoft: fgSoft,
+  fgFaint: fgFaint,
+  link: accent,
+  line: line,
+  hover: mist,
+  held: paperDeep,
+  panel: white,
+  track: paperDeep,
+  field: white,
+  ok: ok,
+  danger: danger,
+);
+
+const _inkPalette = Palette._(
+  onInk: true,
+  fg: snow,
+  fgSoft: snowSoft,
+  fgFaint: snowFaint,
+  link: accentLight,
+  line: inkLine,
+  hover: Color(0x14FFFFFF),
+  held: Color(0x1AFFFFFF),
+  panel: inkTile,
+  track: inkLine,
+  field: inkTile,
+  ok: okOnInk,
+  danger: dangerOnInk,
+);
+
+
+/// Says which [Palette] the widgets under it draw with; paper when none.
+final class Surface extends InheritedWidget {
+  const Surface({super.key, required this.palette, required super.child});
+  final Palette palette;
+
+  static Palette of(BuildContext context) =>
+    context.dependOnInheritedWidgetOfExactType<Surface>()?.palette ?? Palette.paper;
+
+  @override
+  bool updateShouldNotify(Surface oldWidget) => palette != oldWidget.palette;
+}
+
+// Glass (DESIGN.md "Glass Vocabulary"): a tint, a 16px blur at saturation
+// 150% and a hairline, always together.
+const glassDark = Color(0xD10E0F14);
+const glassClear = Color(0x660E0F14);
+const glassLight = Color(0xCCFFFFFF);
+const glassBlur = 16.0;
+
+/// The app's three timed speeds besides [quick] (apps/desktop/DESIGN.md):
+/// a glass changing tone, a label resizing its pill, a flight.
+const toneSpeed = Duration(milliseconds: 300);
+const labelSpeed = Duration(milliseconds: 200);
+const flightSpeed = Duration(milliseconds: 420);
+
+/// A show's glow (apps/desktop/DESIGN.md "Colors"): the artwork's most
+/// vivid hue, lifted to a light that reads as light on ink: saturation at
+/// least 0.55, lightness 0.50–0.62. It only ever shines on ink, at
+/// [glowAlpha], the way the core's periwinkle and violet glows do.
+Color glow(Color vivid) {
+  final hsl = HSLColor.fromColor(vivid);
+  return hsl
+    .withSaturation(hsl.saturation.clamp(0.55, 0.85))
+    .withLightness(hsl.lightness.clamp(0.50, 0.62))
+    .toColor();
+}
+
+/// How strongly a show's glow shines on ink.
+const glowAlpha = 0.32;
+
+enum Tone { accent, ink, quiet, quietOnInk }
 
 enum ButtonSize { sm, md }
 
@@ -171,6 +297,7 @@ ButtonStyle button(Tone tone, [ButtonSize size = ButtonSize.md]) {
     Tone.accent => (accent, accentHover, white),
     Tone.ink => (ink, const Color(0xFF23252D), white),
     Tone.quiet => (paper, paperDeep, fg),
+    Tone.quietOnInk => (inkTile, const Color(0x1AFFFFFF), snow),
   };
   final (height, side, radius, font) = switch (size) {
     ButtonSize.sm => (38.0, 18.0, 12.0, 14.0),

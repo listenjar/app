@@ -27,7 +27,8 @@
 //                          `local:<show>`; the first in the Cloud if
 //                          not given), create (a podcast of their own
 //                          called `title`, in the Cloud if `cloud` is
-//                          true, else on this device), follow (a YouTube
+//                          true, else on this device), rss (a podcast's
+//                          feed `url`), follow (a YouTube
 //                          playlist or channel `url`, on this device),
 //                          unfollow (`show`), move (a `show` on this
 //                          device to the Cloud, or a Cloud `feed` here),

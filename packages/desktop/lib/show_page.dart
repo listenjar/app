@@ -1,5 +1,5 @@
-// A show: its cover, who makes it and what it's about, Follow, and every
-// episode, newest first, filtered to the unplayed or the downloaded and
+// A show, on its sleeve (sleeve.dart): its artwork, who makes it and what
+// it's about, play, Follow, and every episode, newest first, filtered to the unplayed or the downloaded and
 // searchable by title and show notes. Opened
 // from the library, search or an episode; a show looked at from search is
 // in the library unfollowed until the listener follows it. A podcast of the
@@ -19,6 +19,7 @@ import 'menu.dart';
 import 'plans.dart' show showPlans;
 import 'shared_links.dart' show LocalOwn;
 import 'shell.dart';
+import 'sleeve.dart';
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -67,64 +68,79 @@ final class _ShowPageState extends State<ShowPage> {
         final episodes = s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst, query: _query.text);
         final query = _query.text.trim();
         final videos = show.fromYouTube || episodes.any((e) => e.videoId != null);
-        return PageBody(children: [
-          if (Navigator.of(context).canPop()) backButton(context, 'Back'),
-          _header(context, show),
-          if (s.podcasts.paused(show)) ...[
-            const SizedBox(height: 16),
-            _paused(context),
-          ] else if (show.refreshError case final error?) ...[
-            const SizedBox(height: 16),
-            problem(context, 'Couldn’t refresh this show: $error'),
-          ],
-          const SizedBox(height: 28),
-          _toolbar(context, show, episodes),
-          const SizedBox(height: 12),
-          if (episodes.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Text(
-                switch (_filter) {
-                  _ when query.isNotEmpty => switch (_filter) {
-                    EpisodeFilter.all => 'No episodes match “$query”.',
-                    EpisodeFilter.unplayed => 'No unplayed episodes match “$query”.',
-                    EpisodeFilter.downloaded => 'No downloaded episodes match “$query”.',
-                  },
-                  EpisodeFilter.all when show.isOwn => 'Add videos: search YouTube or paste a video link, and it’s added here.',
-                  EpisodeFilter.all => 'This feed lists no episodes with audio.',
-                  EpisodeFilter.unplayed => 'You’ve heard every episode.',
-                  EpisodeFilter.downloaded => 'No episodes downloaded.',
-                },
-                style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: brand.fgSoft),
-              ),
-            )
-          else ...[
-            rowsPanel([
-              for (final e in episodes.take(_shown))
-                EpisodeRow(
-                  episode: e,
-                  thumbnail: videos,
-                  trailing: !show.isOwn ? null : IconButton(
-                    tooltip: 'Remove episode',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => s.library.removeEpisode(e.id),
-                    icon: const Icon(Icons.close_rounded, size: 17, color: brand.fgFaint),
-                  ),
+        const p = brand.Palette.ink;
+        return SleevePage(
+          artwork: show.artworkUrl,
+          title: show.title,
+          info: _info(context, show),
+          actions: [
+            if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
+              Builder(
+                builder: (context) => GlassIcon(
+                  icon: Icons.adaptive.share,
+                  tooltip: 'Share',
+                  size: 21,
+                  onPressed: () => unawaited(shareLink(context, link, title: show.title)),
                 ),
-            ]),
-            if (episodes.length > _shown)
+              ),
+            glassMore(_menu(context, show)),
+          ],
+          children: [
+            if (s.podcasts.paused(show)) ...[
+              _paused(context),
+              const SizedBox(height: 16),
+            ] else if (show.refreshError case final error?) ...[
+              problem(context, 'Couldn’t refresh this show: $error'),
+              const SizedBox(height: 16),
+            ],
+            _toolbar(context, show, episodes),
+            const SizedBox(height: 12),
+            if (episodes.isEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Center(
-                  child: TextButton(
-                    style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-                    onPressed: () => setState(() => _shown += _page),
-                    child: Text('Show ${(episodes.length - _shown).clamp(0, _page)} more'),
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  switch (_filter) {
+                    _ when query.isNotEmpty => switch (_filter) {
+                      EpisodeFilter.all => 'No episodes match “$query”.',
+                      EpisodeFilter.unplayed => 'No unplayed episodes match “$query”.',
+                      EpisodeFilter.downloaded => 'No downloaded episodes match “$query”.',
+                    },
+                    EpisodeFilter.all when show.isOwn => 'Add videos: search YouTube or paste a video link, and it’s added here.',
+                    EpisodeFilter.all => 'This feed lists no episodes with audio.',
+                    EpisodeFilter.unplayed => 'You’ve heard every episode.',
+                    EpisodeFilter.downloaded => 'No episodes downloaded.',
+                  },
+                  style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: p.fgSoft),
+                ),
+              )
+            else ...[
+              rowsPanel([
+                for (final e in episodes.take(_shown))
+                  EpisodeRow(
+                    episode: e,
+                    thumbnail: videos,
+                    trailing: !show.isOwn ? null : IconButton(
+                      tooltip: 'Remove episode',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => s.library.removeEpisode(e.id),
+                      icon: Icon(Icons.close_rounded, size: 17, color: p.fgFaint),
+                    ),
+                  ),
+              ]),
+              if (episodes.length > _shown)
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Center(
+                    child: TextButton(
+                      style: brand.button(brand.Tone.quietOnInk, brand.ButtonSize.sm),
+                      onPressed: () => setState(() => _shown += _page),
+                      child: Text('Show ${(episodes.length - _shown).clamp(0, _page)} more'),
+                    ),
                   ),
                 ),
-              ),
+            ],
           ],
-        ]);
+        );
       },
     );
   }
@@ -135,19 +151,19 @@ final class _ShowPageState extends State<ShowPage> {
     final signedIn = Services.of(context).account.user != null;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
-      decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: brand.inkTile, borderRadius: BorderRadius.circular(12)),
       child: Row(children: [
-        const Icon(Icons.pause_circle_outline_rounded, size: 18, color: brand.accent),
+        const Icon(Icons.pause_circle_outline_rounded, size: 18, color: brand.accentLight),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
             'New videos are paused: following playlists and channels takes a plan. Everything here still plays.',
-            style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.fg),
+            style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.snow),
           ),
         ),
         const SizedBox(width: 8),
         TextButton(
-          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          style: brand.button(brand.Tone.quietOnInk, brand.ButtonSize.sm),
           onPressed: signedIn
             ? () => unawaited(showPlans(context, title: 'Keep getting new videos'))
             : Navigation.of(context).openSettings,
@@ -157,129 +173,73 @@ final class _ShowPageState extends State<ShowPage> {
     );
   }
 
-  Widget _header(BuildContext context, Podcast show) {
+  /// What sits under the hero (beside the artwork on a wide window): who
+  /// makes it, its title, play and the show's actions, and what it's about.
+  Widget _info(BuildContext context, Podcast show) {
     final s = Services.of(context);
     final text = Theme.of(context).textTheme;
-    final narrow = MediaQuery.sizeOf(context).width < 640;
-    final cover = narrow ? 128.0 : 200.0;
+    final wide = MediaQuery.sizeOf(context).width >= wideWidth;
     final about = show.description.replaceAll(RegExp(r'<[^>]+>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-    final info = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(show.title, style: text.headlineMedium!.copyWith(fontSize: narrow ? 26 : 34, height: 1.1)),
-      if (show.author.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        Text(show.author, style: text.bodyMedium!.copyWith(color: brand.fgSoft, fontWeight: FontWeight.w600)),
+    final newest = s.library.episodes(show.id, filter: EpisodeFilter.unplayed).firstOrNull
+      ?? s.library.episodes(show.id).firstOrNull;
+    final refreshing = s.podcasts.refreshing.contains(show.id);
+    final note = switch (show) {
+      Podcast(cloudFeedId: _?) => 'One of your ListenJar feeds. Sign in, in Settings, to manage it.',
+      _ when show.kind == PodcastKind.youtubeFeed || show.isOwn =>
+        'On this device: its videos stream from YouTube as you play them, and nothing is downloaded or uploaded. '
+          'Only this app has it.',
+      _ => null,
+    };
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (show.author.isNotEmpty || show.isOwn) ...[
+        Text(
+          show.isOwn ? 'Podcast of your own' : show.author,
+          style: text.bodyMedium!.copyWith(color: brand.snowSoft, fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
+        ),
+        const SizedBox(height: 6),
       ],
-      const SizedBox(height: 18),
-      Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+      Text(
+        show.title,
+        style: text.headlineMedium!.copyWith(color: brand.snow, fontSize: wide ? 40 : 28, height: wide ? 1.08 : 1.1),
+      ),
+      const SizedBox(height: 20),
+      Wrap(spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        if (newest != null) PlayPill(episode: newest),
         if (show.isOwn)
-          brand.accentShadow(
-            enabled: true,
-            child: TextButton.icon(
-              style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
-              onPressed: () => Navigation.of(context).openSearch(youtube: true, into: LocalOwn(show).id),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add videos'),
-            ),
+          SleeveCircle(
+            icon: Icons.add_rounded,
+            tooltip: 'Add videos',
+            onPressed: () => Navigation.of(context).openSearch(youtube: true, into: LocalOwn(show).id),
           )
         else if (show.followed)
-          TextButton.icon(
-            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          SleeveCircle(
+            icon: Icons.check_rounded,
+            tooltip: show.cloudFeedId != null ? 'Following' : 'Following · Unfollow',
             onPressed: show.cloudFeedId != null ? null : () => _unfollow(context, show),
-            icon: const Icon(Icons.check_rounded, size: 18),
-            label: const Text('Following'),
           )
         else
-          brand.accentShadow(
-            enabled: true,
-            child: TextButton.icon(
-              style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
-              onPressed: () => s.podcasts.followShow(show),
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: Text(show.isYouTube ? 'Add to Library' : 'Follow'),
-            ),
+          SleeveCircle(
+            icon: Icons.add_rounded,
+            tooltip: show.isYouTube ? 'Add to Library' : 'Follow',
+            onPressed: () => s.podcasts.followShow(show),
           ),
         if (show.refreshes)
-          Tooltip(
-            message: 'Check for new episodes',
-            child: IconButton(
-              onPressed: s.podcasts.refreshing.contains(show.id) ? null : () => unawaited(s.podcasts.refresh(show)),
-              icon: s.podcasts.refreshing.contains(show.id)
-                ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: brand.accent))
-                : const Icon(Icons.refresh_rounded, color: brand.fgSoft),
-            ),
+          SleeveCircle(
+            icon: Icons.refresh_rounded,
+            tooltip: 'Check for new episodes',
+            busy: refreshing,
+            onPressed: () => unawaited(s.podcasts.refresh(show)),
           ),
-        Dropdown(
-          align: MenuAlign.end,
-          items: [
-            if (show.followed && show.kind == PodcastKind.rss) ...[
-              MenuEntry(
-                'Download new episodes',
-                checked: show.autoDownload,
-                onPressed: () => s.library.setAutoDownload(show.id, !show.autoDownload),
-              ),
-              const MenuDivider(),
-            ],
-            if (show.isOwn) ...[
-              MenuEntry('Change artwork', icon: Icons.image_outlined, onPressed: () => unawaited(_pickArtwork(context, show))),
-              const MenuDivider(),
-            ],
-            MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
-            MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
-              s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
-            }),
-            if (show.kind == PodcastKind.rss)
-              MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
-            if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
-              MenuEntry(show.fromYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
-                unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
-              }),
-            if ((show.kind == PodcastKind.youtubeFeed && show.followed) || show.isOwn)
-              MenuEntry('Move to ListenJar Cloud', icon: Icons.cloud_upload_outlined, onPressed: () => unawaited(moveToCloud(context, show))),
-            if (show.followed && show.cloudFeedId == null) ...[
-              const MenuDivider(),
-              MenuEntry(
-                show.isOwn ? 'Delete podcast' : show.isYouTube ? 'Remove from Library' : 'Unfollow',
-                icon: Icons.remove_circle_outline_rounded,
-                danger: true,
-                onPressed: () => _unfollow(context, show),
-              ),
-            ],
-          ],
-          builder: (context, menu) => MoreButton(menu: menu),
-        ),
       ]),
-      if (show.kind == PodcastKind.youtubeFeed || show.isOwn) ...[
-        const SizedBox(height: 12),
-        Text(
-          'On this device: its videos stream from YouTube as you play them, and nothing is downloaded or uploaded. '
-            'Only this app has it.',
-          style: text.bodySmall!.copyWith(color: brand.fgSoft),
+      if (note != null) ...[
+        const SizedBox(height: 16),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: Text(note, style: text.bodySmall!.copyWith(color: brand.snowSoft)),
         ),
       ],
-      if (show.cloudFeedId != null) ...[
-        const SizedBox(height: 12),
-        Text(
-          'One of your ListenJar feeds. Sign in, in Settings, to manage it.',
-          style: text.bodySmall!.copyWith(color: brand.fgSoft),
-        ),
-      ],
-    ]);
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (narrow) ...[
-        Artwork(url: show.artworkUrl, title: show.title, size: cover),
-        const SizedBox(height: 20),
-        info,
-      ] else
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          DecoratedBox(
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(22), boxShadow: const [brand.shadowSoft]),
-            child: Artwork(url: show.artworkUrl, title: show.title, size: cover, radius: 22),
-          ),
-          const SizedBox(width: 28),
-          Expanded(child: info),
-        ]),
       if (about.isNotEmpty) ...[
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
           child: GestureDetector(
@@ -294,7 +254,7 @@ final class _ShowPageState extends State<ShowPage> {
                   about,
                   maxLines: _aboutOpen ? null : 3,
                   overflow: _aboutOpen ? null : TextOverflow.ellipsis,
-                  style: text.bodyMedium!.copyWith(color: brand.fgSoft),
+                  style: text.bodyMedium!.copyWith(color: brand.snowSoft),
                 ),
               ),
             ),
@@ -302,6 +262,46 @@ final class _ShowPageState extends State<ShowPage> {
         ),
       ],
     ]);
+  }
+
+  /// The show's more menu, in the glass cluster at the top right.
+  List<Widget> _menu(BuildContext context, Podcast show) {
+    final s = Services.of(context);
+    return [
+      if (show.followed && show.kind == PodcastKind.rss) ...[
+        MenuEntry(
+          'Download new episodes',
+          checked: show.autoDownload,
+          onPressed: () => s.library.setAutoDownload(show.id, !show.autoDownload),
+        ),
+        const MenuDivider(),
+      ],
+      if (show.isOwn) ...[
+        MenuEntry('Change artwork', icon: Icons.image_outlined, onPressed: () => unawaited(_pickArtwork(context, show))),
+        const MenuDivider(),
+      ],
+      MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
+      MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
+        s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
+      }),
+      if (show.kind == PodcastKind.rss)
+        MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
+      if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
+        MenuEntry(show.fromYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
+          unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
+        }),
+      if ((show.kind == PodcastKind.youtubeFeed && show.followed) || show.isOwn)
+        MenuEntry('Move to ListenJar Cloud', icon: Icons.cloud_upload_outlined, onPressed: () => unawaited(moveToCloud(context, show))),
+      if (show.followed && show.cloudFeedId == null) ...[
+        const MenuDivider(),
+        MenuEntry(
+          show.isOwn ? 'Delete podcast' : show.isYouTube ? 'Remove from Library' : 'Unfollow',
+          icon: Icons.remove_circle_outline_rounded,
+          danger: true,
+          onPressed: () => _unfollow(context, show),
+        ),
+      ],
+    ];
   }
 
   Widget _toolbar(BuildContext context, Podcast show, List<PodcastEpisode> episodes) {
@@ -314,11 +314,11 @@ final class _ShowPageState extends State<ShowPage> {
           _shown = _page;
         }),
         style: TextButton.styleFrom(
-          backgroundColor: on ? brand.accent : brand.white,
-          foregroundColor: on ? brand.white : brand.fg,
+          backgroundColor: on ? brand.accent : brand.inkTile,
+          foregroundColor: on ? brand.white : brand.snow,
           minimumSize: const Size(0, 32),
           padding: const EdgeInsets.symmetric(horizontal: 14),
-          shape: StadiumBorder(side: BorderSide(color: on ? brand.accent : brand.line)),
+          shape: StadiumBorder(side: BorderSide(color: on ? brand.accent : brand.inkLine)),
           textStyle: text.labelLarge!.copyWith(fontSize: 13),
         ),
         child: Text(label),
@@ -333,8 +333,8 @@ final class _ShowPageState extends State<ShowPage> {
     final sort = Tooltip(
         message: _oldestFirst ? 'Oldest first' : 'Newest first',
         child: TextButton.icon(
-          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm).copyWith(
-            backgroundColor: WidgetStateProperty.fromMap({WidgetState.hovered: brand.paperDeep, WidgetState.any: const Color(0x00000000)}),
+          style: brand.button(brand.Tone.quietOnInk, brand.ButtonSize.sm).copyWith(
+            backgroundColor: WidgetStateProperty.fromMap({WidgetState.hovered: brand.inkTile, WidgetState.any: brand.inkTile.withAlpha(0)}),
           ),
           onPressed: () => setState(() => _oldestFirst = !_oldestFirst),
           icon: Icon(_oldestFirst ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 16),
@@ -378,11 +378,11 @@ final class _ShowPageState extends State<ShowPage> {
           height: 34,
           padding: const EdgeInsets.only(left: 12, right: 2),
           decoration: ShapeDecoration(
-            color: brand.white,
-            shape: StadiumBorder(side: BorderSide(color: focused ? brand.accent.withValues(alpha: 0.6) : brand.line, width: focused ? 1.5 : 1)),
+            color: brand.inkTile,
+            shape: StadiumBorder(side: BorderSide(color: focused ? brand.accentLight.withValues(alpha: 0.7) : brand.inkLine, width: focused ? 1.5 : 1)),
           ),
           child: Row(children: [
-            Icon(Icons.search_rounded, size: 18, color: focused ? brand.accent : brand.fgSoft),
+            Icon(Icons.search_rounded, size: 18, color: focused ? brand.accentLight : brand.snowSoft),
             const SizedBox(width: 8),
             Expanded(
               child: CallbackShortcuts(
@@ -394,13 +394,13 @@ final class _ShowPageState extends State<ShowPage> {
                   // does that for a mouse on a phone, not a finger.
                   onTapOutside: (_) => _queryFocus.unfocus(),
                   onChanged: (_) => setState(() => _shown = _page),
-                  style: text.bodyMedium!.copyWith(height: 1.2),
-                  cursorColor: brand.accent,
+                  style: text.bodyMedium!.copyWith(color: brand.snow, height: 1.2),
+                  cursorColor: brand.accentLight,
                   decoration: InputDecoration(
                     isCollapsed: true,
                     border: InputBorder.none,
                     hintText: 'Search episodes',
-                    hintStyle: text.bodyMedium!.copyWith(color: brand.fgSoft, height: 1.2),
+                    hintStyle: text.bodyMedium!.copyWith(color: brand.snowSoft, height: 1.2),
                   ),
                 ),
               ),
@@ -415,7 +415,7 @@ final class _ShowPageState extends State<ShowPage> {
                   clear();
                   _queryFocus.requestFocus();
                 },
-                icon: const Icon(Icons.close_rounded, color: brand.fgSoft),
+                icon: const Icon(Icons.close_rounded, color: brand.snowSoft),
               ))
             else
               const SizedBox(width: 10),

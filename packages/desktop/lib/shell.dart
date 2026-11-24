@@ -6,6 +6,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -54,6 +55,10 @@ final class Shell extends StatefulWidget {
 
 final class _ShellState extends State<Shell> implements NavigationTarget {
   Section _section = Section.home;
+
+  /// How tall the floating mini player is on a wide window, so pages can
+  /// scroll their last rows clear of it.
+  double _miniPlayer = 0;
   final _navigators = {for (final s in Section.values) s: GlobalKey<NavigatorState>()};
 
   /// Search asked for from elsewhere, for the search page to pick up.
@@ -235,14 +240,40 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
             body: wide
               ? Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   _Sidebar(section: _section, onGo: _go),
+                  // The mini player floats over the page, which pads its
+                  // bottom by the player's height (MediaQuery padding), so a
+                  // show's sleeve runs on under it instead of stopping at a
+                  // paper strip.
                   Expanded(
-                    child: Column(children: [
-                      Expanded(child: _stacks()),
-                      const MiniPlayer(wide: true),
+                    child: Stack(children: [
+                      Positioned.fill(
+                        child: MediaQuery(
+                          data: MediaQuery.of(context).copyWith(
+                            padding: MediaQuery.paddingOf(context).copyWith(
+                              bottom: MediaQuery.paddingOf(context).bottom + _miniPlayer,
+                            ),
+                          ),
+                          child: _stacks(),
+                        ),
+                      ),
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: _OnHeight(
+                          onHeight: (h) => setState(() => _miniPlayer = h),
+                          child: const MiniPlayer(wide: true),
+                        ),
+                      ),
                     ]),
                   ),
                 ])
-              : SafeArea(bottom: false, child: _stacks()),
+              // No top inset here: a show's artwork runs under the status
+              // bar; pages pad themselves by it (PageBody, SleevePage).
+              : SafeArea(top: false, bottom: false, child: _stacks()),
+            // The page runs on under the mini player and the tab bar, and
+            // pads its end by their height (Scaffold's MediaQuery padding).
+            extendBody: !wide,
             bottomNavigationBar: wide
               ? null
               : Column(mainAxisSize: MainAxisSize.min, children: [
@@ -463,7 +494,12 @@ final class PageBody extends StatelessWidget {
           TargetPlatform.iOS || TargetPlatform.android => ScrollViewKeyboardDismissBehavior.onDrag,
           _ => ScrollViewKeyboardDismissBehavior.manual,
         },
-        padding: EdgeInsets.fromLTRB(gutter, mac && width >= wideWidth ? 40 : 24, gutter, 40),
+        padding: EdgeInsets.fromLTRB(
+          gutter,
+          MediaQuery.paddingOf(context).top + (mac && width >= wideWidth ? 40 : 24),
+          gutter,
+          MediaQuery.paddingOf(context).bottom + 40,
+        ),
         children: [
           // Every page starts at the same left edge; a narrower one ends
           // sooner instead of moving to the middle.
@@ -521,4 +557,31 @@ const _windowChannel = MethodChannel('listenjar/window');
 void windowCommand(String method) {
   if (defaultTargetPlatform != TargetPlatform.macOS) return;
   unawaited(_windowChannel.invokeMethod<void>(method).catchError((_) {}, test: (e) => e is MissingPluginException));
+}
+
+/// Tells [onHeight] its child's height whenever it changes.
+final class _OnHeight extends SingleChildRenderObjectWidget {
+  const _OnHeight({required this.onHeight, required super.child});
+  final ValueChanged<double> onHeight;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderOnHeight(onHeight);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderOnHeight renderObject) => renderObject.onHeight = onHeight;
+}
+
+final class _RenderOnHeight extends RenderProxyBox {
+  _RenderOnHeight(this.onHeight);
+  ValueChanged<double> onHeight;
+  double? _told;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final height = size.height;
+    if (height == _told) return;
+    _told = height;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onHeight(height));
+  }
 }

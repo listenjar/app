@@ -14,8 +14,8 @@ colors:
   glass-light: "rgb(255 255 255 / 0.80)"
   glass-clear: "rgb(14 15 20 / 0.40)"
   # The app's own.
-  sleeve-fallback: "#0a0b0f"
-  sleeve-scrim-end: "rgb(10 11 15 / 0)"
+  glass-on-ink: "rgb(255 255 255 / 0.12)"
+  glow-fallback: "#6a55f0"
 typography:
   sleeve-title:
     fontFamily: "system-ui"
@@ -48,7 +48,7 @@ typography:
 rounded:
   artwork-row: "12px"
   artwork-shelf: "18px"
-  artwork-banner: "18px"
+  artwork-header: "18px"
   sheet: "22px"
   full: "9999px"
 spacing:
@@ -127,14 +127,14 @@ This is a layer, not a second system. The brand core in the [root DESIGN.md](../
 
 **Creative North Star: "The Record Sleeve, Folding Into Glass"**
 
-At rest, a show is its sleeve: the artwork runs full-bleed to the top of the screen, under the status bar, and the page below takes its colour, so every show's page looks like that show and no other. The only chrome on a sleeve at rest is a few small glass controls floating over the picture: back, share, more. Then the listener scrolls, and the sleeve folds away: the artwork slides up under a glass title bar that grows out of those same controls, and the tab bar folds around the mini player. Scroll back to the top and it all unfolds in reverse, exactly.
+At rest, a show is its sleeve: the artwork runs full-bleed to the top of the screen, under the status bar, and the ink below is lit by a glow in the artwork's own colour, so every show's page looks like that show and no other. The only chrome on a sleeve at rest is a few small glass controls floating over the picture: back, share, more. Then the listener scrolls, and the sleeve folds away: the artwork slides up under a glass title bar that grows out of those same controls, and the tab bar folds around the mini player. Scroll back to the top and it all unfolds in reverse, exactly.
 
 The two states are one design driven by the listener's finger. The artwork owns the page while the listener is looking; the glass takes over while they are reading, scrolling or choosing. What drives a morph is the finger's motion (which way it moves, how far, how fast), not where the page happens to be and not a timer. Push the content up and the chrome folds as far as the finger has pushed; pull it back and it unfolds; let go and it settles with the finger's own speed into the state the motion was heading for.
 
-The app keeps the core's split of ink and paper, and adds the sleeve. Sleeve pages (a show, an episode, Now Playing) are dark and take their colour from the artwork. Paper pages (Home, Library, Search, Up Next, Downloads, Settings) stay on the core's working surfaces, the dashboard's paper side. The tab bar and the controls carry glass over both, and switch tone with the page under them.
+The app keeps the core's split of ink and paper, and adds the sleeve. Sleeve pages (a show, an episode, Now Playing) are the core's ink, lit by their artwork's glow. Paper pages (Home, Library, Search, Up Next, Downloads, Settings) stay on the core's working surfaces, the dashboard's paper side. The tab bar and the controls carry glass over both, and switch tone with the page under them.
 
 **Key Characteristics:**
-- Full-bleed artwork at the top of every show and episode page, under the status bar, fading into a ground sampled from the artwork.
+- Full-bleed artwork at the top of every show and episode page, under the status bar, fading into ink lit by a glow in the artwork's colour.
 - Clear-glass controls over the artwork at rest; a dark-glass title bar once the hero has scrolled away.
 - A floating glass tab pill with the mini player above it; on scrolling down they fold into two circles with the mini player between them.
 - Morphs follow the finger's motion: they move with it while it's down and settle with its speed when it lets go.
@@ -146,22 +146,23 @@ The app keeps the core's split of ink and paper, and adds the sleeve. Sleeve pag
 
 ## Colors
 
-The core's palette, plus one colour per show, sampled from its artwork.
+The core's palette, plus one light per show, sampled from its artwork.
 
 ### Primary
 - **Periwinkle** (accent): unchanged from the core. The play pill and every other action, on sleeves as on paper; the artwork's colour never replaces it.
 - **Light Periwinkle** (accent-light): the accent on sleeves: links in show notes, the show link's chevron, selected tab on ink glass, the icons in secondary circle buttons.
 
 ### Neutral
-- **Sleeve** (sampled per show): the ground of a sleeve page. Take the artwork's average colour along its bottom edge (the edge the hero fades from), keep its hue, cap its HSL saturation at 0.45 and clamp its lightness to 0.10–0.16. That keeps snow at 12:1 or better, snow-soft and accent-light at 4.5:1 or better, on any sleeve. Sample once, after the artwork decodes, and store the result with the show, so a second visit opens on the right colour at once.
+- **Ink** (ink): the ground of every sleeve page, as on the core's ink panels. Never tinted: darkening an artwork's colour into a page ground turns most covers to mud.
+- **Glow** (sampled per show): the artwork's most vivid hue, as light on the ink. Read the artwork at 20×20, sort its pixels into twelve 30° hue buckets, weight each by its saturation away from black and white, and take the heaviest bucket's average; lift it to saturation 0.55–0.85 and lightness 0.50–0.62, and shine it at 32% in a wide radial glow from behind the artwork, with the core's faint violet across from it. A greyscale cover glows periwinkle; a lettered cover glows its violet. Sample once, after the artwork decodes, so a second visit opens lit at once; the glow fades in from its own colour at alpha 0.
 - **Sleeve fallback** (ink): the sleeve while there's no artwork or before the first sample. When the sample arrives, the ground fades from ink to the sleeve over the core's tone speed (300ms).
 - **Glass** (glass-clear, glass-dark, glass-light): the core's glass. Clear over artwork, dark over sleeves and ink, light over paper.
 - Text on sleeves is snow, snow-soft and accent-light, as on the core's ink. No other colours are needed.
 
 ### Named Rules
-**The Sleeve Is Ground Rule.** The sampled colour is only ever a page ground and the fade into it. It never fills a button, a chip, a progress bar or text: actions stay periwinkle on every sleeve, so the app looks like one app across a thousand shows.
+**The Artwork Is Light Rule.** A show's colour is only ever light on ink: its glow. It never fills a ground, a panel, a button, a chip, a progress bar or text: actions stay periwinkle on every sleeve, so the app looks like one app across a thousand shows.
 
-**The Sampled-Not-Picked Rule.** Every sleeve colour comes from the same sampling and clamping, never a per-show choice or a fixed list. If a sleeve looks wrong, fix the rule.
+**The Sampled-Not-Picked Rule.** Every glow comes from the same sampling and lifting, never a per-show choice or a fixed list. If a glow looks wrong, fix the rule.
 
 ## Typography
 
@@ -183,7 +184,7 @@ Two widths, split at 760px (`wideWidth` in shell.dart).
 
 **Phones and narrow windows (below 760px).** Edge to edge. The sleeve hero is a square as wide as the screen, capped at 70% of the screen's height (taller screens crop the square's centre), starting at the very top of the screen, behind the status bar. Floating controls sit inside the safe area: 16px from the sides, 6px below the top inset. Below the hero, content runs in a 16px gutter. The tab pill floats 16px from the sides and 8px above the bottom inset; the mini player accessory floats 8px above the pill. Pages pad their bottom by the height of everything floating there, so the last row can scroll clear of it.
 
-**Wide windows (760px and up).** The sidebar stays and there is no tab pill. The sleeve becomes a banner across the content column: the sleeve colour behind a blurred copy of the artwork at 35%, the artwork itself as a 220px square with 18px corners on the left, kicker, title and actions to its right. The glass title bar and its scroll behaviour are the same, across the top of the content column. The mini player stays the core's ink bar at the bottom of the column.
+**Wide windows (760px and up).** The sidebar stays and there is no tab pill. The sleeve becomes a header in the content column: the artwork as a square with 18px corners on the left (240px with room, down to 160px, so the title and actions never wrap first), with a long dark shadow, kicker, title and actions to its right, top-aligned with it. No box and no blurred copy behind it: the glow is the only backdrop. The floating controls sit over ink here, so their glass is a white lift (12%) instead of a dark tint. The glass title bar and its scroll behaviour are the same, across the top of the content column. The mini player is the core's ink bar, floating at the bottom of the column over the page, which pads its end by the bar's height so the last row scrolls clear.
 
 **Shelves and rows.** Artwork is the main image wherever a show appears: 160px squares with 18px corners in horizontal shelves (Home, search results for shows), 56px with 12px corners in episode and show rows. Nothing that shows a podcast is drawn without its artwork.
 
@@ -200,7 +201,7 @@ The app has three depths, from the bottom: the page (paper, or a sleeve with its
 
 ## Shapes
 
-The core's corners, plus the shapes glass takes. Every glass control is a full circle (one icon) or a full pill (several icons, or the mini player). The title bar is the one square-cornered piece of glass: it spans the screen edge to edge. Artwork is square, with corners by size (12px in rows, 18px in shelves and banners, none in the full-bleed hero). The hero's lower edge isn't a line: its bottom 25% fades into the sleeve.
+The core's corners, plus the shapes glass takes. Every glass control is a full circle (one icon) or a full pill (several icons, or the mini player). The title bar is the one square-cornered piece of glass: it spans the screen edge to edge. Artwork is square, with corners by size (12px in rows, 18px in shelves and wide headers, none in the full-bleed hero). The hero's lower edge isn't a line: its bottom 25% fades into the ink.
 
 ## Components
 
@@ -212,7 +213,7 @@ Small, round and out of the picture's way.
 - **Press:** the core's press, plus the glass brightening one step (ink-tile over it) for 150ms.
 
 ### Sleeve hero (signature)
-The page's opening at rest. The full-bleed artwork, its lower 25% fading into the sleeve colour, the floating controls over it. Below, in order: the kicker, the sleeve title, the show link (for an episode: the show's 32px artwork, its name in snow-soft and a light-periwinkle chevron), then the action row.
+The page's opening at rest. The full-bleed artwork, its lower 25% fading into ink lit by its glow, the floating controls over it. Below, in order: the kicker, the sleeve title, the show link (for an episode: the show's 32px artwork, its name in snow-soft and a light-periwinkle chevron), then the action row.
 - **Show page actions:** the play pill playing the newest unplayed episode, then sleeve circles for follow or unfollow, download and the episode filter.
 - **Episode page actions:** the play pill for this episode, then sleeve circles for add to Up Next and download.
 - **The status bar** turns light over a sleeve and dark over paper.
@@ -258,7 +259,7 @@ Home, Library, Search, Up Next, Downloads and Settings keep the core's paper sur
 ## Do's and Don'ts
 
 ### Do:
-- **Do** open every show and episode page on its artwork, full-bleed, fading into its sampled sleeve colour.
+- **Do** open every show and episode page on its artwork, full-bleed on a phone, fading into ink lit by its glow.
 - **Do** drive every fold by the finger's motion: move with its travel while it's down, settle with its release speed when it lets go, and reverse the instant it does.
 - **Do** move one object between places (artwork into the hero, the mini player into Now Playing) instead of crossfading two copies.
 - **Do** keep periwinkle as the only action colour on every sleeve; the artwork's colour is ground only.
@@ -268,7 +269,8 @@ Home, Library, Search, Up Next, Downloads and Settings keep the core's paper sur
 
 ### Don't:
 - **Don't** put glass on glass, or blur anything that isn't floating chrome.
-- **Don't** fill buttons, chips, progress or text with the sampled sleeve colour.
+- **Don't** tint the ground, panels, buttons, chips, progress or text with a show's colour; it's light, not paint.
+- **Don't** put a box, a frosted panel or a blurred copy of the artwork behind the header; the glow is the backdrop.
 - **Don't** show a podcast without its artwork, or draw a sleeve hero smaller than the screen's width on a phone.
 - **Don't** put the title in two places at full strength: the bar title waits until the sleeve title is passing under it.
 - **Don't** fold chrome by where the page is or on a timer; a fold that fires after crossing a threshold, then plays by itself, is the thing to avoid.

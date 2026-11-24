@@ -161,6 +161,10 @@ void control(AppServices? s, Map<String, String> parameters) {
       } else {
         s.library.createOwn(title);
       }
+    case 'rss':
+      // A podcast's RSS feed (`url`), followed as the directory does.
+      final url = Uri.tryParse(parameters['url'] ?? '') ?? (throw ArgumentError('url?'));
+      unawaited(s.podcasts.follow(url, CancellationToken()));
     case 'follow':
       // A YouTube playlist or channel (`url`) on this device, streaming.
       final link = parseYouTubeLink(parameters['url'] ?? '') ?? (throw ArgumentError('not a YouTube link'));
