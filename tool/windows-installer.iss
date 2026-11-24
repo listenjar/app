@@ -1,6 +1,10 @@
 ; The per-user Windows installer, which is also the update WinSparkle runs
 ; (windows/runner/updates.h, appcast from tool/release.ts). Built by
-; tool/package-windows.ps1. Keep AppId: installed copies upgrade by it.
+; tool/package-windows.ps1, once per architecture. Keep AppId, shared by both:
+; installed copies upgrade by it.
+#ifndef Arch
+  #error Arch is required: x64 or arm64
+#endif
 #ifndef AppVersion
   #error AppVersion is required
 #endif
@@ -22,8 +26,14 @@ DefaultGroupName=ListenJar
 PrivilegesRequired=lowest
 DisableDirPage=yes
 DisableProgramGroupPage=yes
+; x64 also installs on Windows 11 on Arm, which emulates it.
+#if Arch == "arm64"
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+#else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
 MinVersion=10.0
 ; The running app holds this mutex (windows/runner/instance.h).
 AppMutex=Local\ListenJar
@@ -31,7 +41,7 @@ CloseApplications=no
 RestartApplications=no
 UninstallDisplayIcon={app}\listenjar.exe
 OutputDir=..\build\release
-OutputBaseFilename=ListenJar-{#AppVersion}-windows-x64-setup
+OutputBaseFilename=ListenJar-{#AppVersion}-windows-{#Arch}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

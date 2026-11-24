@@ -1,7 +1,7 @@
 // Release identity, update signatures, appcasts and publication: every
 // platform's package goes up to listenjar/desktop's GitHub release, and the
-// in-app updaters (lib/updates.dart: Sparkle on macOS, WinSparkle on Windows)
-// read their platform's appcast from the latest release:
+// in-app updaters (lib/updates.dart: Sparkle on macOS, WinSparkle on Windows
+// x64 and arm64) read their platform's appcast from the latest release:
 //
 //   https://github.com/listenjar/desktop/releases/latest/download/appcast-<platform>.xml
 //
@@ -21,20 +21,24 @@ import { createHash, createPrivateKey, createPublicKey, sign, verify } from "nod
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { androidApps } from "../passkeys.ts"
 
 const repository = "listenjar/desktop"
+// The APK's signing certificate (tool/release.dart checks the APK against it).
+const [androidCertificate] = androidApps[0].sha256
 const pubspec = path.join(import.meta.dirname, "../packages/desktop/pubspec.yaml")
 
 type Updater = { seed: string; key: string; minimumSystem: string }
+// Both Windows architectures share one update key; each has its own appcast,
+// which windows/runner/updates.cpp picks by the architecture it was built for.
+const windowsUpdater: Updater = { seed: "WINDOWS_UPDATE_SEED_BASE64", key: "WINDOWS_UPDATE_PUBLIC_KEY", minimumSystem: "10.0" }
 const platforms: Record<string, { suffix: string; updater?: Updater }> = {
   macos: {
     suffix: ".dmg",
     updater: { seed: "MACOS_UPDATE_SEED_BASE64", key: "MACOS_UPDATE_PUBLIC_KEY", minimumSystem: "12.0" },
   },
-  "windows-x64": {
-    suffix: "-setup.exe",
-    updater: { seed: "WINDOWS_UPDATE_SEED_BASE64", key: "WINDOWS_UPDATE_PUBLIC_KEY", minimumSystem: "10.0" },
-  },
+  "windows-x64": { suffix: "-setup.exe", updater: windowsUpdater },
+  "windows-arm64": { suffix: "-setup.exe", updater: windowsUpdater },
   "linux-x64": { suffix: ".tar.gz" },
   android: { suffix: ".apk" },
 }
@@ -101,7 +105,7 @@ function appcast(m: Manifest): string {
 <sparkle:version>${m.build}</sparkle:version>
 <sparkle:shortVersionString>${xml(m.version)}</sparkle:shortVersionString>
 <sparkle:minimumSystemVersion>${updater(m.platform).minimumSystem}</sparkle:minimumSystemVersion>
-<enclosure url="${xml(url)}" length="${m.length}" type="application/octet-stream" sparkle:version="${m.build}" sparkle:shortVersionString="${xml(m.version)}" sparkle:edSignature="${xml(m.signature)}" sparkle:os="${windows ? "windows-x64" : "macos"}"${windows ? ' sparkle:installerArguments="/SILENT /SP- /NOICONS /NORESTART"' : ""}/>
+<enclosure url="${xml(url)}" length="${m.length}" type="application/octet-stream" sparkle:version="${m.build}" sparkle:shortVersionString="${xml(m.version)}" sparkle:edSignature="${xml(m.signature)}" sparkle:os="${xml(m.platform)}"${windows ? ' sparkle:installerArguments="/SILENT /SP- /NOICONS /NORESTART"' : ""}/>
 </item></channel></rss>
 `
 }
@@ -226,9 +230,11 @@ async function publish(directory: string) {
   if (remote.sha !== release.commit) throw new Error("The remote tag no longer points at the built commit")
   const notes = `ListenJar ${release.version}
 
-macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: a per-user installer for x64. Linux: an x64 tar.gz. Android: an APK. On macOS and Windows ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it.
+macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK. On macOS and Windows ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it.
 
 The Windows installer has no Authenticode publisher certificate yet, so SmartScreen may warn about it.
+
+Each package here was built by this repository's release workflow at the commit below; check one with \`gh attestation verify <file> --repo ${repository}\`. The APK is signed with the certificate whose SHA-256 is ${androidCertificate}.
 
 Source: ${release.commit}.
 `

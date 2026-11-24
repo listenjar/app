@@ -68,9 +68,14 @@ moon run desktop:check     # flutter analyze
 moon caches both on their inputs. For other platforms run `moon run desktop:codegen
 desktop:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `packages/desktop`.
 
-- Windows builds QuickJS with MinGW-w64 GCC (MSVC can't build it); see
-  [packages/youtubei](packages/youtubei). The media controls (smtc_windows) build with
-  [Rust](https://rustup.rs).
+- Windows builds QuickJS with MSYS2's MinGW-w64 compiler (MSVC can't build it): UCRT64's GCC on
+  x64, CLANGARM64's Clang on arm64; see [packages/youtubei](packages/youtubei). The media
+  controls (smtc_windows) build with [Rust](https://rustup.rs). Flutter builds for the machine it
+  runs on, so build and run arm64 on Windows on Arm (a Windows 11 Arm VM on an Apple silicon Mac
+  works), with Flutter cloned at mise.toml's tag (Flutter publishes no arm64 Windows SDK), Visual
+  Studio's ARM64 C++ tools, Rust and MSYS2 with `pacman -S mingw-w64-clang-aarch64-clang`. Its
+  libmpv is media-kit's audio-only aarch64 build (pubspec.yaml's override). Windows on Arm also
+  installs and runs the x64 installer, emulated.
 - Linux needs libmpv: `libmpv-dev` to build and `libmpv2` to run on Debian and Ubuntu (`mpv-libs`
   on Fedora, `mpv` on Arch). Without it the app opens but can't play.
 - iOS needs Xcode. Its app icon is still Flutter's: `desktop:icons` doesn't render iOS yet.
@@ -81,7 +86,8 @@ Off their platforms, two checks type-check the native runners:
   Cocoa and Flutter modules, with [Swift for Linux](https://www.swift.org/install/linux/)
   ([tool/swift-check](tool/swift-check)).
 - `moon run desktop:windows-check` (Linux, macOS): the Windows runner's C++ against the Flutter
-  engine's headers, with `zig c++ -target x86_64-windows-gnu` ([tool/windows-check](tool/windows-check)).
+  engine's headers, with `zig c++ -target x86_64-windows-gnu` (and the updater for aarch64)
+  ([tool/windows-check](tool/windows-check)).
 
 [mise.toml](mise.toml) installs Swift (Linux only) and Zig for them.
 
@@ -108,11 +114,14 @@ Every push to master releases the app:
 2. It then dispatches [release.yaml](.github/workflows/release.yaml) on that tag, which builds
    every platform on its own runner into `build/release/`: `desktop:package-macos` (a Developer
    ID signed, notarized DMG; [tool/package-macos.sh](tool/package-macos.sh)),
-   [tool/package-windows.ps1](tool/package-windows.ps1) (an Inno Setup installer),
+   [tool/package-windows.ps1](tool/package-windows.ps1) (an Inno Setup installer each for x64
+   and arm64, on a runner of that architecture),
    `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK signed with the
    permanent release key, which [tool/release.dart](tool/release.dart) checks).
-3. [tool/release.ts](tool/release.ts) signs the DMG and the installer for the updaters
-   (Ed25519), writes `appcast-macos.xml` and `appcast-windows-x64.xml`, uploads all four with
+3. [tool/release.ts](tool/release.ts) signs the DMG and the installers for the updaters
+   (Ed25519), writes `appcast-macos.xml`, `appcast-windows-x64.xml` and `appcast-windows-arm64.xml`,
+   attests each package's build provenance (`gh attestation verify <file> --repo
+   listenjar/desktop`), uploads all five with
    their manifests, and only then makes the release the latest, whose appcasts the apps read.
 
 Secrets live only in GitHub and, on a Mac, in `~/.secrets/listenjar`; never in this repo. On

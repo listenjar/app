@@ -2,10 +2,11 @@
 # says X.Y.Z+N: version.yaml reserves one on every push to master and
 # dispatches this on it (a pushed tag starts this too). Each platform builds
 # on its own runner into build/release/ (`moon run desktop:package-<platform>`,
-# tool/package-windows.ps1 on Windows), `node tool/release.ts prepare` signs
+# tool/package-windows.ps1 on Windows x64 and arm64), `node tool/release.ts prepare` signs
 # the macOS and Windows packages for their updaters and writes their appcasts
-# (lib/updates.dart), and publish uploads all four platforms and only then
-# makes the release the latest, which is what the updaters read. The APK is
+# (lib/updates.dart), and publish uploads all five packages and only then
+# makes the release the latest, which is what the updaters read. Every
+# package gets a build provenance attestation before it goes up. The APK is
 # signed with the one permanent release key (tool/release.dart checks it
 # against passkeys.ts).
 #
@@ -104,15 +105,33 @@ jobs:
         if: always()
         run: bash tool/macos-signing.sh cleanup
 
+  # x64 and arm64, each on its own architecture: Flutter builds Windows only
+  # for the machine it runs on.
   windows:
+    name: windows-${{ matrix.arch }}
     needs: generate
-    runs-on: windows-2025
+    runs-on: ${{ matrix.runner }}
     environment: desktop-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+            # packages/youtubei builds QuickJS with MSYS2's MinGW-w64 compiler.
+            msystem: UCRT64
+            compiler: mingw-w64-ucrt-x86_64-gcc
+            # Off the hidden AppData: smtc_windows' cargokit resolves its own
+            # path with Get-Item, which cannot see hidden folders.
+            pub-cache: D:\pub-cache
+          - arch: arm64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            compiler: mingw-w64-clang-aarch64-clang
+            pub-cache: C:\pub-cache
     env:
       LISTENJAR_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}
-      # Off the hidden AppData: smtc_windows' cargokit resolves its own path
-      # with Get-Item, which cannot see hidden folders.
-      PUB_CACHE: D:\pub-cache
+      PUB_CACHE: ${{ matrix.pub-cache }}
     defaults:
       run:
         shell: pwsh
@@ -130,16 +149,24 @@ jobs:
       - uses: jdx/mise-action@v5
         with:
           version: ${{ env.MISE_VERSION }}
-          install_args: flutter node
-      # packages/youtubei builds QuickJS with MinGW-w64 GCC at its default path.
+          install_args: ${{ matrix.arch == 'x64' && 'flutter node' || 'node' }}
+      # Flutter publishes no arm64 Windows SDK; its checkout fetches the arm64
+      # Dart SDK on first run. The same version mise.toml pins.
+      - name: Install Flutter from its tag
+        if: matrix.arch == 'arm64'
+        run: |
+          $version = (Select-String -Path mise.toml -Pattern '^flutter = "(.+)"').Matches[0].Groups[1].Value
+          git clone --quiet --depth 1 --branch $version https://github.com/flutter/flutter.git C:\flutter
+          if ($LASTEXITCODE -ne 0) { throw "No Flutter $version." }
+          Add-Content $env:GITHUB_PATH 'C:\flutter\bin'
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: ${{ matrix.msystem }}
           release: false
-          install: mingw-w64-ucrt-x86_64-gcc
-      # GCC's own programs (cc1) load their DLLs from ucrt64\bin.
-      - name: Put MinGW-w64 on PATH
-        run: Add-Content $env:GITHUB_PATH 'C:\msys64\ucrt64\bin'
+          install: ${{ matrix.compiler }}
+      # The compiler's own programs and DLLs live in its environment's bin.
+      - name: Put the MinGW-w64 compiler on PATH
+        run: Add-Content $env:GITHUB_PATH "C:\msys64\$('${{ matrix.msystem }}'.ToLower())\bin"
       - name: Install Inno Setup 6.7.3, checked
         env:
           GH_TOKEN: ${{ github.token }}
@@ -165,12 +192,12 @@ jobs:
           WINDOWS_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}
           WINDOWS_UPDATE_SEED_BASE64: ${{ secrets.WINDOWS_UPDATE_SEED_BASE64 }}
         run: >-
-          node tool/release.ts prepare windows-x64
-          "build/release/ListenJar-${{ needs.generate.outputs.version }}-windows-x64-setup.exe" release-windows-x64
+          node tool/release.ts prepare windows-${{ matrix.arch }}
+          "build/release/ListenJar-${{ needs.generate.outputs.version }}-windows-${{ matrix.arch }}-setup.exe" release-windows-${{ matrix.arch }}
       - uses: actions/upload-artifact@v7
         with:
-          name: release-windows-x64
-          path: release-windows-x64/*
+          name: release-windows-${{ matrix.arch }}
+          path: release-windows-${{ matrix.arch }}/*
           if-no-files-found: error
 
   linux:
@@ -254,6 +281,9 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      # Build provenance attestations: Sigstore's certificate and GitHub's store.
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       MACOS_UPDATE_PUBLIC_KEY: ${{ vars.MACOS_UPDATE_PUBLIC_KEY }}
@@ -271,5 +301,13 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: artifacts
-      - name: Verify, upload and make it the latest release
+      - name: Verify every platform's package, signature and appcast
+        run: node tool/release.ts verify artifacts
+      # Anyone can check that a download came from this workflow at this
+      # commit: `gh attestation verify <file> --repo listenjar/desktop`.
+      - name: Attest each package's build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: artifacts/ListenJar-*
+      - name: Upload and make it the latest release
         run: node tool/release.ts publish artifacts

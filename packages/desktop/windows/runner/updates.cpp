@@ -8,9 +8,16 @@ namespace {
 
 #ifdef LISTENJAR_UPDATE_PUBLIC_KEY
 constexpr char kRegistryPath[] = "Software\\ListenJar\\Updates";
+// Each architecture's own installer (tool/release.ts), as WinSparkle takes
+// only an enclosure for the architecture it was built for.
+#if defined(_M_ARM64)
+#define LISTENJAR_APPCAST_PLATFORM "windows-arm64"
+#else
+#define LISTENJAR_APPCAST_PLATFORM "windows-x64"
+#endif
 constexpr char kAppcast[] =
     "https://github.com/listenjar/desktop/releases/latest/download/"
-    "appcast-windows-x64.xml";
+    "appcast-" LISTENJAR_APPCAST_PLATFORM ".xml";
 
 #define LISTENJAR_WIDEN2(text) L##text
 #define LISTENJAR_WIDEN(text) LISTENJAR_WIDEN2(text)

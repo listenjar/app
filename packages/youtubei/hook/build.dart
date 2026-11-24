@@ -66,17 +66,24 @@ void _checkGenerated(Uri generated, List<Uri> scripts) {
   }
 }
 
+/// MSYS2's MinGW-w64 C compiler for each Windows architecture, at its
+/// default path, and the target triple prefix it must report.
+final _mingw = {
+  Architecture.x64: (cc: r'C:\msys64\ucrt64\bin\gcc.exe', triple: 'x86_64-'),
+  Architecture.arm64: (cc: r'C:\msys64\clangarm64\bin\clang.exe', triple: 'aarch64-'),
+};
+
 Future<void> _windows(BuildInput input, BuildOutputBuilder output) async {
-  if (input.config.code.targetArchitecture != Architecture.x64) {
-    throw UnsupportedError('The Windows QuickJS build currently supports x64');
-  }
-  // Upstream QuickJS uses GNU C and winpthreads on Windows; MSVC cannot build it.
-  final compiler = input.userDefines.path('mingw_cc')?.toFilePath() ?? r'C:\msys64\ucrt64\bin\gcc.exe';
+  final architecture = input.config.code.targetArchitecture;
+  final toolchain = _mingw[architecture];
+  if (toolchain == null) throw UnsupportedError('The Windows QuickJS build supports x64 and arm64, not $architecture');
+  // Upstream QuickJS uses GNU C and winpthreads on Windows; MSVC cannot build
+  // it. x64 uses UCRT64's GCC, arm64 CLANGARM64's Clang (MSYS2 has no arm64 GCC).
+  final compiler = input.userDefines.path('mingw_cc')?.toFilePath() ?? toolchain.cc;
   final target = await Process.run(compiler, ['-dumpmachine']);
-  if (target.exitCode != 0 ||
-      !target.stdout.toString().trim().startsWith('x86_64-') ||
-      !target.stdout.toString().contains('mingw')) {
-    throw StateError('Configure hooks.user_defines.youtubei.mingw_cc with an x64 MinGW-w64 GCC');
+  final triple = target.stdout.toString().trim();
+  if (target.exitCode != 0 || !triple.startsWith(toolchain.triple) || !RegExp('mingw|windows-gnu').hasMatch(triple)) {
+    throw StateError('Configure hooks.user_defines.youtubei.mingw_cc with a MinGW-w64 C compiler for $architecture');
   }
   final library = input.outputDirectory.resolve('youtubei.dll');
   final sources = [for (final source in _sources) input.packageRoot.resolve(source)];
@@ -90,7 +97,8 @@ Future<void> _windows(BuildInput input, BuildOutputBuilder output) async {
     for (final source in sources) source.toFilePath(),
     exports.toFilePath(), '-Wl,--exclude-all-symbols',
     '-o', library.toFilePath(),
-    // Keep GCC and winpthreads in this DLL; deployment needs no MinGW DLLs.
+    // Keep the compiler's runtime and winpthreads in this DLL; deployment
+    // needs no MinGW DLLs.
     '-static', '-lm', '-lpthread',
   ]);
   if (result.exitCode != 0) {

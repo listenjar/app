@@ -71,9 +71,10 @@ Where the APIs differ, Dart forces it:
   on the scripts), heading it with each script's SHA-256, and the build hook stops with that
   command when it is missing or older than a script.
 - [hook/build.dart](hook/build.dart) builds it all as a code asset with
-  [native_toolchain_c](https://pub.dev/packages/native_toolchain_c); on Windows it uses MinGW-w64
-  GCC (`hooks.user_defines.youtubei.mingw_cc`, default `C:\msys64\ucrt64\bin\gcc.exe`), since
-  MSVC can't build QuickJS.
+  [native_toolchain_c](https://pub.dev/packages/native_toolchain_c); on Windows it uses MSYS2's
+  MinGW-w64 compilers, since MSVC can't build QuickJS: GCC for x64 (`C:\msys64\ucrt64\bin\gcc.exe`)
+  and Clang for arm64 (`C:\msys64\clangarm64\bin\clang.exe`), or
+  `hooks.user_defines.youtubei.mingw_cc`.
 - [lib/src/bindings.g.dart](lib/src/bindings.g.dart): `@Native` bindings FFIgen generates from
   bridge.h (`moon run desktop:ffigen`).
 
