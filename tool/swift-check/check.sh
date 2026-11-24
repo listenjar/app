@@ -29,5 +29,6 @@ module ios UIKit
 module ios Flutter
 module macos Cocoa
 module macos FlutterMacOS
+module macos Sparkle
 check ios ios/Runner/AppDelegate.swift ios/Runner/SceneDelegate.swift
 check macos macos/Runner/AppDelegate.swift

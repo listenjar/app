@@ -41,6 +41,26 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Sparkle (Updates in AppDelegate.swift). Release packaging sets
+	     LISTENJAR_UPDATE_PUBLIC_KEY (tool/package-macos.sh); without it the
+	     key is empty and there is no updater. Checks and installs on its own by
+	     default; Settings turns either off. The appcast has no release notes. -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/listenjar/desktop/releases/latest/download/appcast-macos.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(LISTENJAR_UPDATE_PUBLIC_KEY)</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<true/>
+	<key>SUShowReleaseNotes</key>
+	<false/>
+	<!-- The App Sandbox: Sparkle installs through its launcher service, which
+	     Release.entitlements lets the app reach. -->
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
 	<!-- Feeds and episodes load from the address as given, http included, like AntennaPod. -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "instance.cpp"
   "main.cpp"
+  "updates.cpp"
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
@@ -31,9 +32,18 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
+# Release builds carry the Ed25519 key that update installers are signed with
+# (updates.h); tool/package-windows.ps1 sets it.
+if(NOT "$ENV{LISTENJAR_UPDATE_PUBLIC_KEY}" STREQUAL "")
+  target_compile_definitions(${BINARY_NAME} PRIVATE "LISTENJAR_UPDATE_PUBLIC_KEY=\"$ENV{LISTENJAR_UPDATE_PUBLIC_KEY}\"")
+endif()
+
 # Add dependency libraries and include directories. Add any application-specific
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_link_libraries(${BINARY_NAME} PRIVATE "${WINSPARKLE_DIR}/${WINSPARKLE_ARCH}/Release/WinSparkle.lib")
+target_link_directories(${BINARY_NAME} PRIVATE "${WINSPARKLE_DIR}/${WINSPARKLE_ARCH}/Release")
+target_include_directories(${BINARY_NAME} PRIVATE "${WINSPARKLE_DIR}/include")
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "advapi32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 

@@ -11,9 +11,13 @@
 #ifdef _DEBUG
 inline constexpr wchar_t kUrlScheme[] = L"listenjar-dev";
 inline constexpr wchar_t kWindowClassName[] = L"ListenJarDevWindow";
+inline constexpr wchar_t kAppMutex[] = L"Local\\ListenJarDev";
 #else
 inline constexpr wchar_t kUrlScheme[] = L"listenjar";
 inline constexpr wchar_t kWindowClassName[] = L"ListenJarWindow";
+// Held while the app runs: the installer (tool/windows-installer.iss) waits
+// for it to go before replacing the app.
+inline constexpr wchar_t kAppMutex[] = L"Local\\ListenJar";
 #endif
 
 #include <windows.h>

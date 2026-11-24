@@ -7,6 +7,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "instance.h"
+#include "updates.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -40,6 +41,33 @@ bool FlutterWindow::OnCreate() {
       result->NotImplemented();
     }
   });
+  StartUpdates(GetHandle());
+  updates_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "listenjar/updates",
+      &flutter::StandardMethodCodec::GetInstance());
+  updates_->SetMethodCallHandler([](const auto& call, auto result) {
+    const std::string& method = call.method_name();
+    if (method == "check") {
+      CheckForUpdates();
+      result->Success();
+      return;
+    }
+    if (method == "setAutomatic") {
+      const auto* enabled = std::get_if<bool>(call.arguments());
+      SetAutomaticUpdates(enabled == nullptr || *enabled);
+    } else if (method != "state") {
+      result->NotImplemented();
+      return;
+    }
+    flutter::EncodableMap state{
+        {flutter::EncodableValue("available"), flutter::EncodableValue(UpdatesAvailable())},
+        {flutter::EncodableValue("version"), flutter::EncodableValue(std::string(AppVersion()))}};
+    if (UpdatesAvailable()) {
+      state[flutter::EncodableValue("canCheck")] = flutter::EncodableValue(true);
+      state[flutter::EncodableValue("automatic")] = flutter::EncodableValue(AutomaticUpdates());
+    }
+    result->Success(flutter::EncodableValue(state));
+  });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -55,6 +83,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  StopUpdates();
+  updates_ = nullptr;
   links_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -78,6 +108,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case kQuitForUpdate:
+      // WinSparkle has started the installer: quit, not just hide.
+      Destroy();
+      return 0;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

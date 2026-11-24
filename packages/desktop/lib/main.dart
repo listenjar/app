@@ -28,6 +28,7 @@ import 'shell.dart';
 import 'theme.dart' as brand;
 import 'tray.dart';
 import 'ui.dart';
+import 'updates.dart';
 import 'youtube.dart';
 
 /// [arguments] carry a link on Linux and Windows when one opened the app
@@ -52,6 +53,7 @@ Future<void> main([List<String> arguments = const []]) async {
   Tray.start(account, feeds);
   unawaited(SyncSchedule().start(feeds, podcasts));
   unawaited(podcasts.refreshAll());
+  unawaited(startUpdates());
   services = (
     youtube: youtube,
     account: account,
@@ -105,6 +107,7 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
         {'title': e.title, 'state': e.downloadState.name, if (e.downloadState == DownloadState.downloading) 'progress': e.downloadProgress},
     ],
     'linksWaiting': [for (final link in links?.waiting ?? const <Uri>[]) '$link'],
+    'updates': updatesState(),
   };
 }
 

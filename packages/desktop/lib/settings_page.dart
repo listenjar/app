@@ -1,5 +1,5 @@
 // Settings: the ListenJar Cloud account (cloud.dart), how the player skips and downloads, the space downloads take
-// (storage_page.dart), moving shows in and out, and what the app sends where.
+// (storage_page.dart), moving shows in and out, updates (updates.dart), and what the app sends where.
 import 'dart:async';
 import 'dart:io';
 
@@ -16,6 +16,7 @@ import 'shell.dart';
 import 'storage_page.dart';
 import 'theme.dart' as brand;
 import 'ui.dart';
+import 'updates.dart';
 
 final class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, this.pushed = false});
@@ -98,6 +99,10 @@ final class SettingsPage extends StatelessWidget {
             _action(context, 'Import from another podcast app', 'Choose an OPML file it exported.', () => unawaited(importOpml(context))),
             _action(context, 'Export for another podcast app', 'Saves every show you follow as an OPML file.', () => unawaited(exportOpml(context))),
           ]),
+          if (updatesSupported) ...[
+            sectionHeading(context, 'Updates'),
+            const _Updates(),
+          ],
           sectionHeading(context, 'Privacy'),
           Text(
             'Your library, your place in each episode and your downloads stay on this device. '
@@ -122,18 +127,8 @@ final class SettingsPage extends StatelessWidget {
     return limit == null ? '$used. Set a limit and what goes on its own.' : '$used, up to ${formatBytes(limit)}.';
   }
 
-  Widget _toggle(BuildContext context, String title, String body, bool value, void Function(bool) onChanged) => settingRow(
-    context,
-    title,
-    body,
-    Switch.adaptive(
-      value: value,
-      onChanged: onChanged,
-      activeTrackColor: brand.accent,
-      activeThumbColor: brand.white,
-    ),
-    onTap: () => onChanged(!value),
-  );
+  Widget _toggle(BuildContext context, String title, String body, bool value, void Function(bool) onChanged) =>
+    _switch(context, title, body, value, onChanged);
 
   Widget _choice<T>(BuildContext context, String title, T value, List<T> options, String Function(T) label, void Function(T) onChanged) =>
     settingChoice(context, title, null, value, options, label, onChanged);
@@ -141,6 +136,68 @@ final class SettingsPage extends StatelessWidget {
   Widget _action(BuildContext context, String title, String body, VoidCallback onTap) =>
     settingRow(context, title, body, const Icon(Icons.chevron_right_rounded, color: brand.fgSoft), onTap: onTap);
 }
+
+/// Sparkle's and WinSparkle's own preferences (updates.dart). A build without
+/// an update key says so instead.
+final class _Updates extends StatelessWidget {
+  const _Updates();
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: updates,
+    builder: (context, state, _) {
+      if (state == null) return const SizedBox.shrink();
+      final version = state.version.isEmpty ? '' : 'This is version ${state.version}. ';
+      if (!state.available) {
+        return Text(
+          '${version}This build doesn’t update itself: the ones from listenjar.com do.',
+          style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: brand.fgSoft),
+        );
+      }
+      final downloads = state.automaticDownloads;
+      return rowsPanel([
+        settingRow(
+          context,
+          'Check for updates',
+          '${version}ListenJar also looks once a day.',
+          const Icon(Icons.chevron_right_rounded, color: brand.fgSoft),
+          onTap: state.canCheck ? () => unawaited(checkForUpdates()) : null,
+        ),
+        _switch(
+          context,
+          'Check automatically',
+          Platform.isWindows
+            ? 'Looks for a new version every day. A change applies the next time ListenJar starts.'
+            : 'Looks for a new version every day.',
+          state.automatic,
+          (v) => unawaited(setAutomaticUpdates(v)),
+        ),
+        if (downloads != null)
+          _switch(
+            context,
+            'Install automatically',
+            'New versions download in the background and install when ListenJar quits.',
+            downloads,
+            (v) => unawaited(setAutomaticDownloads(v)),
+          ),
+      ]);
+    },
+  );
+}
+
+/// A settings row with a switch; the whole row toggles it.
+Widget _switch(BuildContext context, String title, String body, bool value, void Function(bool) onChanged) => settingRow(
+  context,
+  title,
+  body,
+  Switch.adaptive(
+    value: value,
+    onChanged: onChanged,
+    activeTrackColor: brand.accent,
+    activeThumbColor: brand.white,
+  ),
+  onTap: () => onChanged(!value),
+);
 
 /// A row of a settings panel: what it is, a line on what it does, and its
 /// control.

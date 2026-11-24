@@ -17,6 +17,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_SUCCESS;
   }
   RegisterUrlScheme();
+  // Released by Windows when the process exits, however it exits.
+  ::CreateMutexW(nullptr, FALSE, kAppMutex);
 
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.

@@ -34,6 +34,9 @@ class FlutterWindow : public Win32Window {
   // Links a second ListenJar.exe hands over (instance.h), for
   // lib/shared_links.dart.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> links_;
+
+  // In-app updates (updates.h), for lib/updates.dart.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> updates_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

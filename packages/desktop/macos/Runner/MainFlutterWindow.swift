@@ -45,6 +45,9 @@ class MainFlutterWindow: NSWindow {
     // Links opened with the app (AppDelegate.swift).
     SharedLinks.shared = SharedLinks(messenger: flutterViewController.engine.binaryMessenger)
 
+    // In-app updates (AppDelegate.swift).
+    Updates.shared = Updates(messenger: flutterViewController.engine.binaryMessenger)
+
     // lib/podcast_apps.dart: "paste the feed link" over another app's window.
     FlutterMethodChannel(name: "listenjar/toast", binaryMessenger: flutterViewController.engine.binaryMessenger)
       .setMethodCallHandler { [weak self] call, result in

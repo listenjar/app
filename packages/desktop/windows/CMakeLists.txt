@@ -49,6 +49,25 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
+# WinSparkle, for in-app updates (runner/updates.h): pinned, and checked
+# against its SHA-256 before it is unpacked. Its licence ships beside it.
+set(WINSPARKLE_VERSION "0.9.4")
+set(WINSPARKLE_ARCHIVE "${CMAKE_BINARY_DIR}/WinSparkle-${WINSPARKLE_VERSION}.zip")
+file(DOWNLOAD
+  "https://github.com/vslavik/winsparkle/releases/download/v${WINSPARKLE_VERSION}/WinSparkle-${WINSPARKLE_VERSION}.zip"
+  "${WINSPARKLE_ARCHIVE}"
+  EXPECTED_HASH SHA256=6037df37fc263bd1650a1c4949681a9d40ffe991d01f35892a406cb5d103c976
+  TLS_VERIFY ON)
+set(WINSPARKLE_DIR "${CMAKE_BINARY_DIR}/WinSparkle-${WINSPARKLE_VERSION}")
+if(NOT EXISTS "${WINSPARKLE_DIR}/include/winsparkle.h")
+  file(ARCHIVE_EXTRACT INPUT "${WINSPARKLE_ARCHIVE}" DESTINATION "${CMAKE_BINARY_DIR}")
+endif()
+if(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
+  set(WINSPARKLE_ARCH "ARM64")
+else()
+  set(WINSPARKLE_ARCH "x64")
+endif()
+
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
@@ -80,6 +99,11 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+
+install(FILES "${WINSPARKLE_DIR}/${WINSPARKLE_ARCH}/Release/WinSparkle.dll"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime)
+install(FILES "${WINSPARKLE_DIR}/COPYING" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  RENAME "WinSparkle.LICENSE.txt" COMPONENT Runtime)
 
 if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"

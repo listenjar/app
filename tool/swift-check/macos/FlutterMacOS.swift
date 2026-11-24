@@ -26,6 +26,7 @@ open class FlutterMethodChannel: NSObject {
 open class FlutterAppDelegate: NSResponder {
   public required override init() {}
   open var mainFlutterWindow: NSWindow?
+  open func applicationDidFinishLaunching(_ notification: Notification) {}
   open func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
   open func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { true }
   open func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { false }
