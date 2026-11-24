@@ -63,6 +63,11 @@ final class AudioTrack {
   final String id;
 }
 
+({int start, int end})? _byteRange(Object? raw) => switch (mapOrNull(raw)) {
+  {'start': final num start, 'end': final num end} => (start: start.toInt(), end: end.toInt()),
+  _ => null,
+};
+
 /// A stream format, live in YouTube.js until this object is collected.
 final class Format {
   Format._(this._yt, this._handle, Json m)
@@ -82,6 +87,8 @@ final class Format {
       xtags = string(m['xtags']),
       audio_quality = string(m['audio_quality']),
       approx_duration_ms = integer(m['approx_duration_ms']) ?? 0,
+      init_range = _byteRange(m['init_range']),
+      index_range = _byteRange(m['index_range']),
       audio_track = switch (mapOrNull(m['audio_track'])) {
         final t? => AudioTrack(
           audio_is_default: boolean(t['audio_is_default']) ?? false,
@@ -120,6 +127,11 @@ final class Format {
   final String? xtags;
   final String? audio_quality;
   final int approx_duration_ms;
+
+  /// Where an adaptive format's initialization segment (ftyp, moov) and its
+  /// segment index (sidx) lie in the file, inclusive.
+  final ({int start, int end})? init_range;
+  final ({int start, int end})? index_range;
   final AudioTrack? audio_track;
   final String? signature_cipher;
   final String? cipher;

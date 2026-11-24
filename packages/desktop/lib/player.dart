@@ -20,6 +20,8 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'downloads.dart';
 import 'library.dart';
 import 'log.dart';
+import 'stream_server.dart';
+import 'transfer.dart' as transfer;
 import 'windows_media.dart';
 import 'youtube.dart';
 
@@ -63,6 +65,10 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   final Downloads _downloads;
   final _audio = AudioPlayer(handleInterruptions: true, handleAudioSessionActivation: true);
   final _life = CancellationToken();
+
+  /// Carries YouTube's streams to the audio player.
+  final _http = HttpClient()..userAgent = null;
+  late final _streams = StreamServer(_http);
   final _subscriptions = <StreamSubscription<Object?>>[];
   WindowsMedia? _windows;
 
@@ -113,6 +119,16 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   /// Whether [_current] is in the audio player yet; a restored episode
   /// loads on first play.
   bool _prepared = false;
+
+  /// [_current]'s load and then its source in the audio player: one at a
+  /// time. Another episode or [stop] cancels it, with its YouTube lookups
+  /// and the ranges its stream is fetching, so a load the listener left
+  /// never reaches the audio player and nothing plays twice.
+  CancellationToken? _load;
+
+  /// [_load]'s result, which a play or seek during the load waits for
+  /// rather than loading the episode a second time.
+  Future<bool>? _preparing;
 
   /// Looking up or buffering the episode.
   bool get loading => _loading;
@@ -216,11 +232,13 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   /// Plays [episode] from where the listener stopped in it, or from the
   /// start if they finished it.
   Future<void> playEpisode(PodcastEpisode episode, {bool start = true}) async {
-    if (_current?.id == episode.id && _prepared) {
+    // Loaded or loading already: one load, one playback.
+    if (_current?.id == episode.id && (_prepared || _preparing != null)) {
       if (start) await play();
       return;
     }
     _savePosition();
+    _cancelLoad();
     _current = episode;
     _prepared = false;
     _error = null;
@@ -231,17 +249,40 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     if (start) await play();
   }
 
-  Future<bool> _prepare() async {
+  /// Puts [_current] in the audio player, or waits for the load already
+  /// doing it. False when it can't play or another episode replaced it.
+  Future<bool> _prepare() {
     final episode = _current;
-    if (episode == null) return false;
-    if (_prepared) return true;
+    if (episode == null) return Future.value(false);
+    if (_prepared) return Future.value(true);
+    if (_preparing case final preparing?) return preparing;
+    // A spent source's (the episode finished) stream.
+    _load?.cancel();
+    final load = CancellationToken();
+    _load = load;
+    final preparing = _loadEpisode(episode, load);
+    _preparing = preparing;
+    return preparing;
+  }
+
+  /// Cancels the load in flight, if any.
+  void _cancelLoad() {
+    _load?.cancel();
+    _load = null;
+    _preparing = null;
+  }
+
+  Future<bool> _loadEpisode(PodcastEpisode episode, CancellationToken load) async {
+    final token = _life.merge(load);
     _loading = true;
     _error = null;
     notifyListeners();
     _broadcast();
     try {
-      final source = await traced(_log, 'source for “${episode.title}”', () => _source(episode));
-      if (_current?.id != episode.id) return false;
+      final source = await traced(_log, 'source for “${episode.title}”', () => _source(episode, token));
+      // Checked right before the audio player takes the source, so only the
+      // newest load ever reaches it.
+      token.throwIfCancelled();
       final from = episode.played || (episode.duration != null && episode.duration! - episode.position < _nearEnd)
         ? Duration.zero
         : episode.position;
@@ -249,33 +290,45 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       // Heard again, a played episode is in progress again.
       if (episode.played) _library.setPlayed([episode.id], false);
       await _audio.setAudioSource(source, initialPosition: from);
+      token.throwIfCancelled();
       await _audio.setSpeed(_library.settings.speed);
       _prepared = true;
       return true;
     } catch (e) {
-      if (_current?.id == episode.id) _failed(e);
+      // A replaced load ends quietly: the audio player interrupts its source
+      // when the next one's arrives.
+      if (!token.isCancelled) _failed(e);
       return false;
     } finally {
-      _loading = false;
-      notifyListeners();
-      _broadcast();
+      if (identical(_load, load)) {
+        _preparing = null;
+        if (!_prepared) _cancelLoad();
+        _loading = false;
+        notifyListeners();
+        _broadcast();
+      }
     }
   }
 
   /// Where [episode]'s audio comes from: its download, its feed's URL, or
-  /// YouTube's stream, looked up now since YouTube's links expire.
-  Future<AudioSource> _source(PodcastEpisode episode) async {
+  /// YouTube's stream, looked up now since YouTube's links expire. [token]
+  /// is the load's, so a replaced load stops fetching the stream too.
+  Future<AudioSource> _source(PodcastEpisode episode, CancellationToken token) async {
     if (episode.downloaded) {
       final file = _library.downloadFile(episode)!;
       if (await file.exists()) return AudioSource.file(file.path);
       _library.setDownload(episode.id, DownloadState.none);
     }
     if (episode.youtubeId case final id?) {
-      final token = _life.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
-      final session = await _youtube.session(token);
-      final (media, reason) = await session.media(id, channel: false, token: token);
+      final lookup = token.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
+      final session = await _youtube.session(lookup);
+      final (media, reason) = await session.media(id, channel: false, token: lookup);
       if (media == null) throw StateError(reason ?? 'YouTube won’t play this video');
-      return AudioSource.uri(media.audio.url, headers: youtubeHeaders(media.audio));
+      final length = await transfer.mediaLength(_http, media.audio, lookup);
+      // AVPlayer gets an HLS playlist; ExoPlayer and libmpv read the index
+      // in the file themselves.
+      final hls = Platform.isMacOS || Platform.isIOS;
+      return AudioSource.uri(await _streams.serve(media.audio, length, media.contentType, token, hls: hls));
     }
     final url = episode.audioUrl;
     if (url == null) throw StateError('This episode has no audio');
@@ -395,6 +448,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   @override
   Future<void> stop() async {
     _savePosition(notify: true);
+    _cancelLoad();
     await _audio.stop();
     _current = null;
     _prepared = false;
@@ -526,6 +580,8 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     }
     await _windows?.dispose();
     await _audio.dispose();
+    await _streams.close();
+    _http.close(force: true);
     super.dispose();
   }
 }

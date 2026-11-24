@@ -4,6 +4,7 @@
 // range's SHA-256 journaled once it is on disk, so a resumed download fetches
 // only what is missing.
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -174,6 +175,49 @@ Future<File> download(
     await raf.close();
   }
   return file;
+}
+
+/// The size of [stream] in bytes, from the player response or else from the media server.
+Future<int> mediaLength(HttpClient http, MediaStream stream, CancellationToken token) async =>
+  stream.format.content_length ?? (await _probe(http, stream, token)).$1;
+
+/// The bytes of [stream] from [start] up to [end], in one request: for a
+/// small range, such as the segment index.
+Future<Uint8List> fetchRange(HttpClient http, MediaStream stream, int start, int end, int total, CancellationToken token) =>
+  _range(http, stream, start, end - 1, total, null, (_) {}, token);
+
+/// The bytes of [stream] from [start] up to [end], in order, for playing
+/// while they arrive. The media servers send a request for more than about
+/// 10 MB at a trickle (~32 KB/s), so like [download] this asks for
+/// [rangeBytes] at a time, four ranges in flight.
+Stream<List<int>> streamRange(HttpClient http, MediaStream stream, int start, int end, int total, CancellationToken token) async* {
+  // Ending the stream (the player seeked or stopped) cancels the ranges
+  // still in flight.
+  final ended = CancellationToken();
+  final merged = token.merge(ended);
+  final pending = Queue<Future<Uint8List>>();
+  var next = start;
+  void fill() {
+    while (pending.length < _rangeWorkers && next < end) {
+      final last = (next + rangeBytes < end ? next + rangeBytes : end) - 1;
+      pending.add(_range(http, stream, next, last, total, null, (_) {}, merged));
+      next = last + 1;
+    }
+  }
+
+  try {
+    fill();
+    while (pending.isNotEmpty) {
+      final bytes = await pending.removeFirst();
+      fill();
+      yield bytes;
+    }
+  } finally {
+    ended.cancel();
+    for (final range in pending) {
+      range.ignore();
+    }
+  }
 }
 
 Map<String, String> _mediaHeaders(MediaStream stream) => {
