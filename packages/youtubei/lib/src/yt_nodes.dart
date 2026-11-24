@@ -39,6 +39,11 @@ class YTNode {
       'PlayerErrorMessage' => PlayerErrorMessage._(m),
       'PlayerMicroformat' => PlayerMicroformat._(m),
       'NavigationEndpoint' => NavigationEndpoint._(m),
+      'PlayerOverlay' => PlayerOverlay._(m),
+      'DecoratedPlayerBar' => DecoratedPlayerBar._(m),
+      'MultiMarkersPlayerBar' => MultiMarkersPlayerBar._(m),
+      'Marker' => Marker._(m),
+      'Chapter' => Chapter._(m),
       _ => YTNode(type),
     };
   }
@@ -266,4 +271,39 @@ final class NavigationEndpoint extends YTNode {
   /// The endpoint's payload as YouTube sent it (`browseId`, `videoId`…).
   final Object? payload;
   final Map<String, Object?> metadata;
+}
+
+final class PlayerOverlay extends YTNode {
+  PlayerOverlay._(Json m) : decorated_player_bar = _node(m['decorated_player_bar']), super('PlayerOverlay');
+  final DecoratedPlayerBar? decorated_player_bar;
+}
+
+final class DecoratedPlayerBar extends YTNode {
+  DecoratedPlayerBar._(Json m) : player_bar = _node(m['player_bar']), super('DecoratedPlayerBar');
+  final MultiMarkersPlayerBar? player_bar;
+}
+
+final class MultiMarkersPlayerBar extends YTNode {
+  MultiMarkersPlayerBar._(Json m) : markers_map = _nodes(m['markers_map']), super('MultiMarkersPlayerBar');
+  final List<Marker> markers_map;
+}
+
+/// One of the player bar's marker sets: `DESCRIPTION_CHAPTERS`,
+/// `AUTO_CHAPTERS`, `HEATSEEKER`…
+final class Marker extends YTNode {
+  Marker._(Json m)
+    : marker_key = string(m['marker_key']) ?? '',
+      value = (chapters: _nodes<Chapter>(map(m['value'])['chapters'])),
+      super('Marker');
+  final String marker_key;
+  final ({List<Chapter> chapters}) value;
+}
+
+final class Chapter extends YTNode {
+  Chapter._(Json m)
+    : title = Text.fromJson(m['title']) ?? const Text(null),
+      time_range_start_millis = number(m['time_range_start_millis']) ?? 0,
+      super('Chapter');
+  final Text title;
+  final num time_range_start_millis;
 }

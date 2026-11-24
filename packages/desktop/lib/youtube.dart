@@ -17,6 +17,7 @@ import 'package:youtubei/youtubei.dart';
 import 'package:youtubei/yt.dart' as YT; // ignore: library_prefixes
 import 'package:youtubei/yt_nodes.dart' as YTNodes; // ignore: library_prefixes
 
+import 'chapters.dart';
 import 'log.dart';
 
 final _log = Logger('youtube');
@@ -102,6 +103,7 @@ final class Media {
     required this.durationSeconds,
     required this.contentType,
     required this.audio,
+    required this.chapters,
     required this._playback,
     required this._client,
     required this._fallback,
@@ -116,6 +118,9 @@ final class Media {
   /// `audio/mp4` (AAC, preferred) or `audio/webm` (Opus).
   final String contentType;
   MediaStream audio;
+
+  /// The video's chapters, when [YouTube.media] was asked for them.
+  final List<Chapter>? chapters;
   YT.VideoInfo _playback;
   InnerTubeClient _client;
   final List<InnerTubeClient> _fallback;
@@ -190,6 +195,10 @@ final class YouTubeService {
 }
 
 /// One YouTube session: one YouTube.js runtime, reused for every request.
+/// The continuation tokens browsed in the current playlist listing; each
+/// listing starts it afresh, since a refresh pages through the same tokens.
+final _continuations = <String>{};
+
 final class YouTube {
   YouTube._(this._innertube);
 
@@ -203,7 +212,6 @@ final class YouTube {
 
   /// Starts YouTube.js and opens a session. [http] carries every request.
   static Future<YouTube> start(HttpClient http, CancellationToken token) async {
-    final continuations = <String>{};
     final fetch = httpClientFetch(http);
     final innertube = await Innertube.create(
       lang: 'en',
@@ -221,7 +229,7 @@ final class YouTube {
         if (url.path.contains('/youtubei/v1/browse') && body != null) {
           final continuation = _jsonMap(body)['continuation'];
           // A repeated token would page forever.
-          if (continuation is String && !continuations.add(continuation)) throw StateError('repeated YouTube continuation');
+          if (continuation is String && !_continuations.add(continuation)) throw StateError('repeated YouTube continuation');
         }
         return traced(
           _httpLog,
@@ -288,12 +296,13 @@ final class YouTube {
   }
 
   /// What the source holds: every video of a playlist or a channel's uploads,
-  /// or the one video.
-  Future<Snapshot> snapshot(SourceRef source, CancellationToken token) => switch (source.kind) {
+  /// or the one video. [pages] stops after that many pages of a playlist:
+  /// enough for a channel's newest uploads, which list first.
+  Future<Snapshot> snapshot(SourceRef source, CancellationToken token, {int? pages}) => switch (source.kind) {
     SourceRefKind.video => _videoSnapshot(source.id, token),
-    SourceRefKind.playlist => _playlistSnapshot(source.id, token),
+    SourceRefKind.playlist => _playlistSnapshot(source.id, token, pages: pages),
     // A channel's uploads are the playlist UU + the rest of its UC id.
-    SourceRefKind.channel => _playlistSnapshot('UU${source.id.substring(2)}', token),
+    SourceRefKind.channel => _playlistSnapshot('UU${source.id.substring(2)}', token, pages: pages),
   };
 
   Future<Snapshot> _videoSnapshot(String id, CancellationToken token) async {
@@ -318,15 +327,16 @@ final class YouTube {
     return page;
   }
 
-  Future<Snapshot> _playlistSnapshot(String id, CancellationToken token) async {
+  Future<Snapshot> _playlistSnapshot(String id, CancellationToken token, {int? pages}) async {
+    _continuations.clear();
     var page = await _playlistHead(id, token);
     final title = page.info.title ?? '';
     final artwork = _thumbnail(page.info.thumbnails);
     final videos = <Video>[];
     final seen = <String>{};
     var canRemove = true;
-    for (var pages = 1; ; pages++) {
-      if (pages > _maximumPlaylistPages) throw StateError('YouTube playlist exceeds the scan limit');
+    for (var read = 1; ; read++) {
+      if (read > _maximumPlaylistPages) throw StateError('YouTube playlist exceeds the scan limit');
       _validPlaylist(page);
       if (page.page.alerts.isNotEmpty) canRemove = false;
       for (final item in page.items) {
@@ -334,6 +344,11 @@ final class YouTube {
         if (seen.add(video.id)) videos.add(video);
       }
       if (!page.has_continuation) break;
+      if (pages != null && read >= pages) {
+        // Not the whole listing: nothing missing from it is gone.
+        canRemove = false;
+        break;
+      }
       page = await page.getContinuation(token: token);
     }
     return Snapshot(title: title, artworkUrl: artwork, videos: videos, canRemove: canRemove);
@@ -341,8 +356,10 @@ final class YouTube {
 
   /// The video's metadata and audio stream, or the reason it can't be had
   /// (private, removed, live). Throws [RateLimited] once YouTube throttles.
-  Future<(Media?, String?)> media(String id, {required bool channel, required CancellationToken token}) async {
-    final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token);
+  /// With [chapters], the metadata comes with the video's next response, in
+  /// parallel, for its [Media.chapters].
+  Future<(Media?, String?)> media(String id, {required bool channel, bool chapters = false, required CancellationToken token}) async {
+    final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token, next: chapters);
     if (reason != null) return (null, reason);
     final metadata = info!;
     if (metadata.basic_info.is_live == true || metadata.basic_info.is_upcoming == true) return (null, _liveReason);
@@ -369,6 +386,7 @@ final class YouTube {
         durationSeconds: _seconds(metadata.basic_info.duration),
         contentType: contentType,
         audio: await _stream(audio, playback.cpn, client, token),
+        chapters: chapters ? _chapters(metadata) : null,
         playback: playback,
         client: client,
         fallback: [if (client == InnerTubeClient.VISIONOS) InnerTubeClient.TV],
@@ -408,16 +426,43 @@ final class YouTube {
     return false;
   }
 
+  /// The video's chapters, for one that streams from elsewhere (a
+  /// ListenJar Cloud episode) or played from its download; none when it has
+  /// none or can't be had.
+  Future<List<Chapter>> chapters(String id, CancellationToken token) async {
+    final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token, next: true);
+    return reason == null ? _chapters(info!) : const [];
+  }
+
+  /// The chapters on the player bar: the creator's, from the description,
+  /// else the ones YouTube made.
+  static List<Chapter> _chapters(YT.VideoInfo info) {
+    final markers = info.player_overlays?.decorated_player_bar?.player_bar?.markers_map ?? const <YTNodes.Marker>[];
+    final marker = markers.where((m) => m.marker_key == 'DESCRIPTION_CHAPTERS' && m.value.chapters.isNotEmpty).firstOrNull ??
+      markers.where((m) => m.value.chapters.isNotEmpty).firstOrNull;
+    return [
+      for (final (i, c) in (marker?.value.chapters ?? const <YTNodes.Chapter>[]).indexed)
+        (
+          start: Duration(milliseconds: c.time_range_start_millis.round()),
+          title: switch (c.title.text?.trim()) {
+            final t? when t.isNotEmpty => t,
+            _ => 'Chapter ${i + 1}',
+          },
+        ),
+    ];
+  }
+
   /// A player response, or the reason the video is unavailable (and, when
-  /// YouTube answered with an error, no response).
-  Future<(YT.VideoInfo?, String?)> _playerInfo(String id, InnerTubeClient client, CancellationToken token) async {
+  /// YouTube answered with an error, no response). With [next], YouTube.js's
+  /// `getInfo`: the next response too, in parallel, for the chapters.
+  Future<(YT.VideoInfo?, String?)> _playerInfo(String id, InnerTubeClient client, CancellationToken token, {bool next = false}) async {
     if (_limited case final limited?) throw limited;
     final YT.VideoInfo info;
     try {
       info = await traced(
         _log,
-        'player $id as ${client.name}',
-        () => _innertube.getBasicInfo(id, client: client, token: token),
+        '${next ? 'player and next' : 'player'} $id as ${client.name}',
+        () => next ? _innertube.getInfo(id, client: client, token: token) : _innertube.getBasicInfo(id, client: client, token: token),
         describe: (info) => info.playability_status?.status ?? 'no status',
       );
     } on InnertubeError catch (e) {

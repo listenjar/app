@@ -214,6 +214,13 @@ final class Innertube {
       'options': {'client': ?client?.name, 'po_token': ?po_token},
     }, token: token));
 
+  /// A video's player and next responses, as [client] for the player's.
+  Future<YT.VideoInfo> getInfo(String target, {InnerTubeClient? client, String? po_token, CancellationToken? token}) async =>
+    YT.VideoInfo.fromJson(_yt, await callYouTubei(_yt, '__bridge.getInfo', {
+      'target': target,
+      'options': {'client': ?client?.name, 'po_token': ?po_token},
+    }, token: token));
+
   Future<YT.Search> search(String query, {CancellationToken? token}) async =>
     YT.Search.fromJson(await callYouTubei(_yt, '__bridge.search', {'query': query, 'filters': const <String, Object?>{}}, token: token));
 

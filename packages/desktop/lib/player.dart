@@ -17,9 +17,11 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 
+import 'chapters.dart';
 import 'downloads.dart';
 import 'library.dart';
 import 'log.dart';
+import 'media_chapters.dart';
 import 'stream_server.dart';
 import 'transfer.dart' as transfer;
 import 'windows_media.dart';
@@ -157,6 +159,33 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   Stream<Duration> get positionStream => _audio.positionStream;
   Stream<Duration> get bufferedStream => _audio.bufferedPositionStream;
 
+  /// The chapters of the episode loaded, from the audio's own metadata (its
+  /// download, or its stream) or, for a YouTube video, from YouTube; none
+  /// until it loads. Kept in memory only, for this episode.
+  List<Chapter> get chapters => _chapters;
+  List<Chapter> _chapters = const [];
+
+  /// To the start of the next chapter.
+  Future<void> nextChapter() async {
+    final list = chapters;
+    final i = chapterAt(list, position);
+    if (i + 1 < list.length) await seek(list[i + 1].start);
+  }
+
+  /// To the start of this chapter, or of the one before when this one
+  /// has only just begun.
+  Future<void> previousChapter() async {
+    final list = chapters;
+    final at = position;
+    final i = chapterAt(list, at);
+    if (i < 0) return;
+    final back = i > 0 && at - list[i].start < _chapterRestart ? i - 1 : i;
+    await seek(list[back].start);
+  }
+
+  /// Within this much of a chapter's start, previous goes to the one before.
+  static const _chapterRestart = Duration(seconds: 3);
+
   SleepTimer? get sleep => _sleep;
   SleepTimer? _sleep;
   Timer? _sleepTimer;
@@ -242,6 +271,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     _current = episode;
     _prepared = false;
     _error = null;
+    _chapters = const [];
     _library.nowPlaying = episode.id;
     _library.dequeue(episode.id);
     mediaItem.add(_item(episode));
@@ -279,7 +309,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     notifyListeners();
     _broadcast();
     try {
-      final source = await traced(_log, 'source for “${episode.title}”', () => _source(episode, token));
+      final (source, chapters) = await traced(_log, 'source for “${episode.title}”', () => _source(episode, token));
       // Checked right before the audio player takes the source, so only the
       // newest load ever reaches it.
       token.throwIfCancelled();
@@ -293,6 +323,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       token.throwIfCancelled();
       await _audio.setSpeed(_library.settings.speed);
       _prepared = true;
+      unawaited(_findChapters(episode, chapters));
       return true;
     } catch (e) {
       // A replaced load ends quietly: the audio player interrupts its source
@@ -311,28 +342,61 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   }
 
   /// Where [episode]'s audio comes from: its download, its feed's URL, or
-  /// YouTube's stream, looked up now since YouTube's links expire. [token]
-  /// is the load's, so a replaced load stops fetching the stream too.
-  Future<AudioSource> _source(PodcastEpisode episode, CancellationToken token) async {
+  /// YouTube's stream, looked up now since YouTube's links expire, with the
+  /// video's chapters from the same lookup. [token] is the load's, so a
+  /// replaced load stops fetching the stream too.
+  Future<(AudioSource, List<Chapter>?)> _source(PodcastEpisode episode, CancellationToken token) async {
     if (episode.downloaded) {
       final file = _library.downloadFile(episode)!;
-      if (await file.exists()) return AudioSource.file(file.path);
+      if (await file.exists()) return (AudioSource.file(file.path), null);
       _library.setDownload(episode.id, DownloadState.none);
     }
     if (episode.youtubeId case final id?) {
       final lookup = token.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
       final session = await _youtube.session(lookup);
-      final (media, reason) = await session.media(id, channel: false, token: lookup);
+      final (media, reason) = await session.media(id, channel: false, chapters: true, token: lookup);
       if (media == null) throw StateError(reason ?? 'YouTube won’t play this video');
       final length = await transfer.mediaLength(_http, media.audio, lookup);
       // AVPlayer gets an HLS playlist; ExoPlayer and libmpv read the index
       // in the file themselves.
       final hls = Platform.isMacOS || Platform.isIOS;
-      return AudioSource.uri(await _streams.serve(media.audio, length, media.contentType, token, hls: hls));
+      return (AudioSource.uri(await _streams.serve(media.audio, length, media.contentType, token, hls: hls)), media.chapters);
     }
     final url = episode.audioUrl;
     if (url == null) throw StateError('This episode has no audio');
-    return AudioSource.uri(Uri.parse(url));
+    return (AudioSource.uri(Uri.parse(url)), null);
+  }
+
+  /// [episode]'s chapters, once it loads: [found] with its YouTube stream,
+  /// else its download's own; else, for a YouTube video (a ListenJar Cloud
+  /// episode, a download without them), YouTube's, and for a podcast
+  /// episode, its stream's own, read with range requests.
+  Future<void> _findChapters(PodcastEpisode episode, List<Chapter>? found) async {
+    // Loaded again (it finished, and plays again): already found.
+    if (found == null && _chapters.isNotEmpty) return;
+    var chapters = found ?? const <Chapter>[];
+    try {
+      if (found == null && episode.downloaded) {
+        final file = _library.downloadFile(episode)!;
+        chapters = await traced(_log, 'chapters in ${file.path}', () => fileChapters(file), describe: (c) => '${c.length} chapters');
+      }
+      if (found == null && chapters.isEmpty) {
+        final token = _life.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
+        if (episode.videoId case final id?) {
+          final session = await _youtube.session(token);
+          chapters = await traced(_log, 'chapters of $id', () => session.chapters(id, token), describe: (c) => '${c.length} chapters');
+        } else if (!episode.downloaded && episode.audioUrl != null) {
+          final url = Uri.parse(episode.audioUrl!);
+          chapters = await traced(_log, 'chapters in ${url.host}${url.path}', () => streamChapters(_http, url, token), describe: (c) => '${c.length} chapters');
+        }
+      }
+    } catch (e) {
+      // Without chapters it plays the same.
+      _log.fine('No chapters for episode ${episode.id}', e);
+    }
+    if (_current?.id != episode.id || chapters.isEmpty) return;
+    _chapters = chapters;
+    notifyListeners();
   }
 
   void _failed(Object e) {

@@ -59,6 +59,10 @@ const __playlist = playlist => ({
   has_continuation: playlist.has_continuation, is_complete: playlist.is_complete,
   page: {alerts: __serialize(playlist.page?.alerts ?? [])},
 });
+const __videoInfo = info => ({
+  basic_info: __serialize(info.basic_info), playability_status: __serialize(info.playability_status),
+  streaming_data: __serialize(info.streaming_data), page: [{microformat: __serialize(info.page[0]?.microformat)}], cpn: info.cpn,
+});
 const __session = session => ({user_agent: session.user_agent, logged_in: session.logged_in, player: __serialize(session.player)});
 
 globalThis.__bridge = {
@@ -83,10 +87,13 @@ globalThis.__bridge = {
     __innertube = await YouTubeJS.Innertube.create({...config, cache: universal, fetch});
     return {session: __session(__innertube.session), constants: {CLIENTS: __serialize(YouTubeJS.Constants.CLIENTS)}};
   },
-  async getBasicInfo({video_id, options}) {
-    const info = await __innertube.getBasicInfo(video_id, options);
-    return {basic_info: __serialize(info.basic_info), playability_status: __serialize(info.playability_status),
-      streaming_data: __serialize(info.streaming_data), page: [{microformat: __serialize(info.page[0]?.microformat)}], cpn: info.cpn};
+  async getBasicInfo({video_id, options}) { return __videoInfo(await __innertube.getBasicInfo(video_id, options)); },
+  // Of the next response, the player overlay's bar: its chapters.
+  async getInfo({target, options}) {
+    const info = await __innertube.getInfo(target, options);
+    const overlay = info.player_overlays;
+    return {...__videoInfo(info),
+      player_overlays: overlay ? {type: overlay.type, decorated_player_bar: __serialize(overlay.decorated_player_bar)} : null};
   },
   async search({query, filters}) {
     const search = await __innertube.search(query, filters);

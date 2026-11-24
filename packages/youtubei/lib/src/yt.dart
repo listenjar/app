@@ -86,6 +86,7 @@ final class VideoInfo {
         null => null,
       },
       page = [for (final p in list(m['page'])) IPlayerResponse._(map(p))],
+      player_overlays = YTNodes.YTNode.fromJson(m['player_overlays']) as YTNodes.PlayerOverlay?,
       cpn = string(m['cpn']) ?? '';
 
   @internal
@@ -95,6 +96,10 @@ final class VideoInfo {
   final IPlayabilityStatus? playability_status;
   final IStreamingData? streaming_data;
   final List<IPlayerResponse> page;
+
+  /// From the next response, which only `getInfo` asks for: of the overlay,
+  /// its player bar.
+  final YTNodes.PlayerOverlay? player_overlays;
 
   /// The client playback nonce this info's streams are requested with.
   final String cpn;
