@@ -4,7 +4,8 @@
 // speed, the sleep timer, Up Next, a video's chapters and the show notes.
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, listEquals;
+import 'package:flutter/physics.dart' show Simulation;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -18,22 +19,144 @@ import 'theme.dart' as brand;
 import 'ui.dart';
 
 /// Opens Now Playing over the window, rising from the mini player.
-Future<void> showNowPlaying(BuildContext context) => Navigator.of(context, rootNavigator: true).push(
-  PageRouteBuilder<void>(
-    opaque: true,
-    transitionDuration: const Duration(milliseconds: 320),
-    reverseTransitionDuration: const Duration(milliseconds: 220),
-    pageBuilder: (_, _, _) => const NowPlaying(),
-    transitionsBuilder: (context, animation, _, child) {
-      if (MediaQuery.disableAnimationsOf(context)) return FadeTransition(opacity: animation, child: child);
-      final curved = CurvedAnimation(parent: animation, curve: brand.easeOutExpo, reverseCurve: Curves.easeInCubic);
-      return SlideTransition(
-        position: Tween(begin: const Offset(0, 1), end: Offset.zero).animate(curved),
-        child: child,
-      );
-    },
-  ),
-);
+Future<void> showNowPlaying(BuildContext context) => Navigator.of(context, rootNavigator: true).push(_NowPlayingRoute());
+
+/// Now Playing's page: it rises from the mini player, and a swipe down
+/// carries it under the finger, back down to the mini player when let go
+/// low enough or flicked down, back up otherwise.
+final class _NowPlayingRoute extends PageRoute<void> {
+  @override
+  Color? get barrierColor => null;
+  @override
+  String? get barrierLabel => null;
+  @override
+  bool get maintainState => true;
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 320);
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 220);
+
+  @override
+  Widget buildPage(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation) => const NowPlaying();
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
+    // Under a finger, the page is wherever the finger put it.
+    final Animation<double> position;
+    if (navigator?.userGestureInProgress ?? false) {
+      position = animation;
+    } else if (MediaQuery.disableAnimationsOf(context)) {
+      return FadeTransition(opacity: animation, child: child);
+    } else {
+      position = CurvedAnimation(parent: animation, curve: brand.easeOutExpo, reverseCurve: Curves.easeInCubic);
+    }
+    return SlideTransition(position: Tween(begin: const Offset(0, 1), end: Offset.zero).animate(position), child: child);
+  }
+
+  bool _swiping = false;
+
+  /// Whether a swipe holds the page.
+  bool get swiping => _swiping;
+
+  /// Moves the page down by [dy] logical pixels, up when negative, no higher
+  /// than open; returns how much of [dy] it took. A swipe starts only
+  /// going down.
+  double swipe(double dy) {
+    final nav = navigator;
+    final height = subtreeContext?.size?.height ?? 0;
+    if (nav == null || height <= 0) return 0;
+    if (!_swiping) {
+      if (dy <= 0 || !isCurrent || nav.userGestureInProgress) return 0;
+      _swiping = true;
+      nav.didStartUserGesture();
+    }
+    final c = controller!;
+    final before = c.value;
+    c.value = (before - dy / height).clamp(0.0, 1.0);
+    return (before - c.value) * height;
+  }
+
+  /// Lets the page go with the finger moving down at [velocity] logical
+  /// pixels a second: a flick down or a page let go past a third of the way
+  /// down goes down to the mini player, anything else back up.
+  void release(double velocity) {
+    if (!_swiping) return;
+    _swiping = false;
+    final nav = navigator!;
+    final c = controller!;
+    final height = subtreeContext?.size?.height ?? 0;
+    const flick = 700.0;
+    final down = velocity > flick || (velocity > -flick && c.value < 2 / 3);
+    if (down) {
+      nav.pop();
+      c.animateBack(0, duration: _settle(c.value * height, velocity), curve: Curves.easeOutCubic);
+    } else {
+      c.animateTo(1, duration: _settle((1 - c.value) * height, -velocity), curve: Curves.easeOutCubic);
+    }
+    // The page stays linear till it lands, so the curve doesn't jump it.
+    if (!c.isAnimating) return nav.didStopUserGesture();
+    late final AnimationStatusListener landed;
+    landed = (status) {
+      if (status.isAnimating) return;
+      c.removeStatusListener(landed);
+      nav.didStopUserGesture();
+    };
+    c.addStatusListener(landed);
+  }
+
+  /// How long [px] takes to cover leaving at [speed]: an ease out cubic
+  /// starts at three times its average speed.
+  static Duration _settle(double px, double speed) {
+    final seconds = 3 * px / (speed < 1500 ? 1500 : speed);
+    return Duration(milliseconds: (seconds * 1000).clamp(140, 360).round());
+  }
+
+  @override
+  void dispose() {
+    if (_swiping) navigator?.didStopUserGesture();
+    super.dispose();
+  }
+}
+
+/// Lets a swipe down past the top of a scroll view carry Now Playing down,
+/// and a swipe back up lift it before the content scrolls.
+final class _SwipePhysics extends ScrollPhysics {
+  const _SwipePhysics(this.route, {super.parent});
+  final _NowPlayingRoute route;
+
+  @override
+  _SwipePhysics applyTo(ScrollPhysics? ancestor) => _SwipePhysics(route, parent: buildParent(ancestor));
+
+  // Content that fits still swipes the page.
+  @override
+  bool shouldAcceptUserOffset(ScrollMetrics position) => true;
+
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
+    if (offset > 0) {
+      // Down: the content scrolls back to its top, then the page follows.
+      final room = position.pixels > position.minScrollExtent ? position.pixels - position.minScrollExtent : 0.0;
+      if (offset > room) offset = room + (offset - room - route.swipe(offset - room));
+    } else {
+      // Up: the page goes back up, then the content scrolls.
+      offset -= route.swipe(offset);
+    }
+    return super.applyPhysicsToUserOffset(position, offset);
+  }
+
+  @override
+  Simulation? createBallisticSimulation(ScrollMetrics position, double velocity) {
+    if (!route.swiping) return super.createBallisticSimulation(position, velocity);
+    route.release(-velocity);
+    return super.createBallisticSimulation(position, 0);
+  }
+}
+
+/// Where fingers come first, scroll views swipe Now Playing down too.
+bool get _touchFirst => switch (defaultTargetPlatform) {
+  TargetPlatform.android || TargetPlatform.iOS => true,
+  _ => false,
+};
 
 /// The icon for a skip of [d], when Material has one with that number.
 IconData _skipIcon(Duration d, {required bool forward}) => switch ((d.inSeconds, forward)) {
@@ -409,7 +532,25 @@ final class NowPlaying extends StatelessWidget {
     );
   }
 
-  Widget _topBar(BuildContext context, PodcastEpisode e) => Padding(
+  /// Now Playing's route, when it's on one that swipes.
+  static _NowPlayingRoute? _route(BuildContext context) => switch (ModalRoute.of(context)) {
+    final _NowPlayingRoute route => route,
+    _ => null,
+  };
+
+  /// The physics for a scroll view that swipes the page down past its top.
+  static ScrollPhysics? _physics(BuildContext context) => switch (_route(context)) {
+    final route? when _touchFirst => _SwipePhysics(route),
+    _ => null,
+  };
+
+  // The top bar is the page's handle, for any pointer.
+  Widget _topBar(BuildContext context, PodcastEpisode e) => GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onVerticalDragUpdate: (d) => _route(context)?.swipe(d.delta.dy),
+    onVerticalDragEnd: (d) => _route(context)?.release(d.primaryVelocity ?? 0),
+    onVerticalDragCancel: () => _route(context)?.release(0),
+    child: Padding(
     padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
     child: Row(children: [
       IconButton(
@@ -432,6 +573,7 @@ final class NowPlaying extends StatelessWidget {
         ),
       EpisodeMenu(episode: e, showLink: true, tone: MenuTone.ink),
     ]),
+    ),
   );
 
   Widget _identity(BuildContext context, PodcastEpisode e, {required TextAlign align}) {
@@ -490,7 +632,7 @@ final class NowPlaying extends StatelessWidget {
     return Column(children: [
       _topBar(context, e),
       Expanded(
-        child: ListView(padding: const EdgeInsets.fromLTRB(28, 12, 28, 40), children: [
+        child: ListView(physics: _physics(context), padding: const EdgeInsets.fromLTRB(28, 12, 28, 40), children: [
           Center(
             child: DecoratedBox(
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
@@ -533,6 +675,7 @@ final class NowPlaying extends StatelessWidget {
                     // leave, so all of them fit without scrolling.
                     final cover = (column.maxHeight - 390).clamp(140.0, 400.0).toDouble();
                     return SingleChildScrollView(
+                      physics: _physics(context),
                       child: ConstrainedBox(
                         constraints: BoxConstraints(minHeight: column.maxHeight),
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
