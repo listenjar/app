@@ -9,7 +9,8 @@ resources/podcast_apps/*.svg (taken from listenbox.app), as asset PNGs.
 
 Release and profile builds get the icon as it is; debug builds get it with a
 red DEBUG ribbon across the top-right corner, like Flutter's debug banner, so
-a dev build is never mistaken for the installed app.
+a dev build is never mistaken for the installed app. iOS gets the release
+icon only, full-bleed and opaque.
 
 macOS only: Google Chrome renders the SVG (headless), sips resizes it. The
 outputs are committed, so building needs neither.
@@ -111,10 +112,42 @@ def tray_icons(svg: str, work: Path) -> None:
     resize(tile, 32, tray / "tile.png")
 
 
+def ios_icon(svg: str, work: Path) -> None:
+    """iOS: one 1024 px icon, which Xcode sizes for every device.
+
+    iOS rounds the corners itself, so the icon fills the square: the tile's
+    colour edge to edge, with the mark scaled up by as much as the tile is.
+    App Store Connect rejects an icon with an alpha channel, so the PNG goes
+    through JPEG, which has none, at the best quality.
+    """
+    fill = re.search(r'<path d="[^"]+" fill="([^"]+)"', svg).group(1)
+    mark = re.search(r'<g transform="[^"]*">.*?</g>', svg, re.S).group(0)
+    full = re.sub(r'translate\(100 100\) scale\(4\.12\)', "scale(5.12)", mark)
+    if full == mark:
+        sys.exit("icon.svg: expected the mark's group at translate(100 100) scale(4.12)")
+    square = (f'<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">'
+              f'<rect width="1024" height="1024" fill="{fill}"/>{full}</svg>')
+    master = work / "ios.png"
+    render(square, master, work)
+    flat = work / "ios.jpg"
+    subprocess.run(["sips", "-s", "format", "jpeg", "-s", "formatOptions", "best", str(master), "--out", str(flat)],
+                   check=True, capture_output=True)
+    catalog = APP / "ios/Runner/Assets.xcassets/AppIcon.appiconset"
+    shutil.rmtree(catalog)
+    catalog.mkdir()
+    subprocess.run(["sips", "-s", "format", "png", str(flat), "--out", str(catalog / "icon.png")],
+                   check=True, capture_output=True)
+    (catalog / "Contents.json").write_text(
+        '{\n  "images" : [\n    {\n      "filename" : "icon.png",\n      "idiom" : "universal",\n'
+        '      "platform" : "ios",\n      "size" : "1024x1024"\n    }\n  ],\n'
+        '  "info" : {\n    "author" : "xcode",\n    "version" : 1\n  }\n}\n')
+
+
 def main() -> None:
     svg = (ROOT / "resources" / "icon.svg").read_text()
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
+        ios_icon(svg, work)
         for variant, text in (("release", svg), ("debug", debug_svg(svg))):
             master = work / f"{variant}.png"
             render(text, master, work)

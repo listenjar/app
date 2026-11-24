@@ -78,7 +78,7 @@ desktop:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `p
   installs and runs the x64 installer, emulated.
 - Linux needs libmpv: `libmpv-dev` to build and `libmpv2` to run on Debian and Ubuntu (`mpv-libs`
   on Fedora, `mpv` on Arch). Without it the app opens but can't play.
-- iOS needs Xcode. Its app icon is still Flutter's: `desktop:icons` doesn't render iOS yet.
+- iOS needs Xcode.
 
 Off their platforms, two checks type-check the native runners:
 
@@ -214,8 +214,9 @@ runtime errors show (the MCP's `get_runtime_errors`).
 ## Icons
 
 [resources/icon.svg](resources/icon.svg) is the one source. `moon run desktop:icons` renders it
-for macOS, Windows, Android and Linux (not iOS yet): as is for release and profile builds, and with a red
-DEBUG ribbon for debug builds, so a dev build never passes for the installed app.
+for macOS, Windows, Android and Linux: as is for release and profile builds, and with a red
+DEBUG ribbon for debug builds, so a dev build never passes for the installed app. iOS gets one
+opaque, full-bleed 1024 px icon, without the ribbon, as iOS rounds the corners itself.
 
 ## Configuration
 
