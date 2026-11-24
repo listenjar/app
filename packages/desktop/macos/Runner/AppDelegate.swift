@@ -4,8 +4,10 @@ import Sparkle
 
 @main
 class AppDelegate: FlutterAppDelegate {
-  override func applicationDidFinishLaunching(_ notification: Notification) {
-    super.applicationDidFinishLaunching(notification)
+  // No super: FlutterAppDelegate doesn't implement this one, and calling it
+  // throws "unrecognized selector" in the middle of launching, which left
+  // the window black.
+  func applicationDidFinishLaunching(_ notification: Notification) {
     Updates.shared?.addMenuItem()
   }
 
