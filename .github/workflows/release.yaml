@@ -107,6 +107,9 @@ jobs:
     environment: desktop-release
     env:
       LISTENJAR_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}
+      # Off the hidden AppData: smtc_windows' cargokit resolves its own path
+      # with Get-Item, which cannot see hidden folders.
+      PUB_CACHE: D:\pub-cache
     defaults:
       run:
         shell: pwsh
@@ -131,6 +134,9 @@ jobs:
           msystem: UCRT64
           release: false
           install: mingw-w64-ucrt-x86_64-gcc
+      # GCC's own programs (cc1) load their DLLs from ucrt64\bin.
+      - name: Put MinGW-w64 on PATH
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\ucrt64\bin'
       - name: Install Inno Setup 6.7.3, checked
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,6 +151,12 @@ jobs:
           if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed.' }
       - name: Build and package the installer
         run: ./tool/package-windows.ps1
+      # MSBuild only says "Building native assets failed".
+      - name: Show the build hooks' output
+        if: failure()
+        run: |
+          Get-ChildItem -Recurse -Include stdout.txt,stderr.txt -Path .dart_tool/hooks_runner -ErrorAction SilentlyContinue |
+            ForEach-Object { "==== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
       - name: Sign the installer for WinSparkle and write its appcast
         env:
           WINDOWS_UPDATE_PUBLIC_KEY: ${{ vars.WINDOWS_UPDATE_PUBLIC_KEY }}

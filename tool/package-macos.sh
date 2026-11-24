@@ -6,8 +6,8 @@
 #   LISTENJAR_UPDATE_PUBLIC_KEY  the Ed25519 public key updates are signed
 #                                with (Info.plist's SUPublicEDKey); required
 #   LISTENJAR_SIGNING_IDENTITY   "Developer ID Application: … (TEAM)": sign
-#                                inside out with the hardened runtime, then
-#                                notarize and staple the app and the DMG
+#                                the app (tool/sign-macos.sh), then notarize
+#                                and staple the app and the DMG
 #   LISTENJAR_NOTARY_PROFILE     notarytool's keychain profile for that
 #   LISTENJAR_SIGNING_KEYCHAIN   the keychain holding both (tool/macos-signing.sh)
 #
@@ -33,26 +33,28 @@ fi
 sign() {
   codesign --force --timestamp --options runtime --sign "$identity" ${keychain:+--keychain "$keychain"} "$@"
 }
+notary() {
+  xcrun notarytool "$@" --keychain-profile "${LISTENJAR_NOTARY_PROFILE:?Set LISTENJAR_NOTARY_PROFILE}" \
+    ${keychain:+--keychain "$keychain"}
+}
+# Fails, with the notary service's log, unless it accepts $1.
 notarize() {
-  xcrun notarytool submit "$1" --keychain-profile "${LISTENJAR_NOTARY_PROFILE:?Set LISTENJAR_NOTARY_PROFILE}" \
-    ${keychain:+--keychain "$keychain"} --wait --timeout 30m
+  local result id status
+  result="$(notary submit "$1" --wait --timeout 30m --output-format json)"
+  id="$(node -p 'JSON.parse(process.argv[1]).id' "$result")"
+  status="$(node -p 'JSON.parse(process.argv[1]).status' "$result")"
+  echo "Notarization $id of $(basename "$1"): $status"
+  if [[ "$status" != Accepted ]]; then
+    notary log "$id" >&2 || true
+    return 1
+  fi
 }
 
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
 if [[ -n "$identity" ]]; then
-  # Inside out: Sparkle's helpers as its documentation signs them, then every
-  # framework, the Share extension and the app, each keeping the entitlements
-  # Xcode resolved for it (the sandbox, Sparkle's services).
-  sparkle="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
-  sign "$sparkle/XPCServices/Installer.xpc"
-  sign --preserve-metadata=entitlements "$sparkle/XPCServices/Downloader.xpc"
-  sign "$sparkle/Autoupdate"
-  sign "$sparkle/Updater.app"
-  for framework in "$app"/Contents/Frameworks/*.framework; do sign "$framework"; done
-  for extension in "$app"/Contents/PlugIns/*.appex; do sign --preserve-metadata=entitlements "$extension"; done
-  sign --preserve-metadata=entitlements "$app"
-  codesign --verify --deep --strict "$app"
-  work="$(mktemp -d)"
-  trap 'rm -rf "$work"' EXIT
+  tool/sign-macos.sh "$app"
   ditto -c -k --keepParent "$app" "$work/ListenJar.zip"
   notarize "$work/ListenJar.zip"
   xcrun stapler staple "$app"
