@@ -2,9 +2,10 @@
 # For the release workflow's ios job (.github/workflows/release.yaml): `setup`
 # imports the Apple Distribution certificate from the desktop-release
 # environment's secrets into a throwaway keychain, writes out the App Store
-# provisioning profile and the App Store Connect API key, and hands
-# tool/package-ios.sh and tool/testflight.ts their paths; `cleanup` deletes
-# the keychain and the files and restores the keychain list.
+# provisioning profiles (the app's and its share extension's) and the App
+# Store Connect API key, and hands tool/package-ios.sh and tool/testflight.ts
+# their paths; `cleanup` deletes the keychain and the files and restores the
+# keychain list.
 set -euo pipefail
 
 directory="${RUNNER_TEMP:?}/listenjar-ios-signing"
@@ -20,7 +21,7 @@ if [[ "${1:-}" == cleanup ]]; then
   exit 0
 fi
 [[ "${1:-}" == setup ]] || { echo 'Expected setup or cleanup' >&2; exit 1; }
-for name in IOS_DISTRIBUTION_P12_BASE64 IOS_DISTRIBUTION_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 APP_STORE_CONNECT_KEY_P8_BASE64 APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID; do
+for name in IOS_DISTRIBUTION_P12_BASE64 IOS_DISTRIBUTION_PASSWORD IOS_PROVISIONING_PROFILE_BASE64 IOS_SHARE_PROVISIONING_PROFILE_BASE64 APP_STORE_CONNECT_KEY_P8_BASE64 APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID; do
   [[ -n "${!name:-}" ]] || { echo "Missing signing input: $name" >&2; exit 1; }
 done
 umask 077
@@ -28,6 +29,7 @@ mkdir -p "$directory"
 security list-keychains -d user | sed 's/^ *"//; s/"$//' > "$directory/keychains"
 printf '%s' "$IOS_DISTRIBUTION_P12_BASE64" | base64 --decode > "$directory/distribution.p12"
 printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$directory/app-store.mobileprovision"
+printf '%s' "$IOS_SHARE_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$directory/share-app-store.mobileprovision"
 printf '%s' "$APP_STORE_CONNECT_KEY_P8_BASE64" | base64 --decode > "$directory/app-store-connect.p8"
 password="$(openssl rand -hex 32)"
 security create-keychain -p "$password" "$keychain"
@@ -41,5 +43,6 @@ security list-keychains -d user -s "${keychains[@]}"
 security find-identity -v -p codesigning "$keychain" | grep -F '"Apple Distribution: ' > /dev/null
 {
   printf 'LISTENJAR_IOS_PROFILE=%s\n' "$directory/app-store.mobileprovision"
+  printf 'LISTENJAR_IOS_SHARE_PROFILE=%s\n' "$directory/share-app-store.mobileprovision"
   printf 'APP_STORE_CONNECT_KEY_PATH=%s\n' "$directory/app-store-connect.p8"
 } >> "${GITHUB_ENV:?}"

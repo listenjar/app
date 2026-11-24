@@ -172,7 +172,7 @@ tasks:
     description: >-
       Build the release iOS app and export it for App Store Connect as
       build/release/ListenJar-<version>-ios.ipa (tool/package-ios.sh), which tool/testflight.ts
-      sends to TestFlight. Signs with LISTENJAR_IOS_PROFILE's App Store profile when given one.
+      sends to TestFlight. Signs with LISTENJAR_IOS_PROFILE's and LISTENJAR_IOS_SHARE_PROFILE's App Store profiles when given them.
     deps: [~:codegen, ~:scripts]
     script: tool/package-ios.sh
     inputs: []

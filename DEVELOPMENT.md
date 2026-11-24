@@ -149,8 +149,9 @@ in the listenjar monorepo fills it from `~/.secrets/listenjar/desktop-signing`.
   `MACOS_UPDATE_SEED_BASE64`, `WINDOWS_UPDATE_SEED_BASE64` (each updater's Ed25519 private seed),
   and `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` (the APK release key, a PKCS12
   keystore whose store password is also the key's), and `IOS_DISTRIBUTION_P12_BASE64`,
-  `IOS_DISTRIBUTION_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64` (the Apple Distribution
-  certificate and the App Store profile, renewed yearly), `APP_STORE_CONNECT_KEY_P8_BASE64`,
+  `IOS_DISTRIBUTION_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`,
+  `IOS_SHARE_PROVISIONING_PROFILE_BASE64` (the Apple Distribution certificate and the App Store
+  profiles of the app and its share extension, renewed yearly), `APP_STORE_CONNECT_KEY_P8_BASE64`,
   `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` (an Admin App Store Connect API
   key, for TestFlight).
 - Variables: `MACOS_SIGNING_IDENTITY`, `MACOS_TEAM_ID`, `MACOS_UPDATE_PUBLIC_KEY`,
@@ -185,12 +186,11 @@ the `listenjar/links` channel:
 | Platform | How a link arrives |
 | --- | --- |
 | Android | The share sheet (`text/plain`) and YouTube's https links ([MainActivity.kt](packages/desktop/android/app/src/main/kotlin/com/listenjar/desktop/MainActivity.kt)); since Android 12, links open in the app only once its "Open supported links" setting is on, as the app can't verify youtube.com |
-| iOS, macOS | `listenjar://open?url=…`, which the website and shortcuts can open (AppDelegate.swift) |
+| iOS, macOS | The share sheet and Share menu: a share extension ([ios/ShareExtension](packages/desktop/ios/ShareExtension), [macos/ShareExtension](packages/desktop/macos/ShareExtension)) that opens `listenjar://open?url=…`, which the website and shortcuts can open too (AppDelegate.swift) |
 | Windows | Command-line arguments, forwarded to the running instance with `WM_COPYDATA` ([instance.cpp](packages/desktop/windows/runner/instance.cpp)) |
 | Linux | Command-line arguments |
 
-A share extension for iOS and macOS and a Windows share target (which needs MSIX packaging) are
-still to come.
+A Windows share target (which needs MSIX packaging) is still to come.
 
 ## Debugging
 
