@@ -65,6 +65,17 @@ android {
     }
 }
 
+// Compressed native libraries in the release APKs, over half of each
+// download: they are sideloaded from GitHub (lib/apk_updates.dart), which
+// serves them as is, where Play would compress them. Android extracts them on
+// install instead of mapping them from the APK. tool/release.dart splits the
+// release per ABI, so each APK carries one set of them (15 MB for arm64).
+androidComponents {
+    onVariants(selector().withBuildType("release")) {
+        it.packaging.jniLibs.useLegacyPackaging.set(true)
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

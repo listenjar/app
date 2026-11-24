@@ -7,7 +7,7 @@
 // then dispatches release.yaml on the tag, which builds every platform into
 // build/release/: macOS and Windows with
 // tool/package-macos.sh and tool/package-windows.ps1, Linux and Android with
-// `build` here (ListenJar-<version>-linux-x64.tar.gz, -android.apk), and
+// `build` here (ListenJar-<version>-linux-x64.tar.gz, -android-<abi>.apk), and
 // tool/release.ts signs the updates, writes the appcasts and publishes.
 //
 // Android: `build android` refuses an APK not signed with the release key
@@ -26,6 +26,10 @@ import 'dart:math';
 const _repository = 'listenjar/desktop';
 const _manifest = 'packages/desktop/pubspec.yaml';
 const _platforms = ['linux', 'android'];
+
+/// Android's release APKs, one per ABI (`flutter build apk --split-per-abi`),
+/// as tool/release.ts and lib/apk_updates.dart name them.
+const _abis = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
 
 final _root = File.fromUri(Platform.script).absolute.parent.parent;
 final _app = Directory('${_root.path}/packages/desktop');
@@ -155,8 +159,13 @@ void _emit(String output, String tag, Version version) => File(output)
 Future<void> _build(String platform) async {
   final version = _semver(_current);
   final name = 'ListenJar-$version-$platform';
-  final target = platform == 'android' ? 'apk' : platform;
-  await _stream('flutter', ['build', target, '--release'], workingDirectory: _app.path);
+  final target = switch (platform) {
+    // One APK per ABI, each with the build number as its versionCode
+    // (android/gradle.properties).
+    'android' => ['apk', '--split-per-abi'],
+    _ => [platform],
+  };
+  await _stream('flutter', ['build', ...target, '--release'], workingDirectory: _app.path);
   _out.createSync(recursive: true);
 
   switch (platform) {
@@ -170,9 +179,11 @@ Future<void> _build(String platform) async {
         staged.deleteSync(recursive: true);
       }
     case 'android':
-      final apk = '${_app.path}/build/app/outputs/flutter-apk/app-release.apk';
-      _checkSigner(apk);
-      File(apk).copySync('${_out.path}/$name.apk');
+      for (final abi in _abis) {
+        final apk = '${_app.path}/build/app/outputs/flutter-apk/app-$abi-release.apk';
+        _checkSigner(apk);
+        File(apk).copySync('${_out.path}/$name-$abi.apk');
+      }
   }
   for (final file in _out.listSync().whereType<File>()) {
     stdout.writeln('Packaged ${file.path} (${file.lengthSync()} bytes)');

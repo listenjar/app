@@ -1,9 +1,9 @@
 // Android's in-app updates, the APK's Sparkle: ListenJar isn't in a store, so
-// it reads the Android manifest of listenjar/desktop's latest GitHub release
-// (tool/release.ts publishes it beside the APK, and makes a release the
-// latest only once everything is up):
+// it reads the manifest of its ABI's APK in listenjar/desktop's latest GitHub
+// release (tool/release.ts publishes one APK per ABI beside its manifest, and
+// makes a release the latest only once everything is up):
 //
-//   https://github.com/listenjar/desktop/releases/latest/download/manifest-android.json
+//   https://github.com/listenjar/desktop/releases/latest/download/manifest-android-<abi>.json
 //
 // once a day while automatic checks are on, or when asked. A newer build asks
 // the listener (UpdatePrompt), downloads the APK into the cache, checks its
@@ -19,6 +19,7 @@
 // "Install unknown apps" is granted).
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
@@ -34,10 +35,18 @@ import 'log.dart';
 
 /// listenjar/desktop's releases. A test build can point elsewhere with
 /// `--dart-define=LISTENJAR_RELEASES=http://10.0.2.2:8000` (the emulator's
-/// host), serving releases/latest/download/manifest-android.json and
+/// host), serving `releases/latest/download/manifest-android-<abi>.json` and
 /// `releases/download/<tag>/<asset>` as GitHub does.
 const _releases = String.fromEnvironment('LISTENJAR_RELEASES', defaultValue: 'https://github.com/listenjar/desktop');
-const _feed = '$_releases/releases/latest/download/manifest-android.json';
+
+/// The ABI this app was installed as, which its update's APK must carry: the
+/// one Dart runs as, named as tool/release.dart names the APKs.
+final _platform = 'android-${switch (Abi.current()) {
+  Abi.androidArm => 'armeabi-v7a',
+  Abi.androidX64 => 'x86_64',
+  _ => 'arm64-v8a',
+}}';
+final _feed = '$_releases/releases/latest/download/manifest-$_platform.json';
 const _download = '$_releases/releases/download';
 const _daily = Duration(days: 1);
 
@@ -282,7 +291,7 @@ ApkRelease? _release(Object? json) {
   final (version, build, tag, asset, length, sha) =
     (json['version'], json['build'], json['tag'], json['asset'], json['length'], json['sha256']);
   if (version is! String || build is! int || tag is! String || asset is! String || length is! int || sha is! String) return null;
-  if (json.containsKey('platform') && json['platform'] != 'android') return null;
+  if (json.containsKey('platform') && json['platform'] != _platform) return null;
   // Only a file name: it becomes a path in the cache.
   if (asset.contains('/') || asset.contains(r'\') || !asset.endsWith('.apk')) return null;
   return (version: version, build: build, tag: tag, asset: asset, length: length, sha256: sha);

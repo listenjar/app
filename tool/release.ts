@@ -5,9 +5,11 @@
 //
 //   https://github.com/listenjar/desktop/releases/latest/download/appcast-<platform>.xml
 //
-// Android's (lib/apk_updates.dart) reads its manifest from there instead,
-// manifest-android.json: the build it compares, the APK's name, length and
-// SHA-256.
+// Android's (lib/apk_updates.dart) reads its ABI's manifest from there instead,
+// manifest-android-<abi>.json: the build it compares, the APK's name, length
+// and SHA-256. Each ABI has its own APK, as tool/release.dart builds them.
+// manifest-android.json, arm64-v8a's under the platform "android", is the
+// feed of the apps before the split, which read only that one.
 //
 // pubspec.yaml's `version: X.Y.Z+N` is the release: tag vX.Y.Z, shown as
 // X.Y.Z, and N is the build number both updaters compare, so N only grows
@@ -47,8 +49,13 @@ const platforms: Record<string, { suffix: string; updater?: Updater }> = {
   "windows-x64": { suffix: "-setup.exe", updater: windowsUpdater },
   "windows-arm64": { suffix: "-setup.exe", updater: windowsUpdater },
   "linux-x64": { suffix: ".tar.gz" },
-  android: { suffix: ".apk" },
+  "android-arm64-v8a": { suffix: ".apk" },
+  "android-armeabi-v7a": { suffix: ".apk" },
+  "android-x86_64": { suffix: ".apk" },
 }
+// The one APK the apps before the per-ABI split update to, and their feed.
+const legacyAndroid = { platform: "android-arm64-v8a", manifest: "manifest-android.json" }
+const legacyManifest = (m: Manifest) => `${JSON.stringify({ ...m, platform: "android" }, null, 2)}\n`
 type Platform = string
 
 type Release = { version: string; build: number; commit: string; tag: string }
@@ -150,6 +157,7 @@ async function prepare(platform: string, payload: string, directory: string) {
   await writeFile(path.join(directory, manifest.asset), bytes)
   await writeFile(path.join(directory, `manifest-${platform}.json`), `${JSON.stringify(manifest, null, 2)}\n`)
   if (manifest.signature) await writeFile(path.join(directory, `appcast-${platform}.xml`), appcast(manifest))
+  if (platform === legacyAndroid.platform) await writeFile(path.join(directory, legacyAndroid.manifest), legacyManifest(manifest))
 }
 
 /** Checks every platform's payload, signature and appcast in [directory]; returns the files to publish. */
@@ -174,6 +182,12 @@ async function verifyArtifacts(directory: string, release: Release): Promise<str
       throw new Error(`${m.asset}'s bytes differ from ${manifestName}`)
     }
     files.push(m.asset, manifestName)
+    if (platform === legacyAndroid.platform) {
+      if ((await readFile(path.join(directory, legacyAndroid.manifest), "utf8")) !== legacyManifest(m)) {
+        throw new Error(`${legacyAndroid.manifest} differs from ${manifestName}`)
+      }
+      files.push(legacyAndroid.manifest)
+    }
     if (!platforms[platform].updater) continue
     if (!verify(null, bytes, publicKey(platform), rawKey(m.signature, 64))) throw new Error(`${m.asset}'s signature does not verify`)
     if ((await readFile(path.join(directory, feedName), "utf8")) !== appcast(m)) throw new Error(`${feedName} differs from ${manifestName}`)
@@ -237,11 +251,11 @@ async function publish(directory: string) {
   if (remote.sha !== release.commit) throw new Error("The remote tag no longer points at the built commit")
   const notes = `ListenJar ${release.version}
 
-macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK. On macOS, Windows and Android ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it, and Android installs only an APK signed with the same key as the installed app.
+macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK for each of arm64-v8a (nearly every phone), armeabi-v7a and x86_64. On macOS, Windows and Android ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it, and Android installs only an APK signed with the same key as the installed app.
 
 The Windows installer has no Authenticode publisher certificate yet, so SmartScreen may warn about it.
 
-Each package here was built by this repository's release workflow at the commit below; check one with \`gh attestation verify <file> --repo ${repository}\`. The APK is signed with the certificate whose SHA-256 is ${androidCertificate}.
+Each package here was built by this repository's release workflow at the commit below; check one with \`gh attestation verify <file> --repo ${repository}\`. The APKs are signed with the certificate whose SHA-256 is ${androidCertificate}.
 
 Source: ${release.commit}.
 `

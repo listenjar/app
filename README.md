@@ -116,14 +116,15 @@ Every push to master releases the app:
    ID signed, notarized DMG; [tool/package-macos.sh](tool/package-macos.sh)),
    [tool/package-windows.ps1](tool/package-windows.ps1) (an Inno Setup installer each for x64
    and arm64, on a runner of that architecture),
-   `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK signed with the
-   permanent release key, which [tool/release.dart](tool/release.dart) checks).
+   `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK per ABI, arm64-v8a,
+   armeabi-v7a and x86_64, each signed with the permanent release key, which
+   [tool/release.dart](tool/release.dart) checks).
 3. [tool/release.ts](tool/release.ts) signs the DMG and the installers for the updaters
    (Ed25519), writes `appcast-macos.xml`, `appcast-windows-x64.xml` and `appcast-windows-arm64.xml`,
    attests each package's build provenance (`gh attestation verify <file> --repo
-   listenjar/desktop`), uploads all five with
+   listenjar/desktop`), uploads all seven with
    their manifests, and only then makes the release the latest, whose appcasts the apps read
-   (Android's reads `manifest-android.json`, and installs only an APK signed with its own key).
+   (Android's reads its ABI's `manifest-android-<abi>.json`, and installs only an APK signed with its own key).
 4. Beside them, the ios job sends the release to TestFlight for iPhone and iPad. It runs on
    GitHub's `xcode-27` image, as App Store Connect takes only iOS 27 SDK builds from April 2027:
    `desktop:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for

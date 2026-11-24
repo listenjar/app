@@ -4,12 +4,12 @@
 # on its own runner into build/release/ (`moon run desktop:package-<platform>`,
 # tool/package-windows.ps1 on Windows x64 and arm64), `node tool/release.ts prepare` signs
 # the macOS and Windows packages for their updaters and writes their appcasts
-# (lib/updates.dart), and publish uploads all five packages and only then
+# (lib/updates.dart), and publish uploads all seven packages and only then
 # makes the release the latest, which is what the updaters read: the appcasts
-# on macOS and Windows, manifest-android.json on Android (lib/apk_updates.dart).
-# Every package gets a build provenance attestation before it goes up. The APK
-# is signed with the one permanent release key (tool/release.dart checks it
-# against passkeys.ts), which is also what lets Android install it over the
+# on macOS and Windows, manifest-android-<abi>.json on Android (lib/apk_updates.dart).
+# Every package gets a build provenance attestation before it goes up. The APKs
+# are signed with the one permanent release key (tool/release.dart checks it
+# against passkeys.ts), which is also what lets Android install them over the
 # installed app.
 #
 # The signing secrets and variables live in the desktop-release environment,
@@ -260,18 +260,21 @@ jobs:
         run: |
           printenv ANDROID_KEYSTORE_BASE64 | base64 --decode > "$RUNNER_TEMP/release.p12"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
-      - name: Build, sign with the release key and package the APK
+      - name: Build, sign with the release key and package an APK per ABI
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: moon run desktop:package-android
       - name: Remove the keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.p12"
-      # The manifest is also the in-app updater's feed (lib/apk_updates.dart).
-      - name: Write its manifest
-        run: >-
-          node tool/release.ts prepare android
-          "build/release/ListenJar-${{ needs.generate.outputs.version }}-android.apk" release-android
+      # The manifests are also the in-app updater's feeds (lib/apk_updates.dart).
+      - name: Write their manifests
+        env:
+          VERSION: ${{ needs.generate.outputs.version }}
+        run: |
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            node tool/release.ts prepare "android-$abi" "build/release/ListenJar-$VERSION-android-$abi.apk" release-android
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: release-android
