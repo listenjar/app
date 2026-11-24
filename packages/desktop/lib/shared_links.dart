@@ -29,7 +29,7 @@ import 'library.dart' show Podcast;
 import 'config.dart' show appScheme;
 import 'links.dart';
 import 'log.dart';
-import 'plans.dart' show askNewPodcast, cloudPlanHint, hasCloud, isPaid, showPlans;
+import 'plans.dart' show askNewPodcast, hasCloud, isPaid, showPlans, startsInCloud;
 import 'shared_links.g.dart' as android;
 import 'shared_links_ios.g.dart' as ios;
 import 'sync.dart' show PlanLimit;
@@ -149,7 +149,6 @@ Future<void> openLink(BuildContext context, Uri link) async {
     await switch (choice) {
       _Own(:final own) => addVideoToOwnPodcast(context, youtube.url, own),
       _New() => addVideoToOwnPodcast(context, youtube.url, null),
-      _Single() => addToCloud(context, youtube.url),
     };
     return;
   }
@@ -163,13 +162,13 @@ Future<void> openLink(BuildContext context, Uri link) async {
 /// Follows the YouTube playlist or channel [link], called [what], with a
 /// plan: on this device, where its videos stream from YouTube as they play
 /// and nothing downloads, or in ListenJar Cloud, which uploads them for any
-/// podcast app. [cloud] says which; null asks.
+/// podcast app. [cloud] says which; null goes where Settings keeps new
+/// podcasts ([startsInCloud]), on this device unless they chose the Cloud.
+/// Its page can move it later.
 Future<void> followYouTube(BuildContext context, YouTubeLink link, String what, {bool? cloud}) async {
   if (!await mayFollowInCloud(context, what) || !context.mounted) return;
-  cloud ??= await _askHowToFollow(context, what);
-  if (cloud == null || !context.mounted) return;
-  if (cloud) return addToCloud(context, link.url);
   final s = Services.of(context);
+  if (cloud ?? startsInCloud(s)) return addToCloud(context, link.url);
   final navigation = Navigation.of(context);
   await _guard(context, () async {
     tell(context, 'Listing its videos…');
@@ -178,58 +177,6 @@ Future<void> followYouTube(BuildContext context, YouTubeLink link, String what, 
     if (context.mounted) tell(context, 'Following “${show.title}” on this device. Its videos stream from YouTube.');
   });
 }
-
-/// On a paid plan: a playlist or channel on this device, or in the Cloud.
-Future<bool?> _askHowToFollow(BuildContext context, String what) {
-  final text = Theme.of(context).textTheme;
-  Widget option(IconData icon, String title, String body, bool cloud) => InkWell(
-    borderRadius: BorderRadius.circular(14),
-    onTap: () => Navigator.pop(context, cloud),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      child: Row(children: [
-        Icon(icon, color: brand.fgSoft, size: 22),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: text.titleMedium!.copyWith(fontSize: 15)),
-            Text(body, style: text.bodySmall!.copyWith(color: brand.fgSoft)),
-          ]),
-        ),
-      ]),
-    ),
-  );
-  return showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      backgroundColor: brand.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-      title: Text('Follow $what', style: text.titleLarge),
-      contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          option(Icons.smart_display_outlined, 'On this device', followLocalHint, false),
-          option(
-            Icons.cloud_outlined,
-            'In ListenJar Cloud',
-            hasCloud(Services.of(context).account.user) ? followCloudHint : cloudPlanHint,
-            true,
-          ),
-        ]),
-      ),
-      actions: [
-        TextButton(style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm), onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      ],
-    ),
-  );
-}
-
-/// What following on this device means, in a line.
-const followLocalHint = 'Streams each video from YouTube when you play it. Nothing downloads; only this app has it.';
-
-/// What following in ListenJar Cloud means, in a line.
-const followCloudHint = 'This device uploads every video, for any podcast app. Uses your storage.';
 
 /// Adds [url] to ListenJar Cloud as a feed of its own, and opens it in the
 /// Library. Without the Cloud, offers the plans that have it.
@@ -278,24 +225,6 @@ Future<bool> mayFollowInCloud(BuildContext context, String what) async {
   return true;
 }
 
-/// Whether the listener may put a YouTube video in ListenJar Cloud, as a
-/// podcast of its own or in one of theirs. If they can't, says why, as
-/// [mayFollowInCloud] does.
-Future<bool> mayAddVideoToCloud(BuildContext context) async {
-  final user = Services.of(context).account.user;
-  if (user == null) {
-    await _askToSignIn(
-      context,
-      title: 'Make it a podcast with ListenJar Cloud',
-      body: 'This video plays here for free, and Add to Library keeps it on this device. '
-        'As a podcast, of its own or in one of yours, ListenJar keeps it in the cloud, '
-        'for this app and any podcast app. That takes an account and a plan.',
-    );
-    return false;
-  }
-  return mayUseCloud(context, 'Make it a podcast with ListenJar Cloud');
-}
-
 /// Whether the listener may make a podcast of their own. If they can't,
 /// says why, as [mayFollowInCloud] does.
 Future<bool> mayMakePodcast(BuildContext context) async {
@@ -315,16 +244,6 @@ Future<bool> mayMakePodcast(BuildContext context) async {
     return false;
   }
   return true;
-}
-
-/// Makes the YouTube video at [url] a ListenJar podcast of its own.
-Future<void> makeVideoPodcast(BuildContext context, String url) async {
-  if (!await mayAddVideoToCloud(context) || !context.mounted) return;
-  final feeds = Services.of(context).feeds;
-  await _guard(context, () async {
-    final feed = await feeds.add(url, CancellationToken().merge(TimeoutCancellationToken(const Duration(minutes: 2))));
-    if (context.mounted) tell(context, '“${feed.title}” is now a ListenJar podcast. It uploads from this device.');
-  });
 }
 
 /// A podcast of the listener's own: on this device, where its videos
@@ -376,12 +295,12 @@ List<OwnPodcast> ownPodcasts(BuildContext context) {
 /// The podcast of the listener's own whose [OwnPodcast.id] is [id].
 OwnPodcast? ownPodcast(BuildContext context, String id) => ownPodcasts(context).where((o) => o.id == id).firstOrNull;
 
-/// Makes a podcast of the listener's own, asking its name and whether it's
-/// on this device or in ListenJar Cloud; null when they cancel or it fails,
-/// which it says.
-Future<OwnPodcast?> newOwnPodcast(BuildContext context) async {
+/// Makes a podcast of the listener's own, asking its name, offered as
+/// [name], and whether it's on this device or in ListenJar Cloud; null when
+/// they cancel or it fails, which it says.
+Future<OwnPodcast?> newOwnPodcast(BuildContext context, {String? name}) async {
   if (!await mayMakePodcast(context) || !context.mounted) return null;
-  final asked = await askNewPodcast(context);
+  final asked = await askNewPodcast(context, name: name);
   if (asked == null || !context.mounted) return null;
   final s = Services.of(context);
   if (asked.cloud && !await mayUseCloud(context, 'Podcasts of your own in ListenJar Cloud')) return null;
@@ -402,7 +321,7 @@ Future<OwnPodcast?> addVideoToOwnPodcast(BuildContext context, String url, OwnPo
   if (link == null || link.kind != SourceKind.video) return null;
   if (own != null && !await mayMakePodcast(context)) return null;
   if (!context.mounted) return null;
-  final target = own ?? await newOwnPodcast(context);
+  final target = own ?? await newOwnPodcast(context, name: title);
   if (target == null || !context.mounted) return null;
   // One of theirs in the Cloud from when the plan had it.
   if (target is CloudOwn && !await mayUseCloud(context, 'Add to “${target.title}” in ListenJar Cloud')) return null;
@@ -478,12 +397,8 @@ final class _New extends _Where {
   const _New();
 }
 
-final class _Single extends _Where {
-  const _Single();
-}
 
-/// On a paid plan: into one of the listener's own podcasts, or a podcast
-/// of its own.
+/// On a paid plan: into one of the listener's own podcasts, or a new one.
 Future<_Where?> _askWhere(BuildContext context) {
   final text = Theme.of(context).textTheme;
   final own = ownPodcasts(context);
@@ -517,12 +432,6 @@ Future<_Where?> _askWhere(BuildContext context) {
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             for (final o in own) option(Icons.playlist_add_rounded, 'Add to “${o.title}”', null, _Own(o)),
             option(Icons.add_rounded, 'Add to a new podcast…', null, const _New()),
-            option(
-              Icons.podcasts_rounded,
-              'Make it a podcast of its own',
-              'One episode, as a ListenJar feed for any podcast app.',
-              const _Single(),
-            ),
           ]),
         ),
       ),

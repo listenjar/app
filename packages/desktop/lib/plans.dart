@@ -554,31 +554,48 @@ final class _PlanTileState extends State<_PlanTile> {
 /// in ListenJar Cloud or on this device.
 typedef NewPodcast = ({String title, bool cloud});
 
-/// Asks what to call a new podcast of the listener's own and where to keep
-/// it: in the Cloud by default on a plan that has it, on this device on
-/// Local.
-Future<NewPodcast?> askNewPodcast(BuildContext context) {
-  final cloud = hasCloud(Services.of(context).account.user);
+/// Asks what to call a new podcast of the listener's own, offering [name],
+/// and where to keep it, starting where [startsInCloud] says.
+Future<NewPodcast?> askNewPodcast(BuildContext context, {String? name}) {
+  final s = Services.of(context);
   return showDialog<NewPodcast>(
     context: context,
-    builder: (context) => _NewPodcastSheet(hasCloud: cloud),
+    builder: (context) => _NewPodcastSheet(
+      hasCloud: hasCloud(s.account.user),
+      cloud: startsInCloud(s),
+      name: name,
+    ),
   );
 }
 
+/// Whether something new of the listener's (a playlist or channel they
+/// follow, a podcast they make) starts in ListenJar Cloud: on a plan that
+/// has it, when Settings says so. Otherwise on this device.
+bool startsInCloud(Services s) => hasCloud(s.account.user) && s.library.settings.newInCloud;
+
 final class _NewPodcastSheet extends StatefulWidget {
-  const _NewPodcastSheet({required this.hasCloud});
+  const _NewPodcastSheet({required this.hasCloud, required this.cloud, this.name});
 
   /// Whether the plan has ListenJar Cloud; on Local, picking it leads to
   /// the plans that do.
   final bool hasCloud;
+
+  /// Whether it starts in the Cloud rather than on this device.
+  final bool cloud;
+
+  /// The name it starts with, selected to type over.
+  final String? name;
 
   @override
   State<_NewPodcastSheet> createState() => _NewPodcastSheetState();
 }
 
 final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
-  final _title = TextEditingController();
-  late bool _cloud = widget.hasCloud;
+  late final _title = TextEditingController.fromValue(switch (widget.name?.trim()) {
+    final name? when name.isNotEmpty => TextEditingValue(text: name, selection: TextSelection(baseOffset: 0, extentOffset: name.length)),
+    _ => TextEditingValue.empty,
+  });
+  late bool _cloud = widget.cloud;
 
   @override
   void initState() {

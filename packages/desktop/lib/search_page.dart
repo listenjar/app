@@ -10,12 +10,12 @@ import 'dart:async';
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:material_ui/material_ui.dart';
 
-import 'backend/api.dart' show Plan, SourceKind;
+import 'backend/api.dart' show SourceKind;
 import 'directory.dart';
 import 'library.dart' show PodcastEpisode;
 import 'links.dart';
 import 'menu.dart';
-import 'shared_links.dart' show OwnPodcast, addVideoToOwnPodcast, followYouTube, mayAddVideoToCloud, ownPodcast, ownPodcasts;
+import 'shared_links.dart' show OwnPodcast, addVideoToOwnPodcast, followYouTube, ownPodcast, ownPodcasts;
 import 'plans.dart';
 import 'podcasts.dart' show feedUrl;
 import 'shell.dart';
@@ -223,11 +223,11 @@ final class _SearchPageState extends State<SearchPage> {
   }, 'Couldn’t play that video');
 
   /// Playlists and channels take a plan: followed on this device, where
-  /// they stream, or in ListenJar Cloud, as [cloud] says; null asks.
-  Future<void> _follow(String url, String title, {bool? cloud}) async {
+  /// they stream, or in ListenJar Cloud, as Settings says.
+  Future<void> _follow(String url, String title) async {
     final link = parseYouTubeLink(url);
     if (link == null) return;
-    await _run(url, () => followYouTube(context, link, '“$title”', cloud: cloud), 'Couldn’t follow that');
+    await _run(url, () => followYouTube(context, link, '“$title”'), 'Couldn’t follow that');
   }
 
   /// Adds the video to [own], a podcast of the listener's own on this
@@ -237,16 +237,6 @@ final class _SearchPageState extends State<SearchPage> {
     await _run(link.url, () async {
       final target = await addVideoToOwnPodcast(context, link.url, own, title: title);
       if (target != null) _added.add('${target.id} ${link.url}');
-    }, 'Couldn’t add that video');
-  }
-
-  /// Makes the video a ListenJar Cloud podcast of a single episode.
-  Future<void> _videoPodcast(YouTubeLink link) async {
-    if (!await mayAddVideoToCloud(context) || !mounted) return;
-    final feeds = Services.of(context).feeds;
-    await _run(link.url, () async {
-      final feed = await feeds.add(link.url, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
-      if (mounted) tell(context, '“${feed.title}” is now a ListenJar podcast. It uploads from this device.');
     }, 'Couldn’t add that video');
   }
 
@@ -500,7 +490,7 @@ final class _SearchPageState extends State<SearchPage> {
   };
 
   /// Add and play. Add keeps the video in the Library, or puts it in a
-  /// ListenJar Cloud podcast of the listener's own. Once the video is an
+  /// podcast of the listener's own. Once the video is an
   /// episode, play is the same button every episode has: it pauses while
   /// this one plays and resumes it.
   Widget _videoActions(BuildContext context, YouTubeLink link, SearchResult? r, PodcastEpisode? episode) {
@@ -523,7 +513,6 @@ final class _SearchPageState extends State<SearchPage> {
           for (final o in own)
             MenuEntry(o.title, icon: o.icon, onPressed: () => unawaited(_addToPodcast(link, o, title: r?.title))),
           MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_addToPodcast(link, null, title: r?.title))),
-          MenuEntry('A podcast of its own', icon: Icons.playlist_play_rounded, onPressed: () => unawaited(_videoPodcast(link))),
         ],
         builder: (context, menu) => IconButton(
           tooltip: 'Add to Library or a podcast',
@@ -560,26 +549,15 @@ final class _SearchPageState extends State<SearchPage> {
     ]);
   }
 
-  /// Follow: on a plan, a menu of on this device or in the Cloud; without
-  /// one, what following takes.
-  Widget _followButton(BuildContext context, String url, String title) {
-    final paid = Services.of(context).account.user?.plan == Plan.paid;
-    Widget button(VoidCallback onPressed) => TextButton.icon(
-      style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-      onPressed: onPressed,
-      icon: const Icon(Icons.add_rounded, size: 18),
-      label: const Text('Follow'),
-    );
-    if (!paid) return button(() => unawaited(_follow(url, title)));
-    return Dropdown(
-      align: MenuAlign.end,
-      items: [
-        MenuEntry('On this device', icon: Icons.smart_display_outlined, onPressed: () => unawaited(_follow(url, title, cloud: false))),
-        MenuEntry('In ListenJar Cloud', icon: Icons.cloud_outlined, onPressed: () => unawaited(_follow(url, title, cloud: true))),
-      ],
-      builder: (context, menu) => button(menu.toggle),
-    );
-  }
+  /// Follow: where Settings keeps new podcasts, on this device unless the
+  /// listener chose the Cloud; its page can move it. Without a plan, says
+  /// what following takes.
+  Widget _followButton(BuildContext context, String url, String title) => TextButton.icon(
+    style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+    onPressed: () => unawaited(_follow(url, title)),
+    icon: const Icon(Icons.add_rounded, size: 18),
+    label: const Text('Follow'),
+  );
 
   Widget _linkCard(BuildContext context, YouTubeLink link) {
     final text = Theme.of(context).textTheme;
@@ -601,7 +579,9 @@ final class _SearchPageState extends State<SearchPage> {
             Text(
               video
                 ? 'Plays here as an episode of its own. Free, on this device.'
-                : 'Follow it on this device, streaming from YouTube, or in ListenJar Cloud for any podcast app.',
+                : startsInCloud(Services.of(context))
+                  ? 'Follow it in ListenJar Cloud, for any podcast app.'
+                  : 'Follow it on this device. Its videos stream from YouTube.',
               style: text.bodySmall!.copyWith(color: brand.fgSoft),
             ),
           ]),

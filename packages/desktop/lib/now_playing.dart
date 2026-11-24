@@ -14,7 +14,7 @@ import 'chapters.dart';
 import 'library.dart';
 import 'menu.dart';
 import 'player.dart';
-import 'shared_links.dart' show addVideoToOwnPodcast, makeVideoPodcast, ownPodcasts;
+import 'shared_links.dart' show addVideoToOwnPodcast, ownPodcasts;
 import 'theme.dart' as brand;
 import 'ui.dart';
 
@@ -1165,8 +1165,8 @@ final class _UpNextButton extends StatelessWidget {
 }
 
 /// Where a YouTube video that's playing can stay: in the library, free and
-/// on this device; or, in ListenJar Cloud, as a podcast of its own or an
-/// episode of one of the listener's podcasts.
+/// on this device; or as an episode of one of the listener's own podcasts,
+/// on this device or in ListenJar Cloud.
 final class _AddVideoButton extends StatefulWidget {
   const _AddVideoButton({required this.episode});
   final PodcastEpisode episode;
@@ -1214,9 +1214,6 @@ final class _AddVideoButtonState extends State<_AddVideoButton> {
                   tell(context, 'Added “${e.title}” to your library.');
                 },
           ),
-          const MenuDivider(),
-          const MenuHeader('ListenJar Cloud, for any podcast app'),
-          MenuEntry('Make it a podcast', icon: Icons.podcasts_rounded, onPressed: () => unawaited(_run((c) => makeVideoPodcast(c, url)))),
           const MenuDivider(),
           if (planned) ...[
             const MenuHeader('Add to a podcast of yours'),

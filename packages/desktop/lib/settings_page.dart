@@ -11,7 +11,7 @@ import 'library_page.dart' show exportOpml, importOpml;
 import 'menu.dart';
 import 'now_playing.dart' show speedLabel;
 import 'player.dart' show speeds;
-import 'plans.dart' show formatBytes;
+import 'plans.dart' show formatBytes, hasCloud;
 import 'shell.dart';
 import 'storage_page.dart';
 import 'theme.dart' as brand;
@@ -27,7 +27,7 @@ final class SettingsPage extends StatelessWidget {
     final s = Services.of(context);
     final mobile = Platform.isAndroid || Platform.isIOS;
     final page = ListenableBuilder(
-      listenable: s.library,
+      listenable: Listenable.merge([s.library, s.account]),
       builder: (context, _) {
         final settings = s.library.settings;
         void set(PlayerSettings next) => s.library.updateSettings(next);
@@ -96,6 +96,16 @@ final class SettingsPage extends StatelessWidget {
           ]),
           sectionHeading(context, 'Your shows'),
           _group([
+            if (hasCloud(s.account.user))
+              settingChoice(
+                context,
+                'Keep new podcasts',
+                'Where playlists and channels you follow, and podcasts you make, start. Each can move later.',
+                settings.newInCloud,
+                const [false, true],
+                (cloud) => cloud ? 'In ListenJar Cloud' : 'On this device',
+                (cloud) => set(settings.copyWith(newInCloud: cloud)),
+              ),
             _action(context, 'Import from another podcast app', 'Choose an OPML file it exported.', () => unawaited(importOpml(context))),
             _action(context, 'Export for another podcast app', 'Saves every show you follow as an OPML file.', () => unawaited(exportOpml(context))),
           ]),

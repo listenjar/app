@@ -217,6 +217,7 @@ final class PlayerSettings {
     this.removePlayedAfter = Duration.zero,
     this.removeUnplayedAfter,
     this.storageLimit,
+    this.newInCloud = false,
   });
 
   /// Playback speed, 0.5 to 3.
@@ -246,6 +247,11 @@ final class PlayerSettings {
   /// no limit.
   final int? storageLimit;
 
+  /// Playlists and channels the listener follows, and podcasts they make,
+  /// start in ListenJar Cloud rather than on this device, on a plan that
+  /// has the Cloud. Each can move later.
+  final bool newInCloud;
+
   PlayerSettings copyWith({
     double? speed,
     Duration? skipBack,
@@ -256,6 +262,7 @@ final class PlayerSettings {
     Object? removePlayedAfter = _same,
     Object? removeUnplayedAfter = _same,
     Object? storageLimit = _same,
+    bool? newInCloud,
   }) => PlayerSettings(
     speed: speed ?? this.speed,
     skipBack: skipBack ?? this.skipBack,
@@ -266,6 +273,7 @@ final class PlayerSettings {
     removePlayedAfter: identical(removePlayedAfter, _same) ? this.removePlayedAfter : removePlayedAfter as Duration?,
     removeUnplayedAfter: identical(removeUnplayedAfter, _same) ? this.removeUnplayedAfter : removeUnplayedAfter as Duration?,
     storageLimit: identical(storageLimit, _same) ? this.storageLimit : storageLimit as int?,
+    newInCloud: newInCloud ?? this.newInCloud,
   );
 }
 
@@ -431,6 +439,7 @@ final class Library extends ChangeNotifier {
         final b? when b > 0 => b,
         _ => d.storageLimit,
       },
+      newInCloud: (kv['new_in_cloud'] ?? '${d.newInCloud}') == 'true',
     );
   }
 
@@ -1093,6 +1102,7 @@ final class Library extends ChangeNotifier {
       'remove_played_after': '${s.removePlayedAfter?.inSeconds ?? -1}',
       'remove_unplayed_after': '${s.removeUnplayedAfter?.inSeconds ?? -1}',
       'storage_limit_bytes': '${s.storageLimit ?? 0}',
+      'new_in_cloud': '${s.newInCloud}',
     };
     for (final MapEntry(:key, :value) in kv.entries) {
       _db.execute('insert into settings (key, value) values (?, ?) on conflict (key) do update set value = excluded.value', [key, value]);
