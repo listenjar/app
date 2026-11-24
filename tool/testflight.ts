@@ -1,9 +1,10 @@
 // Sends a release's iOS build to TestFlight: uploads the .ipa that
 // tool/package-ios.sh exported, waits for App Store Connect to process it,
-// says what's new (the released commit's subject), adds it to the external
-// "Public" group, whose public link takes up to 10,000 testers, and submits it
-// to Beta App Review, after which that group can install it. Each step it finds
-// already done it skips, so a rerun picks up where a failed one stopped.
+// sets its What to Test to the release's notes (`tool/release.ts notes`), adds
+// it to the external "Public" group, whose public link takes up to 10,000
+// testers, and submits it to Beta App Review, after which that group can
+// install it. Each step it finds already done it skips, so a rerun picks up
+// where a failed one stopped.
 //
 //   node tool/testflight.ts <ipa>
 //
@@ -47,13 +48,14 @@ const list = async (path: string) => (await api("GET", path))!.data as Resource[
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 const ipa = process.argv[2] ?? (() => { throw new Error("Usage: node tool/testflight.ts <ipa>") })()
-const { version, build, commit } = JSON.parse(execFileSync("node", ["tool/release.ts", "identity"], { encoding: "utf8" }))
+const node = (...args: string[]) => JSON.parse(execFileSync("node", ["tool/release.ts", ...args], { encoding: "utf8" }))
+const { version, build } = node("identity")
+const changes: string[] = node("notes")
 
-// What's new: the commit this release was cut from (version.yaml's
-// `Source-commit:` trailer on "Release vX.Y.Z"), else the built commit.
-const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim()
-const source = /^Source-commit:\s*(\S+)/m.exec(git("log", "-1", "--format=%B", commit))?.[1] ?? commit
-const whatsNew = `ListenJar ${version} (${build})\n\n${git("log", "-1", "--format=%s", source)}`.slice(0, 4000)
+// TestFlight shows the version and build above What to Test.
+const whatsNew = `${changes.length ? `What's new:\n${changes.map(change => `• ${change}`).join("\n")}` : "Fixes behind the scenes, nothing new to try."}
+
+Found a bug or something confusing? Take a screenshot and send it as TestFlight feedback.`.slice(0, 4000)
 
 const [app] = await list(`/v1/apps?filter[bundleId]=${bundleId}&fields[apps]=bundleId`)
 if (!app) throw new Error(`No App Store Connect app for ${bundleId}`)

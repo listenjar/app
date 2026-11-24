@@ -137,6 +137,12 @@ Every push to master releases the app:
    Connect's TestFlight tab. The GitHub release doesn't wait for the ios job. macOS stays on
    the DMG above, one download link and Sparkle updates.
 
+A release's notes are the `Release-note:` trailers of the commits since the previous release
+(`node tool/release.ts notes`), written for listeners: a commit that changes what they see or do
+ends with one per change, and other commits carry none. The GitHub release lists them, and
+TestFlight shows them as What to Test. Commit subjects are written for developers and never
+reach listeners.
+
 Secrets live only in GitHub and, on a Mac, in `~/.secrets/listenjar`; never in this repo. On
 GitHub they are in the `desktop-release` environment, which only `v*` tags can use, so the
 macos, windows, android, ios and publish jobs run only on a release tag; `moon run desktop-signing:restore`

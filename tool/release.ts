@@ -21,7 +21,15 @@
 // app checks the certificates before it hands the APK over. Linux, which
 // updates elsewhere, only gets a manifest with the hash.
 //
+// Release notes: a commit that changes something a listener sees or does
+// carries a `Release-note:` trailer, one line per change, written for
+// listeners (see AGENTS.md). A release's notes are those trailers from the
+// commits since the previous release; the GitHub release and TestFlight's
+// What to Test both show them. Commit subjects are written for developers and
+// never reach listeners.
+//
 //   node tool/release.ts identity [tag]
+//   node tool/release.ts notes [tag]
 //   node tool/release.ts prepare <platform> <payload> <directory>
 //   node tool/release.ts verify <directory>
 //   node tool/release.ts publish <directory>
@@ -73,6 +81,34 @@ async function identity(tag?: string): Promise<Release> {
     throw new Error(`${tag} does not point at the built commit`)
   }
   return { version, build: Number(build), commit, tag: `v${version}` }
+}
+
+const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim()
+
+/**
+ * What changed for listeners in [release]: the `Release-note:` trailers of the
+ * commits since the previous release, oldest first. Each tag sits on its own
+ * "Release vX.Y.Z" commit, whose parent is the source commit it released, so
+ * the previous release is the newest other tag whose source commit [release]
+ * contains.
+ */
+function releaseNotes(release: Release): string[] {
+  const contains = (tag: string) => {
+    try {
+      execFileSync("git", ["merge-base", "--is-ancestor", `${tag}^`, release.commit])
+      return true
+    } catch {
+      return false
+    }
+  }
+  const previous = git("tag", "--list", "v*", "--sort=-v:refname")
+    .split("\n")
+    .find(tag => /^v\d+\.\d+\.\d+$/.test(tag) && git("rev-parse", `${tag}^{commit}`) !== release.commit && contains(tag))
+  const range = previous ? `${previous}..${release.commit}` : release.commit
+  return git("log", "--reverse", "--no-merges", "--format=%(trailers:key=Release-note,valueonly,unfold)", range)
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
 }
 
 const assetName = (release: Release, platform: Platform) =>
@@ -249,7 +285,10 @@ async function publish(directory: string) {
   await assertForward(release)
   const remote = await api(`commits/${release.tag}`)
   if (remote.sha !== release.commit) throw new Error("The remote tag no longer points at the built commit")
+  const changes = releaseNotes(release)
   const notes = `ListenJar ${release.version}
+
+${changes.length ? changes.map(change => `- ${change}`).join("\n") : "Fixes behind the scenes."}
 
 macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK for each of arm64-v8a (nearly every phone), armeabi-v7a and x86_64. On macOS, Windows and Android ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it, and Android installs only an APK signed with the same key as the installed app.
 
@@ -311,6 +350,8 @@ if (command === "identity") {
   if (process.env.GITHUB_OUTPUT) {
     await appendFile(process.env.GITHUB_OUTPUT, `version=${release.version}\nbuild=${release.build}\ncommit=${release.commit}\n`)
   }
+} else if (command === "notes") {
+  console.log(JSON.stringify(releaseNotes(await identity(args[0]))))
 } else if (command === "prepare" && args.length === 3) {
   await prepare(args[0], args[1], args[2])
 } else if (command === "verify" && args.length === 1) {
@@ -318,5 +359,5 @@ if (command === "identity") {
 } else if (command === "publish" && args.length === 1) {
   await publish(args[0])
 } else {
-  throw new Error("Usage: release.ts identity [tag] | prepare PLATFORM PAYLOAD DIRECTORY | verify DIRECTORY | publish DIRECTORY")
+  throw new Error("Usage: release.ts identity [tag] | notes [tag] | prepare PLATFORM PAYLOAD DIRECTORY | verify DIRECTORY | publish DIRECTORY")
 }
