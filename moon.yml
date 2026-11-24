@@ -101,6 +101,7 @@ tasks:
     description: Regenerate packages/youtubei/lib/src/bindings.g.dart from native/bridge.h after changing it.
     deps: [~:scripts]
     script: cd packages/youtubei && dart run tool/ffigen.dart
+    inputs: []
     options:
       cache: false
       outputStyle: stream
@@ -110,6 +111,9 @@ tasks:
       save under packages/*/lib (tool/dev.dart) and printing the DTD URI for the Dart MCP server.
     deps: [~:codegen, ~:scripts]
     script: dart tool/dev.dart macos
+    # Uncached, so hash nothing: the default (every file in the project) walks node_modules
+    # and the Flutter build tree, warning on each symlinked directory and running out of file handles.
+    inputs: []
     preset: server
   build:
     description: Package the release macOS app into packages/desktop/build/macos.
@@ -124,6 +128,7 @@ tasks:
     description: Analyze the Flutter app and youtubei.
     deps: [~:codegen, ~:scripts]
     script: flutter analyze packages/desktop packages/youtubei
+    inputs: []
     options:
       cache: false
       runInCI: false
