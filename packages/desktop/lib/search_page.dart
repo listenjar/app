@@ -199,7 +199,7 @@ final class _SearchPageState extends State<SearchPage> {
     final navigator = Navigator.of(context);
     final show = await s.podcasts.open(Uri.parse(url), _life, follow: follow);
     if (!follow && mounted) {
-      await navigator.push(MaterialPageRoute<void>(builder: (_) => ShowPage(podcastId: show.id)));
+      await navigator.push(pageRoute(ShowPage(podcastId: show.id)));
     } else if (mounted) {
       tell(context, 'Following “${show.title}”.');
     }

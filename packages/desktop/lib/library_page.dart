@@ -59,12 +59,12 @@ final class LibraryPage extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Downloads',
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const DownloadsPage(pushed: true))),
+                onPressed: () => Navigator.of(context).push(pageRoute(const DownloadsPage(pushed: true))),
                 icon: const Icon(Icons.download_rounded, color: brand.fgSoft),
               ),
               IconButton(
                 tooltip: 'Settings',
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SettingsPage(pushed: true))),
+                onPressed: () => Navigator.of(context).push(pageRoute(const SettingsPage(pushed: true))),
                 icon: const Icon(Icons.tune_rounded, color: brand.fgSoft),
               ),
             ],
@@ -152,7 +152,7 @@ final class LibraryPage extends StatelessWidget {
       fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
       onTap: () => feed == null
         ? Navigation.of(context).openShow(show.id)
-        : Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CloudShowPage(feedId: feed.id))),
+        : Navigator.of(context).push(pageRoute(CloudShowPage(feedId: feed.id))),
     );
   }
 
@@ -170,7 +170,7 @@ final class LibraryPage extends StatelessWidget {
       semantics: '${feed.title}, ${status.$1}',
       subtitle: status,
       fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
-      onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CloudShowPage(feedId: feed.id))),
+      onTap: () => Navigator.of(context).push(pageRoute(CloudShowPage(feedId: feed.id))),
     );
   }
 }

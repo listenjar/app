@@ -47,7 +47,7 @@ final class DownloadsPage extends StatelessWidget {
               ),
             TextButton(
               style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StoragePage(back: 'Downloads'))),
+              onPressed: () => Navigator.of(context).push(pageRoute(const StoragePage(back: 'Downloads'))),
               child: const Text('Storage'),
             ),
           ]),

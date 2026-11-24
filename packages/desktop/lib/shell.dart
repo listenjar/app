@@ -163,12 +163,8 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     search.ask(query: query, youtube: youtube, into: into);
   }
 
-  // Each page is a Material of its own, so its ink (an InkWell's hover,
-  // focus or pressed highlight) paints with the page. On the Scaffold's
-  // Material it painted under every section, and a hidden page's stuck
-  // highlight showed through the others as grey bars.
   static Route<void> _page(Widget page) => PageRouteBuilder<void>(
-    pageBuilder: (_, _, _) => Material(type: MaterialType.transparency, child: page),
+    pageBuilder: (_, _, _) => _surface(page),
     transitionDuration: const Duration(milliseconds: 220),
     reverseTransitionDuration: const Duration(milliseconds: 160),
     transitionsBuilder: (context, animation, _, child) {
@@ -481,6 +477,17 @@ final class PageBody extends StatelessWidget {
     );
   }
 }
+
+/// A page pushed onto a section's stack, sliding in as the platform does
+/// (with iOS's back swipe).
+Route<void> pageRoute(Widget page) => MaterialPageRoute<void>(builder: (_) => _surface(page));
+
+// Each page is a Material of its own, so its ink (an InkWell's hover, focus
+// or pressed highlight) paints with the page. On the Scaffold's Material it
+// painted under every section, and a hidden page's stuck highlight showed
+// through the others as grey bars. Opaque, so a page sliding or fading in
+// covers the one under it instead of showing it through.
+Widget _surface(Widget page) => Material(color: brand.paper, child: page);
 
 /// A back button for pages pushed onto a section.
 Widget backButton(BuildContext context, String label) => Align(

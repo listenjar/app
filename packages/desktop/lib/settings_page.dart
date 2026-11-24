@@ -91,7 +91,7 @@ final class SettingsPage extends StatelessWidget {
               context,
               'Storage',
               _storageSummary(s.library),
-              () => unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StoragePage(back: 'Settings')))),
+              () => unawaited(Navigator.of(context).push(pageRoute(const StoragePage(back: 'Settings')))),
             ),
           ]),
           sectionHeading(context, 'Your shows'),
