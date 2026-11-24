@@ -294,6 +294,7 @@ Map<String, Object> _json(ApkRelease r) =>
 String _why(Object e) => switch (e) {
   SocketException() || http.ClientException() => 'no connection to GitHub.',
   CancelledException() => 'it took too long.',
+  HttpException(:final message) || FormatException(:final message) => '$message.',
   JThrowable(:final message) => message,
   _ => '$e',
 };

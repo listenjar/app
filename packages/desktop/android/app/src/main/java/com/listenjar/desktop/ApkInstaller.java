@@ -21,7 +21,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Installs ListenJar's own updates, for lib/updates.dart, which calls it
+ * Installs ListenJar's own updates, for lib/apk_updates.dart, which calls it
  * through the JNIgen bindings in lib/apk_installer.g.dart (tool/jnigen.dart
  * regenerates them). Dart checks listenjar/desktop's latest release, asks,
  * downloads the APK and checks its SHA-256; this checks that the APK is this
@@ -41,8 +41,9 @@ public final class ApkInstaller {
     static final String RELEASE_PACKAGE = "com.listenjar.desktop";
 
     /**
-     * How an install went: `confirming`, `cancelled`, `refused` (the APK
-     * isn't a ListenJar update from ListenJar's key) or `failed`, with why.
+     * How an install went: `confirming`, `installed`, `cancelled`, `refused`
+     * (the APK isn't a ListenJar update from ListenJar's key) or `failed`,
+     * with why.
      */
     @Keep
     public interface Listener {

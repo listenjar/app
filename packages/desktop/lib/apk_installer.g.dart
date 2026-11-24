@@ -41,7 +41,7 @@ const _$jniVersionCheck = jni$_.JniVersionCheck(1, 2);
 
 /// from: `com.listenjar.desktop.ApkInstaller`
 ///
-/// Installs ListenJar's own updates, for lib/updates.dart, which calls it
+/// Installs ListenJar's own updates, for lib/apk_updates.dart, which calls it
 /// through the JNIgen bindings in lib/apk_installer.g.dart (tool/jnigen.dart
 /// regenerates them). Dart checks listenjar/desktop's latest release, asks,
 /// downloads the APK and checks its SHA-256; this checks that the APK is this
@@ -406,7 +406,9 @@ final class $ApkInstaller$Status$Type$
 
 /// from: `com.listenjar.desktop.ApkInstaller$Listener`
 ///
-/// How an install went: `confirming`, `cancelled` or `failed` with why.
+/// How an install went: `confirming`, `installed`, `cancelled`, `refused`
+/// (the APK isn't a ListenJar update from ListenJar's key) or `failed`,
+/// with why.
 extension type ApkInstaller$Listener._(jni$_.JObject _$this)
     implements jni$_.JObject {
   static final _class = jni$_.JClass.forName(
