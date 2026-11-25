@@ -197,6 +197,9 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     unawaited(title == null ? showPlans(context) : showPlans(context, title: title));
 
   @override
+  void openNewPodcast() => unawaited(createPodcast(context));
+
+  @override
   void openSearch({String? query, bool youtube = false, String? into}) {
     _navigators[Section.search]!.currentState?.popUntil((r) => r.isFirst);
     setState(() => _section = Section.search);

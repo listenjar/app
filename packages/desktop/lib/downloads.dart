@@ -184,6 +184,7 @@ final class Downloads {
       final session = await _youtube.session(merged);
       final (media, reason) = await session.media(id, channel: false, token: merged);
       if (media == null) throw StateError(reason ?? 'YouTube won’t give this video’s audio');
+      _library.fillVideoDetails(episode.id, description: media.description, publishedAt: media.publishedAt);
       _library.setDownload(episode.id, DownloadState.downloading);
       final key = _youtubeKey(episode.id);
       File part;

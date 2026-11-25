@@ -15,7 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'artwork.dart';
 import 'backend/api.dart';
-import 'cloud.dart' show ListenIn, feedStatus, moveToDevice;
+import 'cloud.dart' show ListenIn, feedStatus;
 import 'feeds.dart';
 import 'links.dart' show kindLabel;
 import 'menu.dart';
@@ -296,8 +296,6 @@ final class _PodcastPageState extends State<PodcastPage> {
                 unawaited(launchUrl(url, mode: LaunchMode.externalApplication));
               }),
             MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: widget.feeds.loading ? null : widget.feeds.syncNow),
-            if (_own || source?.kind == SourceKind.playlist || source?.kind == SourceKind.channel)
-              MenuEntry('Move to this device', icon: Icons.laptop_mac_rounded, onPressed: () => unawaited(moveToDevice(context, _feed))),
             const MenuDivider(),
             MenuEntry(_own ? 'Remove podcast' : 'Remove', icon: Icons.remove_circle_outline_rounded, danger: true, onPressed: widget.onRemove),
           ],

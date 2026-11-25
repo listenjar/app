@@ -71,6 +71,7 @@ final class Navigation {
   void openFeed(String feedId) => target?.openFeed(feedId);
   void openSettings() => target?.openSettings();
   void openPlans({String? title}) => target?.openPlans(title: title);
+  void openNewPodcast() => target?.openNewPodcast();
 
   static Navigation of(BuildContext context) => context.getInheritedWidgetOfExactType<NavigationScope>()!.navigation;
 }
@@ -88,6 +89,9 @@ abstract interface class NavigationTarget {
 
   /// The plans sheet (plans.dart), titled [title] or its default.
   void openPlans({String? title});
+
+  /// Making a podcast of the listener's own (cloud.dart's createPodcast).
+  void openNewPodcast();
 }
 
 final class NavigationScope extends InheritedWidget {

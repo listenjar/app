@@ -243,8 +243,8 @@ Future<void> openApplePodcasts(BuildContext context, ApplePodcastsLink link, Uri
 /// Follows the YouTube playlist or channel [link], called [what], with a
 /// plan: on this device, where its videos stream from YouTube as they play
 /// and nothing downloads, or in ListenJar Cloud, which uploads them for any
-/// podcast app. [cloud] says which; null goes where Settings keeps new
-/// podcasts ([startsInCloud]), on this device unless they chose the Cloud.
+/// podcast app. [cloud] says which; null goes where the plan keeps new
+/// podcasts ([startsInCloud]): the Cloud on a plan that has it.
 /// Its page can move it later.
 Future<void> followYouTube(BuildContext context, YouTubeLink link, String what, {bool? cloud}) async {
   if (!await mayFollowInCloud(context, what) || !context.mounted) return;
@@ -294,8 +294,8 @@ Future<bool> mayFollowInCloud(BuildContext context, String what) async {
       context,
       title: 'Follow $what',
       body: 'Single videos play here for free. Following a playlist or a channel takes a plan: '
-        'on this device, its new videos stream here from YouTube; in ListenJar Cloud, '
-        'they become a podcast for any podcast app. Sign in to pick one.',
+        'with ListenJar Local, its new videos stream here from YouTube; with 10 GB or 100 GB, '
+        'they become a podcast in ListenJar Cloud for any podcast app. Sign in to pick a plan.',
     );
     return false;
   }
@@ -314,8 +314,8 @@ Future<bool> mayMakePodcast(BuildContext context) async {
     await _askToSignIn(
       context,
       title: 'Make a podcast of your own',
-      body: 'Gather any YouTube videos into a podcast with your own name and artwork, '
-        'on this device or in ListenJar Cloud for any podcast app. '
+      body: 'Gather any YouTube videos into a podcast with your own name and artwork: '
+        'on this device with ListenJar Local, or in ListenJar Cloud for any podcast app with 10 GB or 100 GB. '
         'That takes an account and a plan.',
     );
     return false;
@@ -339,7 +339,7 @@ sealed class OwnPodcast {
 
   /// Where it is: this device or the Cloud.
   IconData get icon => switch (this) {
-    LocalOwn() => Icons.laptop_mac_rounded,
+    LocalOwn() => brand.thisDevice,
     CloudOwn() => Icons.cloud_outlined,
   };
 }
@@ -377,8 +377,8 @@ List<OwnPodcast> ownPodcasts(BuildContext context) {
 OwnPodcast? ownPodcast(BuildContext context, String id) => ownPodcasts(context).where((o) => o.id == id).firstOrNull;
 
 /// Makes a podcast of the listener's own, asking its name, offered as
-/// [name], and whether it's on this device or in ListenJar Cloud; null when
-/// they cancel or it fails, which it says.
+/// [name]; it lives where the plan says ([startsInCloud]). Null when they
+/// cancel or it fails, which it says.
 Future<OwnPodcast?> newOwnPodcast(BuildContext context, {String? name}) async {
   if (!await mayMakePodcast(context) || !context.mounted) return null;
   final asked = await askNewPodcast(context, name: name);

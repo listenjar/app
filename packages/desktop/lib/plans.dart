@@ -701,34 +701,21 @@ final class _PlanTileState extends State<_PlanTile> {
 /// in ListenJar Cloud or on this device.
 typedef NewPodcast = ({String title, bool cloud});
 
-/// Asks what to call a new podcast of the listener's own, offering [name],
-/// and where to keep it, starting where [startsInCloud] says.
-Future<NewPodcast?> askNewPodcast(BuildContext context, {String? name}) {
+/// Asks what to call a new podcast of the listener's own, offering [name].
+/// Where it lives is the plan's to say ([startsInCloud]), not a question.
+Future<NewPodcast?> askNewPodcast(BuildContext context, {String? name}) async {
   final s = Services.of(context);
-  return showDialog<NewPodcast>(
-    context: context,
-    builder: (context) => _NewPodcastSheet(
-      hasCloud: hasCloud(s.account.user),
-      cloud: startsInCloud(s),
-      name: name,
-    ),
-  );
+  final title = await showDialog<String>(context: context, builder: (context) => _NewPodcastSheet(name: name));
+  return title == null ? null : (title: title, cloud: startsInCloud(s));
 }
 
 /// Whether something new of the listener's (a playlist or channel they
 /// follow, a podcast they make) starts in ListenJar Cloud: on a plan that
-/// has it, when Settings says so. Otherwise on this device.
-bool startsInCloud(Services s) => hasCloud(s.account.user) && s.library.settings.newInCloud;
+/// has it. Otherwise on this device.
+bool startsInCloud(Services s) => hasCloud(s.account.user);
 
 final class _NewPodcastSheet extends StatefulWidget {
-  const _NewPodcastSheet({required this.hasCloud, required this.cloud, this.name});
-
-  /// Whether the plan has ListenJar Cloud; on Local, picking it leads to
-  /// the plans that do.
-  final bool hasCloud;
-
-  /// Whether it starts in the Cloud rather than on this device.
-  final bool cloud;
+  const _NewPodcastSheet({this.name});
 
   /// The name it starts with, selected to type over.
   final String? name;
@@ -742,12 +729,11 @@ final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
     final name? when name.isNotEmpty => TextEditingValue(text: name, selection: TextSelection(baseOffset: 0, extentOffset: name.length)),
     _ => TextEditingValue.empty,
   });
-  late bool _cloud = widget.cloud;
 
   @override
   void initState() {
     super.initState();
-    _title.addListener(() => setState(() {}));
+    _title.addListener(_changed);
   }
 
   @override
@@ -756,115 +742,86 @@ final class _NewPodcastSheetState extends State<_NewPodcastSheet> {
     super.dispose();
   }
 
+  void _changed() => setState(() {});
+
   void _done() {
     final title = _title.text.trim();
-    if (title.isNotEmpty) Navigator.pop(context, (title: title, cloud: _cloud));
-  }
-
-  Widget _where(TextTheme text, {required bool cloud, required IconData icon, required String title, required String body}) {
-    final on = _cloud == cloud;
-    return Semantics(
-      selected: on,
-      button: true,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => setState(() => _cloud = cloud),
-        child: AnimatedContainer(
-          duration: brand.quick,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: on ? brand.paper : brand.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: on ? brand.accent.withValues(alpha: 0.6) : brand.line, width: on ? 1.5 : 1),
-          ),
-          child: Row(children: [
-            Icon(icon, color: on ? brand.accent : brand.fgSoft, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: text.titleMedium!.copyWith(fontSize: 14)),
-                Text(body, style: text.bodySmall!.copyWith(color: brand.fgSoft)),
-              ]),
-            ),
-          ]),
-        ),
-      ),
-    );
+    if (title.isNotEmpty) Navigator.pop(context, title);
   }
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final ready = _title.text.trim().isNotEmpty;
+    final narrow = _narrow(context);
+    final cancel = TextButton(
+      style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+      onPressed: () => Navigator.pop(context),
+      child: const Text('Cancel'),
+    );
+    final create = brand.accentShadow(
+      enabled: ready,
+      child: TextButton(
+        style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
+        onPressed: ready ? _done : null,
+        child: const Text('Create'),
+      ),
+    );
     return _sheet(
       context: context,
       width: 440,
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('New podcast', style: text.titleLarge),
-        const SizedBox(height: 6),
-        Text(
-          'A podcast you fill yourself. Paste a video link in the field at the top, then add it here.',
-          style: text.bodySmall!.copyWith(color: brand.fgSoft),
-        ),
-        const SizedBox(height: 18),
-        TextField(
-          controller: _title,
-          autofocus: true,
-          maxLength: 500,
-          onSubmitted: (_) => _done(),
-          style: text.bodyMedium,
-          cursorColor: brand.accent,
-          decoration: InputDecoration(
-            hintText: 'Name it, like “Long walks”',
-            hintStyle: text.bodyMedium!.copyWith(color: brand.fgFaint),
-            counterText: '',
-            filled: true,
-            fillColor: brand.paper,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: brand.line),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: brand.accent.withValues(alpha: 0.6), width: 1.5),
-            ),
+      // The fields scroll and the buttons stay: with the keyboard up on a
+      // phone the sheet is short, and a button pushed past its edge takes
+      // no taps.
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Flexible(
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('New podcast', style: text.titleLarge),
+              const SizedBox(height: 6),
+              Text(
+                'Any videos you pick, as one podcast. Add them from Search.',
+                style: text.bodySmall!.copyWith(color: brand.fgSoft),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _title,
+                autofocus: true,
+                maxLength: 500,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _done(),
+                style: text.bodyMedium,
+                cursorColor: brand.accent,
+                decoration: InputDecoration(
+                  hintText: 'Name it, like “Long walks”',
+                  hintStyle: text.bodyMedium!.copyWith(color: brand.fgFaint),
+                  counterText: '',
+                  filled: true,
+                  fillColor: brand.paper,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: brand.line),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: brand.accent.withValues(alpha: 0.6), width: 1.5),
+                  ),
+                ),
+              ),
+            ]),
           ),
         ),
-        const SizedBox(height: 14),
-        _where(text, cloud: false, icon: Icons.laptop_mac_rounded, title: 'On this device', body: ownLocalHint),
-        const SizedBox(height: 8),
-        _where(text, cloud: true, icon: Icons.cloud_outlined, title: 'In ListenJar Cloud', body: widget.hasCloud ? ownCloudHint : cloudPlanHint),
-        const SizedBox(height: 22),
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          TextButton(
-            style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          const SizedBox(width: 8),
-          brand.accentShadow(
-            enabled: ready,
-            child: TextButton(
-              style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
-              onPressed: ready ? _done : null,
-              child: const Text('Create'),
-            ),
-          ),
-        ]),
+        const SizedBox(height: 20),
+        if (narrow)
+          Row(children: [Expanded(child: cancel), const SizedBox(width: 8), Expanded(child: create)])
+        else
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [cancel, const SizedBox(width: 8), create]),
       ]),
     );
   }
 }
-
-/// What keeping a podcast of the listener's own on this device means, in a line.
-const ownLocalHint = 'Its videos stream from YouTube when you play them. Only this app has it.';
-
-/// What keeping it in ListenJar Cloud means, in a line.
-const ownCloudHint = 'This device uploads each video you add, for any podcast app. Uses your storage.';
-
-/// What the Cloud takes, for a listener on Local.
-const cloudPlanHint = 'For any podcast app. Takes a 10 GB or 100 GB plan.';
 
 /// Making room in a full plan: the listener's podcasts by how much they
 /// store, each removable; the episodes of their own podcasts one by one. A

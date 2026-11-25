@@ -15,7 +15,6 @@ import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
 import 'backend/api.dart' show Plan;
-import 'cloud.dart' show feedToDevice, ownToCloud, ownToDevice, showToCloud;
 import 'directory.dart';
 import 'downloads.dart';
 import 'feeds.dart';
@@ -42,7 +41,9 @@ Future<void> main([List<String> arguments = const []]) async {
   WidgetsFlutterBinding.ensureInitialized();
   links = IncomingLinks(arguments);
   // The YouTube session starts now, so the first search doesn't wait for it.
-  final youtube = YouTubeService()..warmUp();
+  final youtube = YouTubeService()
+    ..warmUp()
+    ..watchReleases();
   final account = Account();
   final feeds = Feeds(account, youtube);
   unawaited(account.restore());
@@ -95,7 +96,9 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
       },
     },
     'player': {
-      'episode': episode == null ? null : {'id': episode.id, 'title': episode.title, 'show': episode.from, 'audio': episode.audioUrl, 'artwork': episode.artwork, 'cover': episode.cover},
+      'episode': episode == null
+        ? null
+        : {'id': episode.id, 'title': episode.title, 'show': episode.from, 'audio': episode.audioUrl, 'artwork': episode.artwork, 'cover': episode.cover, 'notes': library.description(episode.id).length},
       'playing': player.playing,
       'loading': player.loading,
       'position': '${player.position}',
@@ -117,6 +120,7 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
     ],
     'linksWaiting': [for (final link in links?.waiting ?? const <Uri>[]) '$link'],
     'updates': updatesState(),
+    'youtubejs': s.youtube.bundles.state,
   };
 }
 
@@ -162,34 +166,34 @@ void control(AppServices? s, Map<String, String> parameters) {
       } else {
         s.library.createOwn(title);
       }
+    case 'video':
+      // A YouTube video `url` pasted into Search: looked up, then played.
+      final link = parseYouTubeLink(parameters['url'] ?? '') ?? (throw ArgumentError('not a YouTube link'));
+      unawaited(() async {
+        final token = CancellationToken();
+        final found = await (await s.youtube.session(token)).lookup(SourceRef(SourceRefKind.video, link.id, link.url), token);
+        final episode = await s.podcasts.youtubeVideo(
+          link,
+          token,
+          title: found.title,
+          channel: found.details.firstOrNull,
+          artworkUrl: found.thumbnailUrl,
+          description: found.description,
+          publishedAt: found.publishedAt,
+        );
+        await player.playEpisode(episode);
+      }());
     case 'rss':
       // A podcast's RSS feed (`url`), followed as the directory does.
       final url = Uri.tryParse(parameters['url'] ?? '') ?? (throw ArgumentError('url?'));
       unawaited(s.podcasts.follow(url, CancellationToken()));
-    case 'follow':
-      // A YouTube playlist or channel (`url`) on this device, streaming.
-      final link = parseYouTubeLink(parameters['url'] ?? '') ?? (throw ArgumentError('not a YouTube link'));
-      unawaited(s.podcasts.followYouTube(link, CancellationToken()));
     case 'unfollow':
       final show = s.library.podcast(int.tryParse(parameters['show'] ?? '') ?? -1) ?? (throw ArgumentError('no show ${parameters['show']}'));
       unawaited(s.podcasts.unfollow(show));
-    case 'move':
-      // A YouTube playlist or channel, or a podcast of the listener's own,
-      // between this device (`show`) and ListenJar Cloud (`feed`), as the
-      // show's and the feed's menus do.
-      switch (parameters) {
-        case {'show': final id}:
-          final show = s.library.podcast(int.parse(id)) ?? (throw ArgumentError('no show $id'));
-          unawaited(show.isOwn ? ownToCloud(s.feeds, s.podcasts, show) : showToCloud(s.feeds, s.podcasts, show));
-        case {'feed': final id}:
-          final feed = s.feeds.feeds.where((f) => f.id == id).firstOrNull ?? (throw ArgumentError('no feed $id'));
-          unawaited(feed.source == null ? ownToDevice(s.feeds, s.podcasts, feed) : feedToDevice(s.feeds, s.podcasts, feed));
-        default:
-          throw ArgumentError('move what? show or feed');
-      }
     case 'open':
       // A ListenJar `feed` (an id), a `show` (an id), `settings`,
-      // `nowPlaying` or `plans` (the sheet, titled by its value if any).
+      // `nowPlaying`, `plans` (the sheet, titled by its value if any) or
+      // `newPodcast` (making one, as the Library's button does).
       switch (parameters) {
         case {'feed': final id}:
           appNavigation.openFeed(id);
@@ -201,8 +205,10 @@ void control(AppServices? s, Map<String, String> parameters) {
           appNavigation.openNowPlaying();
         case {'plans': final title}:
           appNavigation.openPlans(title: title.isEmpty ? null : title);
+        case {'newPodcast': _}:
+          appNavigation.openNewPodcast();
         default:
-          throw ArgumentError('open what? feed, show, settings, nowPlaying or plans');
+          throw ArgumentError('open what? feed, show, settings, nowPlaying, plans or newPodcast');
       }
     case 'download':
       final episode = s.library.episode(int.tryParse(parameters['episode'] ?? '') ?? -1);

@@ -356,6 +356,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       final session = await _youtube.session(lookup);
       final (media, reason) = await session.media(id, channel: false, chapters: true, token: lookup);
       if (media == null) throw StateError(reason ?? 'YouTube won’t play this video');
+      _library.fillVideoDetails(episode.id, description: media.description, publishedAt: media.publishedAt);
       final length = await transfer.mediaLength(_http, media.audio, lookup);
       // AVPlayer gets an HLS playlist; ExoPlayer and libmpv read the index
       // in the file themselves.

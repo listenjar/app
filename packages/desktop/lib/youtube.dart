@@ -9,6 +9,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:path_provider/path_provider.dart';
@@ -19,6 +20,7 @@ import 'package:youtubei/yt_nodes.dart' as YTNodes; // ignore: library_prefixes
 
 import 'chapters.dart';
 import 'log.dart';
+import 'youtubejs_updates.dart';
 
 final _log = Logger('youtube');
 final _httpLog = Logger('youtube.http');
@@ -54,10 +56,14 @@ final class Snapshot {
 
 /// What the listener added, resolved: its canonical URL and how it looks.
 final class Resolved {
-  const Resolved({required this.url, required this.title, required this.artworkUrl});
+  const Resolved({required this.url, required this.title, required this.artworkUrl, this.description, this.publishedAt});
   final String url;
   final String title;
   final String? artworkUrl;
+
+  /// A video's description and publication; null for a playlist or channel.
+  final String? description;
+  final DateTime? publishedAt;
 }
 
 /// Something search found that the listener can add: a video, a playlist or
@@ -70,6 +76,8 @@ final class SearchResult {
     required this.title,
     required this.details,
     required this.thumbnailUrl,
+    this.description,
+    this.publishedAt,
   });
   final SourceRefKind kind;
   final String id;
@@ -79,6 +87,11 @@ final class SearchResult {
   /// Who made it and how big it is: `Cercle · 2:13:48 · 69M views`.
   final List<String> details;
   final String? thumbnailUrl;
+
+  /// A pasted video's description and publication, which its lookup reads;
+  /// null for what search lists.
+  final String? description;
+  final DateTime? publishedAt;
 }
 
 /// A stream to download, with what to send YouTube's media servers.
@@ -161,22 +174,46 @@ const _unplayableAlternative = {InnerTubeClient.WEB_EMBEDDED: InnerTubeClient.WE
 /// YouTube for the app's whole life: one session, started on first use (or
 /// by [warmUp] at launch) and shared by everything that asks YouTube. A
 /// failed start is tried again on the next call; [restart] replaces a
-/// rate-limited session.
+/// rate-limited session. Each session runs the newest YouTube.js the app has
+/// (youtubejs_updates.dart); [watchReleases] moves to newer ones as the fork
+/// releases them.
 final class YouTubeService {
   final _http = HttpClient()..userAgent = null;
   final _life = CancellationToken();
+  final bundles = YouTubeJsUpdates();
   YouTube? _session;
   Future<YouTube>? _starting;
 
   /// Starts the session now, so the first search doesn't wait for it.
   void warmUp() => unawaited(session(_life).then<void>((_) {}, onError: (_) {}));
 
+  /// Checks for YouTube.js releases every few seconds; once one verifies,
+  /// the next call starts a session with it.
+  void watchReleases() => bundles.watch((_) async {
+    // A session starting now runs the bundle before this one.
+    await _starting?.then<void>((_) {}, onError: (_) {});
+    await restart();
+  });
+
   Future<YouTube> session(CancellationToken token) async {
     if (_session case final session?) return session;
-    final starting = _starting ??= traced(_log, 'start session', () => YouTube.start(_http, _life))
+    final starting = _starting ??= traced(_log, 'start session', _start)
       .then((session) => _session = session)
       .whenComplete(() => _starting = null);
     return starting.asCancellable(token);
+  }
+
+  /// A session with the newest bundle, else, should that one not evaluate,
+  /// the built-in one.
+  Future<YouTube> _start() async {
+    final release = await bundles.bundle();
+    if (release == null) return YouTube.start(_http, _life);
+    try {
+      return await YouTube.start(_http, _life, bundle: release.source);
+    } on BundleError catch (e) {
+      await bundles.reject(release, e);
+      return YouTube.start(_http, _life);
+    }
   }
 
   /// Ends the session; the next call starts afresh. Calls already accepted
@@ -189,6 +226,7 @@ final class YouTubeService {
 
   Future<void> close() async {
     _life.cancel();
+    bundles.close();
     await restart().catchError((_) {});
     _http.close(force: true);
   }
@@ -211,9 +249,10 @@ final class YouTube {
   RateLimited? _limited;
 
   /// Starts YouTube.js and opens a session. [http] carries every request.
-  static Future<YouTube> start(HttpClient http, CancellationToken token) async {
+  static Future<YouTube> start(HttpClient http, CancellationToken token, {Uint8List? bundle}) async {
     final fetch = httpClientFetch(http);
     final innertube = await Innertube.create(
+      bundle: bundle,
       lang: 'en',
       location: 'US',
       timezone: 'UTC',
@@ -257,7 +296,13 @@ final class YouTube {
         final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token);
         if (reason != null) throw StateError(reason);
         final title = info!.basic_info.title?.trim() ?? '';
-        return Resolved(url: source.url, title: title.isEmpty ? 'YouTube video $id' : title, artworkUrl: _thumbnail(info.basic_info.thumbnail));
+        return Resolved(
+          url: source.url,
+          title: title.isEmpty ? 'YouTube video $id' : title,
+          artworkUrl: _thumbnail(info.basic_info.thumbnail),
+          description: info.basic_info.short_description ?? '',
+          publishedAt: _publication(info, channel: false),
+        );
       case SourceRefKind.playlist:
         final page = await _playlistHead(id, token);
         return Resolved(url: source.url, title: page.info.title ?? '', artworkUrl: _thumbnail(page.info.thumbnails));
@@ -309,6 +354,8 @@ final class YouTube {
         ?reason,
       ],
       thumbnailUrl: _thumbnail(basic.thumbnail),
+      description: basic.short_description ?? '',
+      publishedAt: _publication(info, channel: false),
     );
   }
 

@@ -7,6 +7,9 @@
 library;
 
 import 'dart:ffi' as ffi;
+@ffi.Native<ffi.Int64 Function()>()
+external int yt_bundle_sequence();
+
 @ffi.Native<ffi.Pointer<ffi.Char> Function(ffi.Pointer<YtEngine> , ffi.Pointer<ffi.Char> , ffi.Pointer<ffi.Char> , ffi.Int64 , ffi.Pointer<ffi.Uint8> , ffi.Int64 )>()
 external ffi.Pointer<ffi.Char> yt_deliver(ffi.Pointer<YtEngine> engine,
 ffi.Pointer<ffi.Char> name,
@@ -42,8 +45,10 @@ external void yt_interrupt_free(ffi.Pointer<YtInterrupt> interrupt,
 @ffi.Native<ffi.Pointer<YtInterrupt> Function()>()
 external ffi.Pointer<YtInterrupt> yt_interrupt_new();
 
-@ffi.Native<ffi.Pointer<ffi.Char> Function(ffi.Pointer<YtEngine> )>()
+@ffi.Native<ffi.Pointer<ffi.Char> Function(ffi.Pointer<YtEngine> , ffi.Pointer<ffi.Char> , ffi.Int64 )>()
 external ffi.Pointer<ffi.Char> yt_load(ffi.Pointer<YtEngine> engine,
+ffi.Pointer<ffi.Char> bundle,
+int bundle_len,
 );
 
 @ffi.Native<ffi.Pointer<YtEngine> Function(ffi.Int64 , ffi.Int64 , ffi.Pointer<YtInterrupt> )>()

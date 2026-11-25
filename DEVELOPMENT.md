@@ -17,6 +17,14 @@ A [pub workspace](https://dart.dev/tools/pub/workspaces) ([pubspec.yaml](pubspec
 | [packages/youtubei](packages/youtubei) | [listenbox/YouTube.js](https://github.com/listenbox/YouTube.js) in embedded QuickJS, for Dart |
 | [packages/youtubejs](packages/youtubejs) | Git submodule of the YouTube.js fork (`master`), which youtubei bundles |
 
+The app ships the bundle built from the pinned fork, and every push to the fork's `master`
+reaches listeners without an app release: the fork's Bundle release workflow publishes a signed
+`bundle-v<ABI>.<N>` release, and [youtubejs_updates.dart](packages/desktop/lib/youtubejs_updates.dart)
+lists those tags every ten seconds (Git's ref listing, which has no hourly limit), verifies the
+manifest against the pinned Ed25519 key, the ABI and the bundle's digest, keeps it in
+`youtubejs/` in the app's support directory and starts the next YouTube session with it. A
+release older than the bundle in use, or one that fails to evaluate, is never run.
+
 ## Player
 
 | File | What |
@@ -195,7 +203,7 @@ A Windows share target (which needs MSIX packaging) is still to come.
 ## Debugging
 
 Each part of the app logs through a `Logger` of its own ([log.dart](packages/desktop/lib/log.dart)):
-`youtube`, `youtube.http`, `youtube.js` (YouTube.js's own log), `podcasts`, `rss`, `player`,
+`youtube`, `youtube.http`, `youtube.js` (YouTube.js's own log), `youtube.bundle` (YouTube.js releases), `podcasts`, `rss`, `player`,
 `downloads`, `storage`, `links`. Outside release builds, records of level FINE and up print to
 `flutter run`'s console and go to DevTools' Logging view; warnings and up go there in release.
 `traced()` wraps slow work (each YouTube request, resolving a video, a feed refresh): it logs how
@@ -209,7 +217,7 @@ DevTools can call:
 | --- | --- |
 | `ext.listenjar.log` | Recent records; `since` a sequence number, `level` (default FINE), `logger` a name prefix |
 | `ext.listenjar.running` | Traced work not finished yet, oldest first |
-| `ext.listenjar.state` | Account plan, what plays, Up Next, downloads, links waiting (no names or email) |
+| `ext.listenjar.state` | Account plan, what plays, Up Next, downloads, links waiting, the YouTube.js release in use (no names or email) |
 
 SEVERE records and uncaught async errors are reported as Flutter errors, so they show where
 runtime errors show (the MCP's `get_runtime_errors`).

@@ -134,7 +134,7 @@ final class LibraryPage extends StatelessWidget {
       size: size,
       count: unplayed,
       badge: switch (show) {
-        Podcast(kind: PodcastKind.youtubeFeed || PodcastKind.own) => (Icons.laptop_mac_rounded, 'On this device'),
+        Podcast(kind: PodcastKind.youtubeFeed || PodcastKind.own) => (brand.thisDevice, 'On this device'),
         Podcast(cloudFeedId: _?) => (Icons.cloud_outlined, 'Cloud'),
         Podcast(isYouTube: true) => (Icons.smart_display_outlined, 'YouTube'),
         _ => null,

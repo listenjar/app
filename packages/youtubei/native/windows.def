@@ -1,4 +1,5 @@
 EXPORTS
+  yt_bundle_sequence
   yt_deliver
   yt_eval
   yt_free

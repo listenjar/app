@@ -13,7 +13,7 @@
 /// Where YouTube.js takes an AbortSignal, this takes a CancellationToken.
 library;
 
-export 'src/engine.dart' show YouTubeiLog;
+export 'src/engine.dart' show Bundle, BundleError, YouTubeiLog;
 export 'src/fetch.dart';
 export 'src/innertube.dart';
 export 'src/utils.dart' show InnertubeError, UniversalCache;

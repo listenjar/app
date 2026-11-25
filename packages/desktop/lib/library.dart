@@ -217,7 +217,6 @@ final class PlayerSettings {
     this.removePlayedAfter = Duration.zero,
     this.removeUnplayedAfter,
     this.storageLimit,
-    this.newInCloud = false,
   });
 
   /// Playback speed, 0.5 to 3.
@@ -247,11 +246,6 @@ final class PlayerSettings {
   /// no limit.
   final int? storageLimit;
 
-  /// Playlists and channels the listener follows, and podcasts they make,
-  /// start in ListenJar Cloud rather than on this device, on a plan that
-  /// has the Cloud. Each can move later.
-  final bool newInCloud;
-
   PlayerSettings copyWith({
     double? speed,
     Duration? skipBack,
@@ -262,7 +256,6 @@ final class PlayerSettings {
     Object? removePlayedAfter = _same,
     Object? removeUnplayedAfter = _same,
     Object? storageLimit = _same,
-    bool? newInCloud,
   }) => PlayerSettings(
     speed: speed ?? this.speed,
     skipBack: skipBack ?? this.skipBack,
@@ -273,7 +266,6 @@ final class PlayerSettings {
     removePlayedAfter: identical(removePlayedAfter, _same) ? this.removePlayedAfter : removePlayedAfter as Duration?,
     removeUnplayedAfter: identical(removeUnplayedAfter, _same) ? this.removeUnplayedAfter : removeUnplayedAfter as Duration?,
     storageLimit: identical(storageLimit, _same) ? this.storageLimit : storageLimit as int?,
-    newInCloud: newInCloud ?? this.newInCloud,
   );
 }
 
@@ -386,7 +378,8 @@ final class Library extends ChangeNotifier {
     }
     if (version < 4) {
       // Where the listener was in a YouTube playlist or channel moved to
-      // ListenJar Cloud, by video, until its uploads arrive (carry).
+      // ListenJar Cloud, by video, until its uploads arrived. Moving is
+      // gone; the table stays so later versions number on.
       db.execute('''
         create table if not exists carried (
           feed_id text not null,
@@ -439,7 +432,6 @@ final class Library extends ChangeNotifier {
         final b? when b > 0 => b,
         _ => d.storageLimit,
       },
-      newInCloud: (kv['new_in_cloud'] ?? '${d.newInCloud}') == 'true',
     );
   }
 
@@ -732,10 +724,31 @@ final class Library extends ChangeNotifier {
     _db.execute('''
       insert into episodes (podcast_id, guid, title, description, published_at, duration_ms, artwork_url, link, youtube_id, added_at)
       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      on conflict (podcast_id, guid) do nothing
+      on conflict (podcast_id, guid) do update set
+        description = case when episodes.description = '' then excluded.description else episodes.description end,
+        published_at = coalesce(episodes.published_at, excluded.published_at)
     ''', [id, 'yt:$videoId', title, description, publishedAt?.millisecondsSinceEpoch, duration?.inMilliseconds, artworkUrl, url, videoId, now]);
     _changed();
     return podcast(id)!;
+  }
+
+  /// What YouTube says of [episode]'s video, once played or downloaded:
+  /// its description and date where the episode has none, as for a video
+  /// search or a playlist listed, which say neither.
+  void fillVideoDetails(int episode, {required String description, required DateTime publishedAt}) {
+    if (description.isEmpty) return;
+    final changed = _db.select('''
+      update episodes set description = ?, published_at = coalesce(published_at, ?)
+      where id = ? and description = ''
+      returning podcast_id
+    ''', [description, publishedAt.millisecondsSinceEpoch, episode]);
+    if (changed.isEmpty) return;
+    // A video kept on its own is a show of one: its description is the show's.
+    _db.execute(
+      "update podcasts set description = ? where id = ? and kind = 'youtube' and description = ''",
+      [description, changed.first['podcast_id']],
+    );
+    _changed();
   }
 
   /// Follows the YouTube playlist or channel at [url] on this device; a
@@ -830,61 +843,6 @@ final class Library extends ChangeNotifier {
     _changed();
   }
 
-  // Moving between this device and ListenJar Cloud.
-
-  /// The videos of [podcast] the listener played or started, by video id.
-  Map<String, (Duration, bool)> _listened(int podcast) => {
-    for (final e in episodes(podcast))
-      if (e.videoId case final id? when e.played || e.position > Duration.zero) id: (e.position, e.played),
-  };
-
-  /// Puts [listened] on the episodes of [podcast] that are the same videos;
-  /// returns the video ids it put.
-  Set<String> _listen(int podcast, Map<String, (Duration, bool)> listened) {
-    final put = <String>{};
-    for (final e in episodes(podcast)) {
-      final id = e.videoId;
-      final listening = id == null ? null : listened[id];
-      if (listening == null) continue;
-      final (position, played) = listening;
-      _db.execute('update episodes set position_ms = ?, played = ? where id = ?', [position.inMilliseconds, played ? 1 : 0, e.id]);
-      put.add(id!);
-    }
-    return put;
-  }
-
-  /// Where the listener was in [from], onto [to]: the same YouTube videos,
-  /// one show moving between this device and ListenJar Cloud.
-  void copyListening(int from, int to) {
-    _listen(to, _listened(from));
-    _changed();
-  }
-
-  /// Keeps where the listener was in [podcast] for [feedId], its ListenJar
-  /// Cloud feed now, whose episodes arrive as they upload ([applyCarried]).
-  void carry(int podcast, String feedId) {
-    for (final MapEntry(key: video, value: (position, played)) in _listened(podcast).entries) {
-      _db.execute(
-        'insert or replace into carried (feed_id, video_id, position_ms, played) values (?, ?, ?, ?)',
-        [feedId, video, position.inMilliseconds, played ? 1 : 0],
-      );
-    }
-  }
-
-  /// Puts what [carry] kept on the episodes of [podcast], [feedId]'s show,
-  /// that have arrived, and forgets it for those.
-  void applyCarried(int podcast, String feedId) {
-    final rows = _db.select('select video_id, position_ms, played from carried where feed_id = ?', [feedId]);
-    if (rows.isEmpty) return;
-    final put = _listen(podcast, {
-      for (final r in rows) r['video_id'] as String: (Duration(milliseconds: r['position_ms'] as int), r['played'] == 1),
-    });
-    for (final id in put) {
-      _db.execute('delete from carried where feed_id = ? and video_id = ?', [feedId, id]);
-    }
-    if (put.isNotEmpty) _changed();
-  }
-
   /// Keeps [podcast], a ListenJar Cloud show whose feed is gone, on this
   /// device instead: the YouTube playlist or channel at [source], or with
   /// none a podcast of the listener's own. Its episodes become the YouTube
@@ -929,13 +887,6 @@ final class Library extends ChangeNotifier {
     }
     _changed();
     return true;
-  }
-
-  /// Forgets what was carried for feeds the listener no longer has.
-  void forgetCarried(Set<String> live) {
-    for (final r in _db.select('select distinct feed_id from carried')) {
-      if (!live.contains(r['feed_id'])) _db.execute('delete from carried where feed_id = ?', [r['feed_id']]);
-    }
   }
 
   static String _watchUrl(String videoId) => 'https://www.youtube.com/watch?v=$videoId';
@@ -1102,7 +1053,6 @@ final class Library extends ChangeNotifier {
       'remove_played_after': '${s.removePlayedAfter?.inSeconds ?? -1}',
       'remove_unplayed_after': '${s.removeUnplayedAfter?.inSeconds ?? -1}',
       'storage_limit_bytes': '${s.storageLimit ?? 0}',
-      'new_in_cloud': '${s.newInCloud}',
     };
     for (final MapEntry(:key, :value) in kv.entries) {
       _db.execute('insert into settings (key, value) values (?, ?) on conflict (key) do update set value = excluded.value', [key, value]);

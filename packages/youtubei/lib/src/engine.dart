@@ -33,6 +33,24 @@ import 'utils.dart';
 /// `debug`.
 typedef YouTubeiLog = void Function(String level, String message);
 
+/// The YouTube.js bundles a runtime can evaluate: the one built in, or the
+/// source of a signed release of the fork (its `youtubejs.js`), which the
+/// caller fetches and verifies.
+abstract final class Bundle {
+  /// The contract between host.js and bindings.js and the bundle: a release
+  /// for another ABI won't run here. The fork's `.github/bundle/abi`.
+  static const abi = 1;
+
+  /// The built-in bundle's sequence: its YouTube.js commit's committer time,
+  /// as release manifests carry it. A release with a later one is newer.
+  static int get sequence => yt_bundle_sequence();
+}
+
+/// A bundle that failed to evaluate.
+final class BundleError extends StateError {
+  BundleError(super.message);
+}
+
 const _memoryLimit = 768 << 20;
 // Dart runs isolates on threads with small native stacks; stay well inside.
 const _stackLimit = 512 << 10;
@@ -76,10 +94,11 @@ final _handles = Finalizer<(YouTubei, int)>((h) {
   });
 });
 
-/// Starts an engine: a new isolate evaluates the embedded YouTube.js. [log]
-/// receives YouTube.js's log lines.
+/// Starts an engine: a new isolate evaluates [bundle], a YouTube.js
+/// bundle's source, or the built-in one. [log] receives YouTube.js's log
+/// lines.
 @internal
-Future<YouTubei> startYouTubei(Fetch fetch, {CancellationToken? token, YouTubeiLog? log}) async {
+Future<YouTubei> startYouTubei(Fetch fetch, {Uint8List? bundle, CancellationToken? token, YouTubeiLog? log}) async {
   token?.throwIfCancelled();
   final interrupt = yt_interrupt_new();
   if (interrupt == nullptr) throw StateError('allocate the QuickJS interrupt');
@@ -87,7 +106,8 @@ Future<YouTubei> startYouTubei(Fetch fetch, {CancellationToken? token, YouTubeiL
   final ready = CancellableCompleter<void>(token, onCancel: () => yt_interrupt_close(interrupt));
   yt._events.listen((message) => _onEvent(yt, message, ready));
   try {
-    await Isolate.spawn(_engineMain, (yt._events.sendPort, interrupt.address), debugName: 'youtubei');
+    final source = bundle == null ? null : TransferableTypedData.fromList([bundle]);
+    await Isolate.spawn(_engineMain, (yt._events.sendPort, interrupt.address, source), debugName: 'youtubei');
   } catch (_) {
     _dispose(yt);
     rethrow;
@@ -146,6 +166,8 @@ void _onEvent(YouTubei yt, Object? message, CancellableCompleter<void> ready) {
       ready.complete();
     case _StartFailed(:final message):
       ready.completeError(StateError('initialize embedded YouTube.js: $message'));
+    case _LoadFailed(:final message):
+      ready.completeError(BundleError('evaluate YouTube.js: $message'));
     case _Ask(:final id, :final call, :final kind, :final fields):
       unawaited(_runAsk(yt, id, call, kind, fields));
     case _Log(:final level, :final message):
@@ -291,6 +313,11 @@ final class _StartFailed {
   final String message;
 }
 
+final class _LoadFailed {
+  const _LoadFailed(this.message);
+  final String message;
+}
+
 /// A fetch or cache ask from JavaScript, made while [call] ran.
 final class _Ask {
   const _Ask(this.id, this.call, this.kind, this.fields);
@@ -343,8 +370,8 @@ final class _Engine {
   final random = Random.secure();
 }
 
-void _engineMain((SendPort, int) args) {
-  final (owner, interruptAddress) = args;
+void _engineMain((SendPort, int, TransferableTypedData?) args) {
+  final (owner, interruptAddress, bundle) = args;
   final e = _Engine(owner, ReceivePort('youtubei engine'));
   final native = yt_new(_memoryLimit, _stackLimit, Pointer.fromAddress(interruptAddress));
   if (native == nullptr) {
@@ -353,15 +380,27 @@ void _engineMain((SendPort, int) args) {
     return;
   }
   e.native = native;
-  final error = _take(yt_load(native)) ?? _pump(e) ?? _drain(e, 0);
+  final error = _load(native, bundle?.materialize().asUint8List()) ?? _pump(e) ?? _drain(e, 0);
   if (error != null) {
     _free(e);
-    owner.send(_StartFailed(error));
+    owner.send(_LoadFailed(error));
     owner.send(const _Exited());
     return;
   }
   e.commands.listen((message) => _onCommand(e, message));
   owner.send(_Ready(e.commands.sendPort));
+}
+
+/// Evaluates the scripts with [bundle], zero-terminated as JS_Eval wants,
+/// or the built-in bundle.
+String? _load(Pointer<YtEngine> native, Uint8List? bundle) {
+  if (bundle == null) return _take(yt_load(native, nullptr, 0));
+  return using((arena) {
+    final source = arena<Uint8>(bundle.length + 1);
+    source.asTypedList(bundle.length).setAll(0, bundle);
+    source[bundle.length] = 0;
+    return _take(yt_load(native, source.cast(), bundle.length));
+  });
 }
 
 void _onCommand(_Engine e, Object? message) {

@@ -4,6 +4,7 @@
 // AbortSignal, these take a CancellationToken.
 // ignore_for_file: non_constant_identifier_names, constant_identifier_names
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:meta/meta.dart';
@@ -142,6 +143,9 @@ final class Innertube {
   /// defaults. Without [fetch], requests go through a dart:io HttpClient.
   /// [timezone] is an IANA zone (`Europe/Berlin`): QuickJS has no Intl to
   /// read the system's from. [log] receives YouTube.js's log lines.
+  /// [bundle] is the source of a YouTube.js release for [Bundle.abi] to run
+  /// instead of the built-in bundle; one that fails to evaluate throws a
+  /// [BundleError].
   static Future<Innertube> create({
     String? lang,
     String? location,
@@ -163,10 +167,17 @@ final class Innertube {
     Fetch? fetch,
     String? po_token,
     YouTubeiLog? log,
+    Uint8List? bundle,
     CancellationToken? token,
   }) async {
     final http = fetch == null ? (HttpClient()..userAgent = null) : null;
-    final yt = await startYouTubei(fetch ?? httpClientFetch(http!), token: token, log: log);
+    final YouTubei yt;
+    try {
+      yt = await startYouTubei(fetch ?? httpClientFetch(http!), bundle: bundle, token: token, log: log);
+    } catch (_) {
+      http?.close(force: true);
+      rethrow;
+    }
     try {
       final created = map(await callYouTubei(yt, '__bridge.create', {
         'lang': ?lang,

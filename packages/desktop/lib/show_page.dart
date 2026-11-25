@@ -13,7 +13,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'artwork.dart' show artworkExtensions;
-import 'cloud.dart' show CloudShowPage, failure, moveToCloud;
+import 'cloud.dart' show CloudShowPage, failure;
 import 'library.dart';
 import 'menu.dart';
 import 'plans.dart' show showPlans;
@@ -290,8 +290,6 @@ final class _ShowPageState extends State<ShowPage> {
         MenuEntry(show.fromYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
           unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
         }),
-      if ((show.kind == PodcastKind.youtubeFeed && show.followed) || show.isOwn)
-        MenuEntry('Move to ListenJar Cloud', icon: Icons.cloud_upload_outlined, onPressed: () => unawaited(moveToCloud(context, show))),
       if (show.followed && show.cloudFeedId == null) ...[
         const MenuDivider(),
         MenuEntry(

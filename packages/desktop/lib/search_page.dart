@@ -262,6 +262,8 @@ final class _SearchPageState extends State<SearchPage> {
       title: result?.title,
       channel: result?.details.firstOrNull,
       artworkUrl: result?.thumbnailUrl,
+      description: result?.description,
+      publishedAt: result?.publishedAt,
       follow: keep,
     );
     if (keep) {
@@ -271,8 +273,9 @@ final class _SearchPageState extends State<SearchPage> {
     }
   }, 'Couldn’t play that video');
 
-  /// Playlists and channels take a plan: followed on this device, where
-  /// they stream, or in ListenJar Cloud, as Settings says.
+  /// Playlists and channels take a plan, and the plan says where they go:
+  /// ListenJar Cloud on a plan that has it, else this device, where they
+  /// stream.
   Future<void> _follow(String url, String title) async {
     final link = parseYouTubeLink(url);
     if (link == null) return;
@@ -604,8 +607,8 @@ final class _SearchPageState extends State<SearchPage> {
     ]);
   }
 
-  /// Follow: where Settings keeps new podcasts, on this device unless the
-  /// listener chose the Cloud; its page can move it. Without a plan, says
+  /// Follow: where the plan keeps new podcasts, the Cloud on a plan that
+  /// has it, else this device; its page can move it. Without a plan, says
   /// what following takes.
   Widget _followButton(BuildContext context, String url, String title) => TextButton.icon(
     style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),

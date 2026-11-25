@@ -66,8 +66,11 @@ Where the APIs differ, Dart forces it:
 - [native/bindings.js](native/bindings.js): the thin bindings: each calls the YouTube.js method
   the Dart one mirrors and serializes what it returns.
 - `native/scripts.g.c` holds host.js, the bundle and bindings.js as C string literals, which
-  any C compiler builds into the library; the app needs no JavaScript runtime or download at
-  run time. [tool/scripts.mjs](tool/scripts.mjs) writes it (`moon run desktop:scripts`, cached
+  any C compiler builds into the library, and the bundle's sequence (its YouTube.js commit's
+  committer time, `Bundle.sequence`); the app needs no JavaScript runtime or download at run time.
+  `Innertube.create(bundle: …)` runs another bundle's source instead (a signed release of the fork
+  for `Bundle.abi`, which the caller fetches and verifies); one that fails to evaluate throws a
+  `BundleError`. [tool/scripts.mjs](tool/scripts.mjs) writes it (`moon run desktop:scripts`, cached
   on the scripts), heading it with each script's SHA-256, and the build hook stops with that
   command when it is missing or older than a script.
 - [hook/build.dart](hook/build.dart) builds it all as a code asset with

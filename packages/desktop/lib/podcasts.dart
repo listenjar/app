@@ -183,7 +183,6 @@ final class Podcasts extends ChangeNotifier {
       final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 2)));
       final fetch = await fetchFeed(_http, Uri.parse(podcast.feedUrl), token, etag: etag, lastModified: modified);
       final added = library.refreshed(podcast.id, fetch);
-      if (podcast.cloudFeedId case final feed?) library.applyCarried(podcast.id, feed);
       if (added.isNotEmpty) await _downloads.downloadNew(added);
     } on CancelledException {
       if (!_life.isCancelled) {
@@ -208,11 +207,23 @@ final class Podcasts extends ChangeNotifier {
     String? channel,
     String? artworkUrl,
     Duration? duration,
+    String? description,
+    DateTime? publishedAt,
     bool follow = false,
   }) => traced(
     _log,
     'add YouTube video ${link.id}',
-    () => _youtubeVideo(link, token, title: title, channel: channel, artworkUrl: artworkUrl, duration: duration, follow: follow),
+    () => _youtubeVideo(
+      link,
+      token,
+      title: title,
+      channel: channel,
+      artworkUrl: artworkUrl,
+      duration: duration,
+      description: description,
+      publishedAt: publishedAt,
+      follow: follow,
+    ),
     describe: (e) => 'episode ${e.id} of show ${e.podcastId}',
   );
 
@@ -223,15 +234,21 @@ final class Podcasts extends ChangeNotifier {
     String? channel,
     String? artworkUrl,
     Duration? duration,
+    String? description,
+    DateTime? publishedAt,
     bool follow = false,
   }) async {
     var name = title;
     var art = artworkUrl;
+    var notes = description;
+    var published = publishedAt;
     if (name == null) {
       final merged = _life.merge(token);
       final resolved = await (await _youtube.session(merged)).resolve(SourceRef(SourceRefKind.video, link.id, link.url), merged);
       name = resolved.title;
       art ??= resolved.artworkUrl;
+      notes ??= resolved.description;
+      published ??= resolved.publishedAt;
     }
     final show = library.addYouTubeVideo(
       videoId: link.id,
@@ -239,8 +256,9 @@ final class Podcasts extends ChangeNotifier {
       channel: channel ?? 'YouTube',
       artworkUrl: art,
       duration: duration,
-      description: '',
-      publishedAt: null,
+      // Unknown for a video search listed: playing it fills them in.
+      description: notes ?? '',
+      publishedAt: published,
       follow: follow,
     );
     return library.episodes(show.id).first;
@@ -376,7 +394,6 @@ final class Podcasts extends ChangeNotifier {
   /// goes.
   Future<void> followCloud(List<Feed> feeds, {Set<String> removed = const {}}) async {
     final live = {for (final f in feeds) f.id};
-    library.forgetCarried(live);
     for (final show in library.podcasts.where((p) => p.cloudFeedId != null && !live.contains(p.cloudFeedId))) {
       if (paid() == false && !removed.contains(show.cloudFeedId) && await keepOnDevice(show)) continue;
       await unfollow(show);
@@ -393,8 +410,7 @@ final class Podcasts extends ChangeNotifier {
       }
       try {
         final fetch = await fetchFeed(_http, Uri.parse(rss), _life);
-        final show = library.subscribe(rss, fetch.feed!, etag: fetch.etag, lastModified: fetch.lastModified, cloudFeedId: feed.id);
-        library.applyCarried(show.id, feed.id);
+        library.subscribe(rss, fetch.feed!, etag: fetch.etag, lastModified: fetch.lastModified, cloudFeedId: feed.id);
       } catch (e) {
         _log.warning('Couldn’t follow ListenJar feed ${feed.id}', e);
       }

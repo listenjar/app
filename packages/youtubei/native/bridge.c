@@ -26,6 +26,7 @@ extern const unsigned char yt_youtubejs_js[];
 extern const size_t yt_youtubejs_js_len;
 extern const unsigned char yt_bindings_js[];
 extern const size_t yt_bindings_js_len;
+extern const int64_t yt_youtubejs_sequence;
 
 #define CANCELLED_SLOTS 16
 
@@ -221,13 +222,18 @@ char *yt_eval(YtEngine *engine, const char *source, const char *filename) {
   return eval(engine, source, strlen(source), filename);
 }
 
-// Evaluates host.js, YouTube.js and bindings.js.
-char *yt_load(YtEngine *engine) {
+// Evaluates host.js, the given or embedded YouTube.js bundle and bindings.js.
+char *yt_load(YtEngine *engine, const char *bundle, int64_t bundle_len) {
   char *error = eval(engine, (const char *)yt_host_js, yt_host_js_len, "host.js");
-  if (!error) error = eval(engine, (const char *)yt_youtubejs_js, yt_youtubejs_js_len, "youtubejs.js");
+  if (!error) {
+    error = bundle ? eval(engine, bundle, (size_t)bundle_len, "youtubejs.js")
+                   : eval(engine, (const char *)yt_youtubejs_js, yt_youtubejs_js_len, "youtubejs.js");
+  }
   if (!error) error = eval(engine, (const char *)yt_bindings_js, yt_bindings_js_len, "bindings.js");
   return error;
 }
+
+int64_t yt_bundle_sequence(void) { return yt_youtubejs_sequence; }
 
 // Runs every pending promise job; returns NULL or the error to free.
 char *yt_pump(YtEngine *engine) {

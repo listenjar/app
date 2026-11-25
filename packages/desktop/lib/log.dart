@@ -28,12 +28,14 @@
 //                          not given), create (a podcast of their own
 //                          called `title`, in the Cloud if `cloud` is
 //                          true, else on this device), rss (a podcast's
-//                          feed `url`), follow (a YouTube
+//                          feed `url`), video (a YouTube video `url`,
+//                          looked up and played as Search does), follow (a YouTube
 //                          playlist or channel `url`, on this device),
 //                          unfollow (`show`), move (a `show` on this
 //                          device to the Cloud, or a Cloud `feed` here),
 //                          open (a `feed` or `show`
-//                          id, `settings` or `nowPlaying`), download
+//                          id, `settings`, `nowPlaying`, `plans` or
+//                          `newPodcast`), download
 //                          (`episode`) or key (`key` up, down, left,
 //                          right, space, enter, escape or tab, to
 //                          whatever has focus)

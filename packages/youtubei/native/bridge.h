@@ -25,8 +25,13 @@ void yt_set_running(YtEngine *engine, int64_t call);
 
 // Each of these returns NULL, or an error message to free with yt_string_free.
 
-// Evaluates host.js, YouTube.js and bindings.js, embedded at build time.
-char *yt_load(YtEngine *engine);
+// Evaluates host.js, a YouTube.js bundle and bindings.js. The bundle is
+// bundle_len bytes at bundle, followed by a zero byte, or the one embedded at
+// build time when bundle is NULL.
+char *yt_load(YtEngine *engine, const char *bundle, int64_t bundle_len);
+// The embedded bundle's sequence: its YouTube.js commit's committer time, as
+// signed release manifests carry it.
+int64_t yt_bundle_sequence(void);
 // Evaluates a zero-terminated global script.
 char *yt_eval(YtEngine *engine, const char *source, const char *filename);
 // Runs every pending promise job.

@@ -12,6 +12,7 @@ dependencies:
     sdk: flutter
   cancellation_token: ^2.0.1
   crypto: ^3.0.8
+  cryptography: ^2.9.0
   flutter_secure_storage: ^11.2.0
   http: ^1.6.0
   material_ui: ^1.1.0
