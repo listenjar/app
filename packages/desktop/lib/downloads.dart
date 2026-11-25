@@ -184,9 +184,12 @@ final class Downloads {
     try {
       final journal = await _openJournal();
       final session = await _youtube.session(merged);
-      final (media, reason) = await session.media(id, channel: false, token: merged);
+      // With its chapters, unless kept already, so the download has them
+      // offline.
+      final (media, reason) = await session.media(id, channel: false, chapters: _library.youtubeChapters(id) == null, token: merged);
       if (media == null) throw StateError(reason ?? 'YouTube won’t give this video’s audio');
       _library.fillVideoDetails(episode.id, description: media.description, publishedAt: media.publishedAt);
+      if (media.chapters case final found?) _library.keepYouTubeChapters(id, found);
       _library.setDownload(episode.id, DownloadState.downloading);
       final key = _youtubeKey(episode.id);
       File part;

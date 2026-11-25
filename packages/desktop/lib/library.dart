@@ -5,6 +5,7 @@
 // nothing in it leaves the device. Queries are synchronous (package:sqlite3
 // over FFI) and small, so widgets read straight from it on build; every
 // change notifies once. No widgets here.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import 'backend/api.dart' show SourceKind;
+import 'chapters.dart';
 import 'links.dart';
 import 'migrations.dart';
 
@@ -779,6 +781,24 @@ final class Library extends ChangeNotifier {
     );
     _changed();
   }
+
+  /// The YouTube video [videoId]'s chapters as kept on this device, or null
+  /// when YouTube hasn't answered for it yet.
+  List<Chapter>? youtubeChapters(String videoId) {
+    final row = _db.select('select chapters from youtube_chapters where video_id = ?', [videoId]).firstOrNull;
+    if (row == null) return null;
+    return [
+      for (final c in jsonDecode(row['chapters'] as String) as List)
+        if (c case [final int ms, final String title]) (start: Duration(milliseconds: ms), title: title),
+    ];
+  }
+
+  /// Keeps what YouTube answered for [videoId]'s chapters, none among
+  /// them. A video's chapters are kept once: the first answer stays.
+  void keepYouTubeChapters(String videoId, List<Chapter> chapters) => _db.execute(
+    'insert into youtube_chapters (video_id, chapters) values (?, ?) on conflict (video_id) do nothing',
+    [videoId, jsonEncode([for (final c in chapters) [c.start.inMilliseconds, c.title]])],
+  );
 
   /// Follows the YouTube playlist or channel at [url] on this device; a
   /// show already there is followed again.

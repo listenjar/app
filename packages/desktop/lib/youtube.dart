@@ -503,11 +503,11 @@ final class YouTube {
   }
 
   /// The video's chapters, for one that streams from elsewhere (a
-  /// ListenJar Cloud episode) or played from its download; none when it has
-  /// none or can't be had.
-  Future<List<Chapter>> chapters(String id, CancellationToken token) async {
+  /// ListenJar Cloud episode) or played from its download; empty when it
+  /// has none, null when YouTube won't say (the video is unavailable).
+  Future<List<Chapter>?> chapters(String id, CancellationToken token) async {
     final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token, next: true);
-    return reason == null ? _chapters(info!) : const [];
+    return reason == null ? _chapters(info!) : null;
   }
 
   /// The chapters on the player bar: the creator's, from the description,

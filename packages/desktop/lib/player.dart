@@ -354,14 +354,18 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     if (episode.youtubeId case final id?) {
       final lookup = token.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
       final session = await _youtube.session(lookup);
-      final (media, reason) = await session.media(id, channel: false, chapters: true, token: lookup);
+      // Chapters are kept once found, so the next response is asked for
+      // only the first time.
+      final kept = _library.youtubeChapters(id);
+      final (media, reason) = await session.media(id, channel: false, chapters: kept == null, token: lookup);
       if (media == null) throw StateError(reason ?? 'YouTube won’t play this video');
       _library.fillVideoDetails(episode.id, description: media.description, publishedAt: media.publishedAt);
+      if (media.chapters case final found?) _library.keepYouTubeChapters(id, found);
       final length = await transfer.mediaLength(_http, media.audio, lookup);
       // AVPlayer gets an HLS playlist; ExoPlayer and libmpv read the index
       // in the file themselves.
       final hls = Platform.isMacOS || Platform.isIOS;
-      return (AudioSource.uri(await _streams.serve(media.audio, length, media.contentType, token, hls: hls)), media.chapters);
+      return (AudioSource.uri(await _streams.serve(media.audio, length, media.contentType, token, hls: hls)), kept ?? media.chapters);
     }
     final url = episode.audioUrl;
     if (url == null) throw StateError('This episode has no audio');
@@ -370,8 +374,9 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
 
   /// [episode]'s chapters, once it loads: [found] with its YouTube stream,
   /// else its download's own; else, for a YouTube video (a ListenJar Cloud
-  /// episode, a download without them), YouTube's, and for a podcast
-  /// episode, its stream's own, read with range requests.
+  /// episode, a download without them), YouTube's, kept on this device once
+  /// found, and for a podcast episode, its stream's own, read with range
+  /// requests.
   Future<void> _findChapters(PodcastEpisode episode, List<Chapter>? found) async {
     // Loaded again (it finished, and plays again): already found.
     if (found == null && _chapters.isNotEmpty) return;
@@ -384,8 +389,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       if (found == null && chapters.isEmpty) {
         final token = _life.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
         if (episode.videoId case final id?) {
-          final session = await _youtube.session(token);
-          chapters = await traced(_log, 'chapters of $id', () => session.chapters(id, token), describe: (c) => '${c.length} chapters');
+          chapters = _library.youtubeChapters(id) ?? await _youtubeChapters(id, token);
         } else if (!episode.downloaded && episode.audioUrl != null) {
           final url = Uri.parse(episode.audioUrl!);
           chapters = await traced(_log, 'chapters in ${url.host}${url.path}', () => streamChapters(_http, url, token), describe: (c) => '${c.length} chapters');
@@ -398,6 +402,16 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     if (_current?.id != episode.id || chapters.isEmpty) return;
     _chapters = chapters;
     notifyListeners();
+  }
+
+  /// The YouTube video [id]'s chapters, asked of YouTube and kept, once it
+  /// answers, for good.
+  Future<List<Chapter>> _youtubeChapters(String id, CancellationToken token) async {
+    final session = await _youtube.session(token);
+    final found = await traced(_log, 'chapters of $id', () => session.chapters(id, token), describe: (c) => '${c?.length} chapters');
+    if (found == null) return const [];
+    _library.keepYouTubeChapters(id, found);
+    return found;
   }
 
   void _failed(Object e) {
