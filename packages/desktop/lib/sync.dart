@@ -329,6 +329,19 @@ final class SyncEngine {
         }
       }
 
+      // A playlist's episodes are numbered in its order, so its RSS, a
+      // serial show, lists them as the playlist does; reordered, again.
+      final numbers = <String, int>{
+        if (source?.kind == SourceRefKind.playlist)
+          for (final (i, v) in snapshot.videos.indexed) youTubeVideoUrl(v.id): i + 1,
+      };
+      if (inventory.any((e) => numbers.containsKey(e.sourceUrl) && numbers[e.sourceUrl] != e.number)) {
+        await _retry(
+          () => _api.numberEpisodes(feedId: feed.id, body: EpisodeNumbers(sourceUrls: [...numbers.keys])).asCancellable(token),
+          token,
+        );
+      }
+
       final uploaded = {for (final e in inventory) if (e.uploadedAt != null) e.sourceUrl};
       status.episodes = uploaded.where(present.contains).length + (snapshot.canRemove ? 0 : uploaded.difference(present).length);
       final additions = [
@@ -348,7 +361,16 @@ final class SyncEngine {
         while (next < additions.length && limited == null && stopped == null) {
           final video = additions[next++];
           try {
-            await _transferVideo(feed, source?.kind == SourceRefKind.channel, video, youtube, journal, status, token);
+            await _transferVideo(
+              feed,
+              source?.kind == SourceRefKind.channel,
+              video,
+              numbers[youTubeVideoUrl(video.id)],
+              youtube,
+              journal,
+              status,
+              token,
+            );
           } on RateLimited catch (e) {
             limited = e;
           } on PlanLimit catch (e) {
@@ -396,6 +418,7 @@ final class SyncEngine {
     Feed feed,
     bool channel,
     Video video,
+    int? number,
     YouTube youtube,
     Journal journal,
     FeedSync status,
@@ -430,6 +453,7 @@ final class SyncEngine {
               description: _clip(media.description, 10000),
               publishedAt: media.publishedAt.toIso8601String(),
               durationSeconds: media.durationSeconds,
+              number: number,
             ),
           )
           .asCancellable(token);

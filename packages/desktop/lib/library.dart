@@ -59,6 +59,7 @@ final class Podcast {
     required this.followed,
     required this.unplayed,
     required this.latestAt,
+    required this.serial,
   });
 
   final int id;
@@ -85,6 +86,10 @@ final class Podcast {
   final bool followed;
   final int unplayed;
   final DateTime? latestAt;
+
+  /// Its episodes go in order of their numbers, not their dates: a YouTube
+  /// playlist's, in the playlist's order.
+  final bool serial;
 
   /// A single YouTube video kept as a show of its own.
   bool get isYouTube => kind == PodcastKind.youtube;
@@ -427,6 +432,7 @@ final class Library extends ChangeNotifier {
     followed: r['followed'] == 1,
     unplayed: r['unplayed'] as int? ?? 0,
     latestAt: _time(r['latest_at']),
+    serial: r['serial'] == 1,
   );
 
   /// A stored duration: whole seconds, negative for none.
@@ -525,7 +531,8 @@ final class Library extends ChangeNotifier {
     _changed();
   }
 
-  /// [podcast]'s episodes, newest first unless [oldestFirst]; with a [query],
+  /// [podcast]'s episodes, newest first unless [oldestFirst], or a serial
+  /// show's last first unless [oldestFirst]; with a [query],
   /// only those whose title or show notes hold every one of its words.
   List<PodcastEpisode> episodes(int podcast, {EpisodeFilter filter = EpisodeFilter.all, bool oldestFirst = false, String query = ''}) {
     final words = query.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
@@ -541,7 +548,9 @@ final class Library extends ChangeNotifier {
       podcast,
       for (final w in words) ...List.filled(2, '%${w.replaceAllMapped(RegExp(r'[\\%_]'), (m) => '\\${m[0]}')}%'),
     ];
-    return _episodes(where, args, oldestFirst ? 'e.published_at asc, e.id asc' : 'e.published_at desc, e.id desc');
+    // A serial show's by number, those without one last.
+    const number = 'case when p.serial = 1 then coalesce(e.number, 9223372036854775807) end';
+    return _episodes(where, args, oldestFirst ? '$number asc, e.published_at asc, e.id asc' : '$number desc, e.published_at desc, e.id desc');
   }
 
   PodcastEpisode? episode(int id) => _episodes('e.id = ?', [id]).firstOrNull;
@@ -581,16 +590,16 @@ final class Library extends ChangeNotifier {
   Podcast subscribe(String feedUrl, ParsedFeed feed, {String? etag, String? lastModified, String? cloudFeedId, bool follow = true}) {
     final now = DateTime.now().millisecondsSinceEpoch;
     _db.execute('''
-      insert into podcasts (feed_url, title, author, description, artwork_url, link, subscribed_at, refreshed_at, etag, last_modified, cloud_feed_id, followed)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      insert into podcasts (feed_url, title, author, description, artwork_url, link, subscribed_at, refreshed_at, etag, last_modified, cloud_feed_id, followed, serial)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (feed_url) do update set
-        title = excluded.title, author = excluded.author, description = excluded.description,
+        title = excluded.title, author = excluded.author, description = excluded.description, serial = excluded.serial,
         artwork_url = excluded.artwork_url, link = excluded.link, refreshed_at = excluded.refreshed_at,
         etag = excluded.etag, last_modified = excluded.last_modified, refresh_error = null,
         cloud_feed_id = coalesce(excluded.cloud_feed_id, podcasts.cloud_feed_id),
         followed = max(podcasts.followed, excluded.followed),
         subscribed_at = case when podcasts.followed = 0 and excluded.followed = 1 then excluded.subscribed_at else podcasts.subscribed_at end
-    ''', [feedUrl, feed.title, feed.author, feed.description, feed.artworkUrl, feed.link, now, now, etag, lastModified, cloudFeedId, follow ? 1 : 0]);
+    ''', [feedUrl, feed.title, feed.author, feed.description, feed.artworkUrl, feed.link, now, now, etag, lastModified, cloudFeedId, follow ? 1 : 0, feed.serial ? 1 : 0]);
     final id = _db.select('select id from podcasts where feed_url = ?', [feedUrl]).first['id'] as int;
     final fresh = _db.select('select count(*) as n from episodes where podcast_id = ?', [id]).first['n'] == 0;
     _store(id, feed.episodes, playedBefore: fresh ? _newestCount : null);
@@ -690,9 +699,9 @@ final class Library extends ChangeNotifier {
     var added = const <int>[];
     if (fetch.feed case final feed?) {
       _db.execute('''
-        update podcasts set title = ?, author = ?, description = ?, artwork_url = coalesce(?, artwork_url), link = ?
+        update podcasts set title = ?, author = ?, description = ?, artwork_url = coalesce(?, artwork_url), link = ?, serial = ?
         where id = ?
-      ''', [feed.title, feed.author, feed.description, feed.artworkUrl, feed.link, podcast]);
+      ''', [feed.title, feed.author, feed.description, feed.artworkUrl, feed.link, feed.serial ? 1 : 0, podcast]);
       added = _store(podcast, feed.episodes);
     }
     final moved = fetch.feed?.newFeedUrl ?? fetch.url.toString();
@@ -789,15 +798,17 @@ final class Library extends ChangeNotifier {
   /// [YouTubeVideo]s in its order, and returns the episodes new to it. The
   /// first listing ([dated] false) is the back catalogue, undated, and all
   /// but its first few count as played, as a feed's do; videos found later
-  /// are dated when they turned up, so they count as new.
-  List<PodcastEpisode> youtubeFeedRefreshed(int podcast, {required String? title, required String? artworkUrl, required List<YouTubeVideo> videos, required bool dated}) {
+  /// are dated when they turned up, so they count as new. A playlist's
+  /// ([numbered]) are numbered in its order, from 1, every time, and the
+  /// show is serial: it lists them as the playlist does.
+  List<PodcastEpisode> youtubeFeedRefreshed(int podcast, {required String? title, required String? artworkUrl, required List<YouTubeVideo> videos, required bool dated, required bool numbered}) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final added = <int>[];
     _db.execute('begin');
     try {
       _db.execute(
-        'update podcasts set title = coalesce(?, title), artwork_url = coalesce(?, artwork_url), refreshed_at = ?, refresh_error = null where id = ?',
-        [title, artworkUrl, now, podcast],
+        'update podcasts set title = coalesce(?, title), artwork_url = coalesce(?, artwork_url), refreshed_at = ?, refresh_error = null, serial = ? where id = ?',
+        [title, artworkUrl, now, numbered ? 1 : 0, podcast],
       );
       // Oldest first, so the newest gets the highest id and lists first.
       for (final (i, v) in videos.indexed.toList().reversed) {
@@ -805,15 +816,20 @@ final class Library extends ChangeNotifier {
         // A video the show has already, uploaded to its ListenJar feed
         // under the feed's guid, is the same episode: one per source.
         final rows = _db.select('''
-          insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at, source_url)
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at, source_url, number)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           on conflict do nothing
           returning id
         ''', [
           podcast, 'yt:${v.id}', v.title, dated ? now : null, v.seconds == null ? null : v.seconds! * 1000, url, v.id,
-          !dated && i >= _newestCount ? 1 : 0, now, url,
+          !dated && i >= _newestCount ? 1 : 0, now, url, numbered ? i + 1 : null,
         ]);
-        if (rows.isNotEmpty) added.add(rows.first['id'] as int);
+        if (rows.isNotEmpty) {
+          added.add(rows.first['id'] as int);
+        } else if (numbered) {
+          // Moved in the playlist.
+          _db.execute('update episodes set number = ? where podcast_id = ? and source_url = ? and number is not ?', [i + 1, podcast, url, i + 1]);
+        }
       }
       _db.execute('commit');
     } catch (_) {

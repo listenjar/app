@@ -413,7 +413,14 @@ final class Podcasts extends ChangeNotifier {
         author: channel?.title ?? kindLabel(link.kind),
         artworkUrl: artwork,
       );
-      library.youtubeFeedRefreshed(show.id, title: title, artworkUrl: artwork, videos: _videos(snapshot), dated: false);
+      library.youtubeFeedRefreshed(
+        show.id,
+        title: title,
+        artworkUrl: artwork,
+        videos: _videos(snapshot),
+        dated: false,
+        numbered: link.kind == SourceKind.playlist,
+      );
       return library.podcast(show.id)!;
     },
     describe: (p) => 'show ${p.id}',
@@ -437,6 +444,7 @@ final class Podcasts extends ChangeNotifier {
       artworkUrl: playlist ? snapshot.artworkUrl : null,
       videos: _videos(snapshot),
       dated: true,
+      numbered: link.kind == SourceKind.playlist,
     );
   }
 

@@ -64,7 +64,11 @@ info:
     media bucket), uploads, and confirms (`completeEpisode`), which puts the
     episode in the RSS of every feed that has the source. Videos gone from a
     playlist or channel leave the feed through `deleteEpisode`; a podcast of
-    the listener's own changes only when they add or remove videos.
+    the listener's own changes only when they add or remove videos. A
+    playlist's RSS is a serial show: the app numbers its episodes in the
+    playlist's order (`NewEpisode.number`), and numbers them again when the
+    playlist is reordered (`numberEpisodes`), so podcast apps list them as
+    the playlist does.
 
 
     Uploads: every file the app stores, an episode's audio or a podcast's
@@ -360,6 +364,31 @@ paths:
           description: The listener has no feed with that id.
         "507":
           description: The video's audio is already uploaded, and it would take the listener past their plan's storage.
+  /me/feeds/{feedId}/numbers:
+    put:
+      operationId: numberEpisodes
+      summary: Number a feed's episodes in an order
+      description: >-
+        Each episode whose source is in `sourceUrls` is numbered by its place
+        there, the first being 1; the others keep theirs. When a number
+        changes, the RSS is republished.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EpisodeNumbers"
+      responses:
+        "204":
+          description: The episodes are numbered.
+        "400":
+          description: A source isn't a canonical YouTube watch URL, or there are too many.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no feed with that id.
   /me/feeds/{feedId}/episodes/{episodeId}:
     delete:
       operationId: deleteEpisode
@@ -952,6 +981,10 @@ components:
         durationSeconds:
           type: integer
           minimum: 1
+        number:
+          type: integer
+          minimum: 1
+          description: Its number, `<itunes:episode>`; a playlist's place in it.
         contentType:
           type: string
           description: The audio's type; present once an upload was asked for.
@@ -991,6 +1024,25 @@ components:
         durationSeconds:
           type: integer
           minimum: 1
+        number:
+          type: integer
+          minimum: 1
+          description: >-
+            Its number, `<itunes:episode>`: in a playlist, its place there,
+            the first being 1. Omitted, an episode the feed has keeps its
+            number.
+    EpisodeNumbers:
+      type: object
+      required: [sourceUrls]
+      properties:
+        sourceUrls:
+          type: array
+          maxItems: 20000
+          description: The episodes' sources in order, each a YouTube video's watch URL.
+          items:
+            type: string
+            format: uri
+            pattern: "^https://www\\.youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}$"
     NewUpload:
       type: object
       description: >-

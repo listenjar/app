@@ -1,5 +1,5 @@
 // A show, on its sleeve (sleeve.dart): its artwork, who makes it and what
-// it's about, play, Follow, and every episode, newest first, filtered to the unplayed or the downloaded and
+// it's about, play, Follow, and every episode, newest first (a serial show's in order), filtered to the unplayed or the downloaded and
 // searchable by title and show notes. Opened
 // from the library, search or an episode; a show looked at from search is
 // in the library unfollowed until the listener follows it. A podcast of the
@@ -47,7 +47,10 @@ final class ShowPage extends StatefulWidget {
 
 final class _ShowPageState extends State<ShowPage> {
   EpisodeFilter _filter = EpisodeFilter.all;
-  bool _oldestFirst = false;
+  /// Until the listener picks: a serial show from its first episode (a
+  /// YouTube playlist from its top), any other from the newest.
+  bool? _oldestFirst;
+  bool _firstFirst(Podcast show) => _oldestFirst ?? show.serial;
   bool _aboutOpen = false;
   final _query = TextEditingController();
   final _queryFocus = FocusNode();
@@ -112,7 +115,7 @@ final class _ShowPageState extends State<ShowPage> {
         final own = feed != null ? feed.source == null : show!.isOwn;
         final episodes = show == null
           ? const <PodcastEpisode>[]
-          : s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst, query: _query.text);
+          : s.library.episodes(show.id, filter: _filter, oldestFirst: _firstFirst(show), query: _query.text);
         final query = _query.text.trim();
         final videos = feed != null || show!.fromYouTube || episodes.any((e) => e.videoId != null);
         const p = brand.Palette.ink;
@@ -252,9 +255,11 @@ final class _ShowPageState extends State<ShowPage> {
     final text = Theme.of(context).textTheme;
     final wide = MediaQuery.sizeOf(context).width >= wideWidth;
     final about = (show?.description ?? '').replaceAll(RegExp(r'<[^>]+>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    // A serial show plays on from its first unplayed episode.
     final newest = show == null
       ? null
-      : s.library.episodes(show.id, filter: EpisodeFilter.unplayed).firstOrNull ?? s.library.episodes(show.id).firstOrNull;
+      : s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: show.serial).firstOrNull ??
+        s.library.episodes(show.id, oldestFirst: show.serial).firstOrNull;
     final refreshing = show != null && s.podcasts.refreshing.contains(show.id);
     // Signed out, a ListenJar feed's show stays and plays, but the feed
     // isn't there to manage.
@@ -443,15 +448,21 @@ final class _ShowPageState extends State<ShowPage> {
       chip(EpisodeFilter.unplayed, show.unplayed == 0 ? 'Unplayed' : 'Unplayed · ${show.unplayed}'),
       chip(EpisodeFilter.downloaded, 'Downloaded'),
     ]);
+    final oldestFirst = _firstFirst(show);
     final sort = Tooltip(
-        message: _oldestFirst ? 'Oldest first' : 'Newest first',
+        message: switch ((show.serial, oldestFirst)) {
+          (true, true) => 'First episode first',
+          (true, false) => 'Last episode first',
+          (false, true) => 'Oldest first',
+          (false, false) => 'Newest first',
+        },
         child: TextButton.icon(
           style: brand.button(brand.Tone.quietOnInk, brand.ButtonSize.sm).copyWith(
             backgroundColor: WidgetStateProperty.fromMap({WidgetState.hovered: brand.inkTile, WidgetState.any: brand.inkTile.withAlpha(0)}),
           ),
-          onPressed: () => setState(() => _oldestFirst = !_oldestFirst),
-          icon: Icon(_oldestFirst ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 16),
-          label: Text(_oldestFirst ? 'Oldest' : 'Newest'),
+          onPressed: () => setState(() => _oldestFirst = !oldestFirst),
+          icon: Icon(oldestFirst ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 16),
+          label: Text(show.serial ? (oldestFirst ? 'First' : 'Last') : (oldestFirst ? 'Oldest' : 'Newest')),
         ),
       );
     // The page's own width, not the window's: beside the sidebar, a mid-size

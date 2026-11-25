@@ -35,6 +35,7 @@ final class ParsedFeed {
     required this.link,
     required this.newFeedUrl,
     required this.episodes,
+    this.serial = false,
   });
   final String title;
   final String author;
@@ -45,6 +46,9 @@ final class ParsedFeed {
   /// `itunes:new-feed-url`: the show moved, follow it from now on.
   final String? newFeedUrl;
   final List<ParsedEpisode> episodes;
+
+  /// `itunes:type` serial: its episodes go in order of their numbers.
+  final bool serial;
 }
 
 /// An episode, as its feed describes it. Items without audio are left out.
@@ -248,6 +252,7 @@ ParsedFeed _rss(XmlElement root) {
     link: _text(channel.childElements.where((e) => e.localName == 'link' && e.namespaceUri == null).firstOrNull),
     newFeedUrl: _text(_child(channel, 'new-feed-url')),
     episodes: episodes,
+    serial: _text(_child(channel, 'type'))?.toLowerCase() == 'serial',
   );
 }
 
