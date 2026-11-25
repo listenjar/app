@@ -47,6 +47,22 @@ async function api(method: string, path: string, body?: object): Promise<Documen
 const list = async (path: string) => (await api("GET", path))!.data as Resource[]
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
+// A build VALID moments ago can be missing from TestFlight's own endpoints
+// for a while: they answer 404, "no resource of type 'builds'", until they
+// catch up.
+async function once404sClear<T>(step: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + 15 * 60_000
+  for (;;) {
+    try {
+      return await step()
+    } catch (e) {
+      if (!String(e).includes(": 404 ") || Date.now() > deadline) throw e
+      console.log("TestFlight doesn't list the build yet; trying again in 30 s")
+      await sleep(30_000)
+    }
+  }
+}
+
 const ipa = process.argv[2] ?? (() => { throw new Error("Usage: node tool/testflight.ts <ipa>") })()
 const node = (...args: string[]) => JSON.parse(execFileSync("node", ["tool/release.ts", ...args], { encoding: "utf8" }))
 const { version, build } = node("identity")
@@ -98,7 +114,8 @@ if (localization) {
 const external = (await list(`/v1/apps/${app.id}/betaGroups`))
   .find(each => each.attributes.name === group && each.attributes.isInternalGroup === false)
 if (!external) throw new Error(`No external TestFlight group named ${group}`)
-await api("POST", `/v1/betaGroups/${external.id}/relationships/builds`, { data: [{ type: "builds", id: buildId }] })
+await once404sClear(() =>
+  api("POST", `/v1/betaGroups/${external.id}/relationships/builds`, { data: [{ type: "builds", id: buildId }] }))
 console.log(`Added build ${build} to ${group}`)
 
 const submitted = (await api("GET", `/v1/builds/${buildId}/betaAppReviewSubmission`))?.data as Resource | null | undefined
@@ -121,7 +138,7 @@ if (submitted) {
     await api("PATCH", `/v1/builds/${older.id}`, { data: { type: "builds", id: older.id, attributes: { expired: true } } })
     console.log(`Expired build ${older.attributes.version}, which was still waiting for Beta App Review`)
   }
-  await api("POST", "/v1/betaAppReviewSubmissions",
-    { data: { type: "betaAppReviewSubmissions", relationships: { build: { data: { type: "builds", id: buildId } } } } })
+  await once404sClear(() => api("POST", "/v1/betaAppReviewSubmissions",
+    { data: { type: "betaAppReviewSubmissions", relationships: { build: { data: { type: "builds", id: buildId } } } } }))
   console.log(`Submitted ${version} (${build}) to Beta App Review`)
 }
