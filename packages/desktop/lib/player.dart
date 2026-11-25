@@ -145,7 +145,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     null => null,
     StateError(:final message) => message,
     SignInRequired() => 'YouTube wants to confirm you’re not a bot before it plays this. Try again later.',
-    RateLimited() => 'YouTube is limiting this computer for now. Try again in a few minutes.',
+    RateLimited() => 'YouTube is limiting this device for now. Try again in a few minutes.',
     MediaUnavailable() => 'YouTube refused to stream this video. Try again in a few minutes.',
     SocketException() || HttpException() || TimeoutException() => 'Couldn’t reach the podcast’s server. Check your connection and try again.',
     PlayerException(:final message) => 'Couldn’t play this episode${message == null || message.isEmpty ? '' : ': $message'}.',

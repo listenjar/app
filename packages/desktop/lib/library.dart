@@ -599,7 +599,8 @@ final class Library extends ChangeNotifier {
     };
     // A ListenJar feed is made of sources, one episode each: the feed's
     // episode of a source here already, streaming or under a guid the feed
-    // had for it before, is that row.
+    // had for it before, is that row. Once the feed has its audio it plays
+    // that, no longer the video ([PodcastEpisode.audioUrl]).
     final keyed = _db.select('select 1 from podcasts where id = ? and cloud_feed_id is not null', [podcast]).isNotEmpty;
     final bySource = <String, String>{
       if (keyed)
@@ -619,7 +620,7 @@ final class Library extends ChangeNotifier {
     final update = _db.prepare('''
       update or ignore episodes set title = ?, description = ?, published_at = ?, duration_ms = coalesce(?, duration_ms),
         audio_url = ?, audio_type = ?, audio_bytes = ?, artwork_url = ?, link = ?, season = ?, number = ?,
-        source_url = ?
+        source_url = ?, youtube_id = iif(? is null, youtube_id, null)
       where podcast_id = ? and guid = ?
     ''');
     _db.execute('begin');
@@ -638,7 +639,7 @@ final class Library extends ChangeNotifier {
         if (known.contains(e.guid)) {
           update.execute([
             e.title, e.description, e.publishedAt?.millisecondsSinceEpoch, e.duration?.inMilliseconds, e.audioUrl,
-            e.audioType, e.audioBytes, e.artworkUrl, e.link, e.season, e.number, source, podcast, e.guid,
+            e.audioType, e.audioBytes, e.artworkUrl, e.link, e.season, e.number, source, e.audioUrl, podcast, e.guid,
           ]);
           continue;
         }
