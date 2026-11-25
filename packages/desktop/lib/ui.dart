@@ -387,8 +387,8 @@ List<Widget> episodeActions(BuildContext context, PodcastEpisode e, {bool showLi
     if (episodeUrl(e) case final url?) MenuEntry('Share…', icon: Icons.adaptive.share, onPressed: () => unawaited(shareLink(context, url, title: e.title))),
     if (e.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
       MenuEntry(
-        e.youtubeId == null ? 'Open episode page' : 'Open on YouTube',
-        icon: e.youtubeId == null ? Icons.open_in_new_rounded : Icons.smart_display_outlined,
+        e.videoId == null ? 'Open episode page' : 'Open on YouTube',
+        icon: e.videoId == null ? Icons.open_in_new_rounded : Icons.smart_display_outlined,
         onPressed: () => unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication)),
       ),
   ];

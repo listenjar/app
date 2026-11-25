@@ -94,68 +94,31 @@ Future<void> removeCloudFeed(BuildContext context, Feed feed) async {
   }
 }
 
-/// "Listen in…": the podcast apps on this device, then copying the link.
-/// Until the feed's first episode is uploaded it has no RSS, so the button
-/// waits, disabled, while the page shows the sync.
-final class ListenIn extends StatefulWidget {
-  const ListenIn({super.key, required this.feed, this.onInk = false});
-  final Feed feed;
+/// The podcast apps this device can open feeds in, asked once.
+final podcastApps = installedPodcastApps();
 
-  /// On a show's sleeve rather than paper.
-  final bool onInk;
-
-  @override
-  State<ListenIn> createState() => _ListenInState();
-}
-
-final class _ListenInState extends State<ListenIn> {
-  /// The podcast apps this device can open feeds in, asked once.
-  static final _podcastApps = installedPodcastApps();
-
-  Future<void> _copyFeedLink(String url) async {
-    await Clipboard.setData(ClipboardData(text: url));
-    if (mounted) tell(context, 'Feed link copied. Add it to your podcast app as a podcast by URL.');
-  }
-
-  Widget _menuIcon(String asset) => ClipRRect(
+/// "Listen in", a group in a show's More menu: the podcast apps on this
+/// device in [apps], then copying the link. Until the feed's first episode
+/// is uploaded it has no RSS, so the group says it waits.
+List<Widget> listenIn(BuildContext context, Feed feed, List<PodcastApp> apps) {
+  Widget icon(String asset) => ClipRRect(
     borderRadius: BorderRadius.circular(5),
-    child: Image.asset(asset, width: 22, height: 22, filterQuality: FilterQuality.medium),
+    child: Image.asset(asset, width: 18, height: 18, filterQuality: FilterQuality.medium),
   );
-
-  @override
-  Widget build(BuildContext context) {
-    final rss = widget.feed.rssUrl;
-    if (rss == null) {
-      return Tooltip(
-        message: 'Ready once the first episode is uploaded',
-        child: TextButton(
-          style: brand.button(widget.onInk ? brand.Tone.quietOnInk : brand.Tone.quiet, brand.ButtonSize.sm),
-          onPressed: null,
-          child: const Text('Listen in…'),
-        ),
-      );
-    }
-    return FutureBuilder(
-      future: _podcastApps,
-      builder: (context, snapshot) => Dropdown(
-        items: [
-          for (final app in snapshot.data ?? const <PodcastApp>[])
-            MenuEntry(
-              app.web ? '${app.title} (web)' : app.title,
-              leading: _menuIcon(app.icon),
-              onPressed: () => openInPodcastApp(app, rss),
-            ),
-          if (snapshot.data?.isNotEmpty ?? false) const MenuDivider(),
-          MenuEntry('Copy feed link', leading: _menuIcon(podcastAppIcon('rss')), onPressed: () => _copyFeedLink(rss)),
-        ],
-        builder: (context, menu) => TextButton(
-          style: brand.button(widget.onInk ? brand.Tone.quietOnInk : brand.Tone.quiet, brand.ButtonSize.sm),
-          onPressed: menu.toggle,
-          child: const Text('Listen in…'),
-        ),
-      ),
-    );
-  }
+  final rss = feed.rssUrl;
+  return [
+    const MenuHeader('Listen in'),
+    if (rss == null)
+      const MenuEntry('Ready once the first episode is uploaded')
+    else ...[
+      for (final app in apps)
+        MenuEntry(app.web ? '${app.title} (web)' : app.title, leading: icon(app.icon), onPressed: () => openInPodcastApp(app, rss)),
+      MenuEntry('Copy feed link', leading: icon(podcastAppIcon('rss')), onPressed: () async {
+        await Clipboard.setData(ClipboardData(text: rss));
+        if (context.mounted) tell(context, 'Feed link copied. Add it to your podcast app as a podcast by URL.');
+      }),
+    ],
+  ];
 }
 
 /// What syncing is doing with a feed, in a line, and whether it failed.

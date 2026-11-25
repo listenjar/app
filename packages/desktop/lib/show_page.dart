@@ -17,11 +17,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'artwork.dart' show UnreadablePicture, artworkExtensions;
 import 'backend/api.dart' show Feed, Plan, SourceKind;
-import 'cloud.dart' show ListenIn, StorageFullNotice, failure, removeCloudFeed;
+import 'cloud.dart' show StorageFullNotice, failure, listenIn, podcastApps, removeCloudFeed;
 import 'hosted_feed.dart';
 import 'library.dart';
 import 'menu.dart';
 import 'net.dart';
+import 'podcast_apps.dart' show PodcastApp;
 import 'plans.dart' show showPlans;
 import 'shared_links.dart' show OwnPodcast;
 import 'sync.dart' show PlanLimit;
@@ -57,6 +58,17 @@ final class _ShowPageState extends State<ShowPage> {
 
   /// The show's ListenJar feed's episodes, while it has one.
   FeedEpisodes? _hosted;
+
+  /// The podcast apps this device can open the feed in, for "Listen in".
+  List<PodcastApp> _apps = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(podcastApps.then((apps) {
+      if (mounted) setState(() => _apps = apps);
+    }));
+  }
 
   FeedEpisodes? _hostedFor(Feed? feed) {
     if (feed?.id == _hosted?.feedId) return _hosted;
@@ -278,8 +290,17 @@ final class _ShowPageState extends State<ShowPage> {
         else if (show.followed)
           SleeveCircle(
             icon: Icons.check_rounded,
-            tooltip: show.cloudFeedId != null ? 'Following' : 'Following · Unfollow',
-            onPressed: show.cloudFeedId != null ? null : () => _unfollow(context, show),
+            tooltip: switch ((show.cloudFeedId, feed)) {
+              (null, _) => show.isYouTube ? 'In Library · Remove' : 'Following · Unfollow',
+              (_, null) => 'Following · Sign in to manage',
+              _ => 'Following · Remove',
+            },
+            onPressed: switch ((show.cloudFeedId, feed)) {
+              (null, _) => () => _unfollow(context, show),
+              // Signed out, the feed isn't there to remove: Settings signs in.
+              (_, null) => Navigation.of(context).openSettings,
+              (_, final feed?) => () => unawaited(removeCloudFeed(context, feed)),
+            },
           )
         else
           SleeveCircle(
@@ -294,7 +315,6 @@ final class _ShowPageState extends State<ShowPage> {
             busy: refreshing,
             onPressed: () => unawaited(s.podcasts.refresh(show!)),
           ),
-        if (feed != null) ListenIn(feed: feed, onInk: true),
         if (feed != null && video != null) AddToPodcast(feed: feed, url: video),
       ]),
       if (s.podcasts.offline) ...[
@@ -341,6 +361,10 @@ final class _ShowPageState extends State<ShowPage> {
   List<Widget> _menu(BuildContext context, Podcast? show, Feed? feed, bool own) {
     final s = Services.of(context);
     final link = feed?.source?.url ?? show?.link;
+    final youtube = switch (Uri.tryParse(link ?? '')?.host) {
+      final host? => host == 'youtu.be' || host == 'youtube.com' || host.endsWith('.youtube.com'),
+      null => false,
+    };
     return [
       if (show != null && show.followed && show.kind == PodcastKind.rss) ...[
         MenuEntry(
@@ -361,15 +385,18 @@ final class _ShowPageState extends State<ShowPage> {
         MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
           s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
         }),
-        if (show.kind == PodcastKind.rss)
+        if (show.kind == PodcastKind.rss && feed == null)
           MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
       ],
       if (link case final link? when !own && (Uri.tryParse(link)?.hasScheme ?? false))
-        MenuEntry(feed?.source != null || (show?.fromYouTube ?? false) ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
+        MenuEntry(youtube || feed?.source != null || (show?.fromYouTube ?? false) ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
           unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
         }),
-      if (feed != null)
+      if (feed != null) ...[
         MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: s.feeds.loading ? null : s.feeds.syncNow),
+        const MenuDivider(),
+        ...listenIn(context, feed, _apps),
+      ],
       if (feed != null) ...[
         const MenuDivider(),
         MenuEntry(
