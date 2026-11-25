@@ -21,6 +21,7 @@ import 'feeds.dart';
 import 'library.dart';
 import 'links.dart' show canonicalSourceUrl;
 import 'podcasts.dart';
+import 'sync.dart' show PlanLimit;
 
 final _log = Logger('cloud shows');
 
@@ -86,20 +87,24 @@ final class CloudShows {
   bool get _uploads => _account.user?.storageLimitBytes != null && _account.user?.plan == Plan.paid && _loaded;
 
   /// Gives each YouTube playlist, channel and podcast of the listener's own
-  /// followed here, but not hosted yet, its ListenJar feed.
+  /// followed here, but not hosted yet, its ListenJar feed, and each
+  /// podcast of their own hosted already the videos added to it here that
+  /// its feed lacks.
   Future<void> _host() async {
     if (_hosting != null || !_uploads) return;
     final pass = () async {
       for (final show in [..._library.podcasts]) {
         if (!_uploads) return;
-        if (show.cloudFeedId != null || !show.followed) continue;
-        if (show.kind != PodcastKind.youtubeFeed && show.kind != PodcastKind.own) continue;
+        if (!show.followed) continue;
+        final own = _feeds.own.where((f) => f.id == show.cloudFeedId).firstOrNull;
+        if (show.cloudFeedId != null && own == null) continue;
+        if (show.cloudFeedId == null && show.kind != PodcastKind.youtubeFeed && show.kind != PodcastKind.own) continue;
         if (_failed[show.id] case final at? when DateTime.now().difference(at) < _retryHost) continue;
         try {
-          await _feedFor(show);
+          await (own == null ? _feedFor(show) : _addMissing(show, own));
           _failed.remove(show.id);
         } catch (e) {
-          _log.warning('Couldn’t make a ListenJar feed of show ${show.id}', e);
+          _log.warning('Couldn’t bring show ${show.id} to ListenJar Cloud', e);
           _failed[show.id] = DateTime.now();
         }
       }
@@ -124,8 +129,7 @@ final class CloudShows {
       _log.info('Show ${show.id} is ListenJar feed ${feed.id}');
       return;
     }
-    // A podcast of the listener's own: its name, its picture and its
-    // videos, oldest first so they list in the same order.
+    // A podcast of the listener's own: its name, its picture and its videos.
     final feed = await _feeds.create(show.title);
     _library.setCloudFeed(show.id, feed.id);
     _log.info('Show ${show.id} is ListenJar feed ${feed.id}');
@@ -136,8 +140,45 @@ final class CloudShows {
         _log.warning('Couldn’t upload the artwork of show ${show.id}', e);
       }
     }
-    for (final e in _library.episodes(show.id, oldestFirst: true)) {
-      if (e.link case final link?) await _feeds.addVideo(feed, link, token);
+    await _addMissing(show, feed);
+  }
+
+  /// Videos of podcasts of the listener's own their feeds have, by feed
+  /// and source, so a pass doesn't ask about them again.
+  final _inFeed = <(String, String)>{};
+
+  /// Adds to [feed] the videos added here to [show], a podcast of the
+  /// listener's own, that the feed lacks, oldest first so they list in the
+  /// same order. A video added here stays here alone until its feed has
+  /// it: one that couldn't be added then (offline, YouTube not answering)
+  /// is added on a later pass.
+  Future<void> _addMissing(Podcast show, Feed feed) async {
+    // Streaming from YouTube under the guid it was added with
+    // ([Library.addOwnVideo]), not yet the feed's.
+    final here = [
+      for (final e in _library.episodes(show.id, oldestFirst: true))
+        if (e.guid.startsWith('yt:') && e.link != null && !_inFeed.contains((feed.id, canonicalSourceUrl(e.link!)))) e.link!,
+    ];
+    if (here.isEmpty) return;
+    final there = {for (final e in await _feeds.episodes(feed)) canonicalSourceUrl(e.sourceUrl)};
+    final token = CancellationToken();
+    Object? failed;
+    for (final link in here) {
+      final source = canonicalSourceUrl(link);
+      if (!there.contains(source)) {
+        try {
+          _log.info('Adding $source of show ${show.id} to ListenJar feed ${feed.id}');
+          await _feeds.addVideo(feed, link, token);
+        } on PlanLimit {
+          rethrow;
+        } catch (e) {
+          _log.warning('Couldn’t add $source to ListenJar feed ${feed.id}', e);
+          failed = e;
+          continue;
+        }
+      }
+      _inFeed.add((feed.id, source));
     }
+    if (failed != null) throw failed;
   }
 }
