@@ -19,6 +19,7 @@ import 'directory.dart';
 import 'downloads.dart';
 import 'feeds.dart';
 import 'library.dart';
+import 'library_sync.dart';
 import 'links.dart' show parseYouTubeLink;
 import 'log.dart';
 import 'player.dart';
@@ -59,6 +60,7 @@ Future<void> main([List<String> arguments = const []]) async {
   final player = await Player.start(library, youtube, downloads);
   unawaited(downloads.start());
   CloudShows(account, feeds, podcasts);
+  librarySync = LibrarySync(account, podcasts);
   Tray.start(account, feeds);
   unawaited(SyncSchedule().start(feeds, podcasts));
   unawaited(podcasts.refreshAll());
@@ -75,6 +77,9 @@ Future<void> main([List<String> arguments = const []]) async {
   );
   runApp(App(links: links, services: services));
 }
+
+/// The library between the listener's devices, on a ListenJar Cloud plan.
+LibrarySync? librarySync;
 
 /// What the app is doing, for `ext.listenjar.state` (log.dart). Nothing
 /// personal: no email, no names.
@@ -110,6 +115,10 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
       'chapters': [for (final c in player.chapters) '${c.start} ${c.title}'],
     },
     'upNext': [for (final e in library.queue) e.title],
+    'librarySync': switch (librarySync) {
+      final sync? => {'on': sync.on, 'syncedAt': sync.syncedAt?.toIso8601String(), 'error': sync.error?.toString()},
+      null => null,
+    },
     'following': [
       for (final p in library.podcasts.where((p) => p.followed))
         {'id': p.id, 'kind': p.kind.name, 'episodes': library.episodes(p.id).length, if (p.refreshError != null) 'error': p.refreshError},
@@ -140,6 +149,9 @@ void control(AppServices? s, Map<String, String> parameters) {
       unawaited(player.stop());
     case 'seek':
       unawaited(player.seek(Duration(milliseconds: ((double.tryParse(parameters['seconds'] ?? '') ?? 0) * 1000).round())));
+    case 'syncLibrary':
+      // A library sync pass with ListenJar Cloud now.
+      unawaited(librarySync?.sync());
     case 'refresh':
       unawaited(s.podcasts.refreshAll(force: true));
     case 'add':

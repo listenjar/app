@@ -352,6 +352,12 @@ final class _AccountPanelState extends State<AccountPanel> {
             ),
           ),
         ]),
+      if (limit != null) ...[
+        const SizedBox(height: 4),
+        Text('Only YouTube audio counts. Classic podcasts play from their publishers and don’t use your storage.', style: soft),
+        const SizedBox(height: 4),
+        Text('Your library, classic podcasts too, is the same on every device you sign in on.', style: soft),
+      ],
       const SizedBox(height: 4),
       Text(s.feeds.summary, style: soft),
       const SizedBox(height: 18),

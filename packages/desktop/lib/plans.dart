@@ -324,7 +324,11 @@ Future<void> showPlans(BuildContext context, {String title = 'Keep what you add'
 );
 
 /// What ListenJar Cloud adds to every plan's perks, as the pricing page puts it.
-const _cloudPerk = 'ListenJar Cloud: they play in any podcast app';
+const _cloudPerks = [
+  'ListenJar Cloud: they play in any podcast app',
+  'Your whole library, classic podcasts too, on every device',
+  'Storage counts YouTube audio only, never classic podcasts',
+];
 
 final class _PlansSheet extends StatefulWidget {
   const _PlansSheet({required this.title, required this.cloud, required this.account});
@@ -460,7 +464,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
             ),
           ]),
           const SizedBox(height: 12),
-          for (final perk in [..._planPerks, if (widget.cloud) _cloudPerk])
+          for (final perk in [..._planPerks, if (widget.cloud) ..._cloudPerks])
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

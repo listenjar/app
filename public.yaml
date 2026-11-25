@@ -83,6 +83,19 @@ info:
     it; removing an episode or a feed (`deleteEpisode`, `deleteFeed`, or a free
     feed expiring) uncounts it. A listener's storage is every video they hold,
     once; audio nobody holds any more is deleted from the media bucket.
+    Only YouTube audio the app uploads counts: classic podcasts play from
+    their own publishers' servers and never use the plan's storage, nor does
+    artwork or the library.
+
+
+    Library: with ListenJar Cloud, the app keeps the listener's whole library
+    the same on every device (`pullLibrary`, `pushLibrary`,
+    `watchLibrary`): every show they follow, classic RSS podcasts as well as
+    YouTube, where they are in each episode, the videos of their podcasts of
+    their own kept on a device, and Up Next. The server stores each
+    `LibraryRecord` as the app sends it and never reads its `data`; the
+    newest `updatedAt` wins, and a removed record stays, `deleted`, so every
+    device learns it went. Feeds under `/me/feeds` sync on their own.
 servers:
   - url: https://api.listenjar.com
     description: Production.
@@ -679,6 +692,77 @@ paths:
           description: The token is missing, revoked or expired.
         "404":
           description: The user never subscribed.
+  /me/library:
+    get:
+      operationId: pullLibrary
+      summary: What changed in the listener's library since a version
+      description: >-
+        The records whose version is above `since`, oldest change first, a
+        page at a time: up to about a thousand, never splitting one push. A
+        device keeps the answer's `version` and asks again from there while
+        `more` is true. `since` 0 is the whole library.
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: The records above `since`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryChanges"
+        "400":
+          description: "`since` isn't a whole number."
+        "401":
+          description: The token is missing, revoked or expired.
+        "402":
+          description: The listener's plan has no ListenJar Cloud (Free, Local).
+    post:
+      operationId: pushLibrary
+      summary: Record changes the listener made on this device
+      description: >-
+        Each record replaces the one stored for its `kind`, `show` and `item`
+        unless that one's `updatedAt` is as new or newer. The ones that land
+        take the listener's next version, which other devices pull.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LibraryPush"
+      responses:
+        "204":
+          description: Recorded.
+        "400":
+          description: A record is malformed, or there are more than 500, or the body is over 1 MB.
+        "401":
+          description: The token is missing, revoked or expired.
+        "402":
+          description: The listener's plan has no ListenJar Cloud (Free, Local).
+  /me/library/events:
+    get:
+      operationId: watchLibrary
+      summary: The listener's library version, live
+      description: >-
+        Server-sent events. The first event is the library's version now;
+        another follows whenever a push moves it, from any device. Each
+        event's `data` is a `LibraryVersion`: a device pulls when it is above
+        what it has. Pings and the stream's end are as for `watchMyFeeds`.
+      responses:
+        "200":
+          description: The library's version, then again on every change.
+          content:
+            text/event-stream:
+              itemSchema:
+                $ref: "#/components/schemas/LibraryVersion"
+        "401":
+          description: The token is missing, revoked or expired.
+        "402":
+          description: The listener's plan has no ListenJar Cloud (Free, Local).
   /me:
     get:
       operationId: getMe
@@ -934,6 +1018,126 @@ components:
         expiresAt:
           type: string
           format: date-time
+    LibraryKind:
+      type: string
+      enum: [show, listen, video, queue]
+      description: >-
+        `show`: a show the listener follows, its feed URL `show`. `listen`:
+        where they are in the episode `item` (its guid) of `show`. `video`:
+        the YouTube video `item` in `show`, a podcast of their own on a
+        device. `queue`: Up Next, `show` and `item` empty.
+    LibraryRecord:
+      type: object
+      required: [kind, show, item, updatedAt]
+      properties:
+        kind:
+          $ref: "#/components/schemas/LibraryKind"
+        show:
+          type: string
+          maxLength: 2000
+          description: The show's feed URL, or an address the app made for a podcast of the listener's own; empty for the queue.
+        item:
+          type: string
+          maxLength: 2000
+          description: An episode's guid or a video's id; empty for a show and the queue.
+        updatedAt:
+          type: integer
+          minimum: 0
+          description: When the listener changed it, in milliseconds since the epoch, by the device's clock.
+        deleted:
+          type: boolean
+          description: The listener removed it. Absent otherwise.
+        data:
+          $ref: "#/components/schemas/LibraryData"
+          description: What it is now; absent once deleted.
+        version:
+          type: integer
+          minimum: 1
+          description: The push that stored it. Only from `pullLibrary`.
+    LibraryData:
+      type: object
+      description: >-
+        A record's contents, which only the app reads; each kind uses some of
+        these. Up to 256 KB.
+      properties:
+        showKind:
+          type: string
+          enum: [rss, youtube, youtubeFeed, own]
+          description: "`show`: a podcast's RSS feed, a single YouTube video, a YouTube playlist or channel, or a podcast of the listener's own."
+        title:
+          type: string
+        author:
+          type: string
+        artworkUrl:
+          type: string
+          format: uri
+        subscribedAt:
+          type: integer
+          description: "`show`: when the listener followed it, in ms."
+        positionMs:
+          type: integer
+          minimum: 0
+          description: "`listen`: where they stopped; 0 when they haven't started or finished."
+        played:
+          type: boolean
+          description: "`listen`"
+        playedAt:
+          type: integer
+          description: "`listen`: when they last played it or marked it, in ms."
+        durationMs:
+          type: integer
+          minimum: 1
+          description: "`video`, `show` of a single video: its length."
+        addedAt:
+          type: integer
+          description: "`video`: when it was added, in ms."
+        queue:
+          type: array
+          description: "`queue`: Up Next, in order."
+          items:
+            $ref: "#/components/schemas/LibraryEpisodeRef"
+    LibraryEpisodeRef:
+      type: object
+      required: [show, item]
+      properties:
+        show:
+          type: string
+          description: The episode's show's feed URL.
+        item:
+          type: string
+          description: The episode's guid.
+    LibraryPush:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/LibraryRecord"
+    LibraryChanges:
+      type: object
+      required: [records, version, more]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryRecord"
+        version:
+          type: integer
+          minimum: 0
+          description: The highest version in `records`, or `since` when there are none; ask from here next.
+        more:
+          type: boolean
+          description: More records are above `version`.
+    LibraryVersion:
+      type: object
+      description: One `watchLibrary` event.
+      required: [version]
+      properties:
+        version:
+          type: integer
+          minimum: 0
     Plan:
       type: string
       enum: [free, paid]
@@ -968,8 +1172,10 @@ components:
           minimum: 1
           description: >-
             What the listener's plan stores in ListenJar Cloud, in bytes (10
-            or 100 GB). Absent without the Cloud: on the free plan and on
-            Local, whose plan is still `paid`.
+            or 100 GB): the YouTube audio the app uploads, since classic
+            podcasts play from their publishers and don't count. Absent
+            without the Cloud: on the free plan and on Local, whose plan is
+            still `paid`.
         storageUsedBytes:
           type: integer
           minimum: 0

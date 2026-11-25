@@ -279,7 +279,8 @@ typedef StoredDownload = ({PodcastEpisode episode, DateTime? playedAt, DateTime 
 /// How a show's episodes are listed.
 enum EpisodeFilter { all, unplayed, downloaded }
 
-const _schema = 4;
+const _schema = 5;
+
 
 final class Library extends ChangeNotifier {
   Library._(this._db, this.directory) {
@@ -390,6 +391,22 @@ final class Library extends ChangeNotifier {
         ) strict;
       ''');
     }
+    if (version < 5) {
+      // The library as ListenJar Cloud last agreed on it, by record
+      // (library_sync.dart): what changed here since is what differs from
+      // it, and `pending` marks what the Cloud changed that isn't here yet.
+      db.execute('''
+        create table if not exists sync_base (
+          kind text not null,
+          show text not null,
+          item text not null,
+          updated_at integer not null,
+          data text,
+          pending integer not null default 0,
+          primary key (kind, show, item)
+        ) strict, without rowid;
+      ''');
+    }
     db.execute('pragma user_version = $_schema');
   }
 
@@ -439,6 +456,11 @@ final class Library extends ChangeNotifier {
     _load();
     notifyListeners();
   }
+
+  /// The library's database, for keeping it in step with ListenJar Cloud
+  /// (library_sync.dart), which calls [reload] after changing it.
+  Database get database => _db;
+  void reload() => _changed();
 
   static Podcast _podcast(Row r) => Podcast(
     id: r['id'] as int,
@@ -806,13 +828,18 @@ final class Library extends ChangeNotifier {
 
   /// Makes a podcast of the listener's own on this device, empty until they
   /// add videos.
-  Podcast createOwn(String title, {String? artworkUrl}) {
+  /// [feedUrl] and [subscribedAt] are another device's, when ListenJar
+  /// Cloud brings one made there (library_sync.dart).
+  Podcast createOwn(String title, {String? artworkUrl, String? feedUrl, DateTime? subscribedAt}) {
     final now = DateTime.now();
     final rows = _db.select('''
       insert into podcasts (feed_url, kind, title, author, artwork_url, subscribed_at, refreshed_at, followed)
       values (?, 'own', ?, 'Podcast of your own', ?, ?, ?, 1)
       returning id
-    ''', ['listenjar:own:${now.microsecondsSinceEpoch}', title, artworkUrl, now.millisecondsSinceEpoch, now.millisecondsSinceEpoch]);
+    ''', [
+      feedUrl ?? 'listenjar:own:${now.microsecondsSinceEpoch}', title, artworkUrl,
+      (subscribedAt ?? now).millisecondsSinceEpoch, now.millisecondsSinceEpoch,
+    ]);
     _changed();
     return podcast(rows.first['id'] as int)!;
   }
