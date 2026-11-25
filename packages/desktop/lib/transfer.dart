@@ -12,6 +12,7 @@ import 'package:cancellation_token/cancellation_token.dart';
 import 'package:crypto/crypto.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import 'migrations.dart';
 import 'youtube.dart';
 
 const rangeBytes = 1 << 20;
@@ -39,28 +40,12 @@ final class Journal {
   /// Where partial downloads live until they are uploaded.
   final Directory directory;
 
-  static Journal open(Directory support) {
+  static Future<Journal> open(Directory support) async {
     final directory = Directory('${support.path}/downloads')..createSync(recursive: true);
     final db = sqlite3.open('${support.path}/sync.sqlite')
       ..execute('pragma journal_mode = wal')
-      ..execute('''
-        create table if not exists downloads (
-          key text primary key,
-          identity text not null
-        ) strict;
-        create table if not exists ranges (
-          key text not null references downloads (key) on delete cascade,
-          start integer not null,
-          sha256 text not null,
-          primary key (key, start)
-        ) strict;
-        create table if not exists skips (
-          key text primary key,
-          reason text not null,
-          at integer not null
-        ) strict;
-        pragma foreign_keys = on;
-      ''');
+      ..execute('pragma foreign_keys = on');
+    await migrate(db, 'sync', support);
     return Journal._(db, directory);
   }
 

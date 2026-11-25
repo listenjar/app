@@ -13,6 +13,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'backend/api.dart' show SourceKind;
 import 'links.dart';
+import 'migrations.dart';
 
 import 'rss.dart';
 
@@ -279,8 +280,6 @@ typedef StoredDownload = ({PodcastEpisode episode, DateTime? playedAt, DateTime 
 /// How a show's episodes are listed.
 enum EpisodeFilter { all, unplayed, downloaded }
 
-const _schema = 7;
-
 
 final class Library extends ChangeNotifier {
   Library._(this._db, this.directory) {
@@ -298,157 +297,8 @@ final class Library extends ChangeNotifier {
     final db = sqlite3.open('${support.path}/library.sqlite')
       ..execute('pragma journal_mode = wal')
       ..execute('pragma foreign_keys = on');
-    _migrate(db, support);
+    await migrate(db, 'library', support);
     return Library._(db, support);
-  }
-
-  static void _migrate(Database db, Directory support) {
-    final version = db.select('pragma user_version').first.columnAt(0) as int;
-    if (version < 1) {
-      db.execute('''
-        create table podcasts (
-          id integer primary key,
-          feed_url text not null unique,
-          kind text not null default 'rss',
-          title text not null,
-          author text not null default '',
-          description text not null default '',
-          artwork_url text,
-          link text,
-          subscribed_at integer not null,
-          refreshed_at integer,
-          refresh_error text,
-          etag text,
-          last_modified text,
-          cloud_feed_id text,
-          auto_download integer not null default 0,
-          followed integer not null default 1
-        ) strict;
-        create table episodes (
-          id integer primary key,
-          podcast_id integer not null references podcasts (id) on delete cascade,
-          guid text not null,
-          title text not null,
-          description text not null default '',
-          published_at integer,
-          duration_ms integer,
-          audio_url text,
-          audio_type text,
-          audio_bytes integer,
-          artwork_url text,
-          link text,
-          youtube_id text,
-          season integer,
-          number integer,
-          position_ms integer not null default 0,
-          played integer not null default 0,
-          played_at integer,
-          download_path text,
-          download_state text not null default 'none',
-          download_progress real not null default 0,
-          download_error text,
-          added_at integer not null,
-          unique (podcast_id, guid)
-        ) strict;
-        create index episodes_by_date on episodes (podcast_id, published_at desc);
-        create index episodes_new on episodes (played, published_at desc);
-        create table queue (
-          episode_id integer primary key references episodes (id) on delete cascade,
-          position real not null
-        ) strict;
-        create table settings (
-          key text primary key,
-          value text not null
-        ) strict;
-      ''');
-    }
-    if (version < 2) {
-      db.execute('''
-        create table if not exists now_playing (
-          id integer primary key check (id = 1),
-          episode_id integer references episodes (id) on delete set null
-        ) strict;
-      ''');
-    }
-    if (version < 3) {
-      // When each download finished, for removing the unused ones.
-      db.execute('''
-        alter table episodes add column downloaded_at integer;
-        update episodes set downloaded_at = added_at where download_state = 'done';
-      ''');
-    }
-    if (version < 4) {
-      // Where the listener was in a YouTube playlist or channel moved to
-      // ListenJar Cloud, by video, until its uploads arrived. Moving is
-      // gone; the table stays so later versions number on.
-      db.execute('''
-        create table if not exists carried (
-          feed_id text not null,
-          video_id text not null,
-          position_ms integer not null,
-          played integer not null,
-          primary key (feed_id, video_id)
-        ) strict;
-      ''');
-    }
-    if (version < 5) {
-      // The library as ListenJar Cloud last agreed on it, by record
-      // (library_sync.dart): what changed here since is what differs from
-      // it, and `pending` marks what the Cloud changed that isn't here yet.
-      db.execute('''
-        create table if not exists sync_base (
-          kind text not null,
-          show text not null,
-          item text not null,
-          updated_at integer not null,
-          data text,
-          pending integer not null default 0,
-          primary key (kind, show, item)
-        ) strict, without rowid;
-      ''');
-    }
-    if (version < 6) {
-      // The library syncs the classic way, RSS shows only: what the base
-      // held of YouTube shows and of the videos of podcasts of the
-      // listener's own goes, as it went from the Cloud.
-      db.execute('''
-        delete from sync_base where kind = 'listen' and show in (
-          select show from sync_base where kind = 'show'
-            and json_extract(data, '\$.showKind') in ('youtube', 'youtubeFeed', 'own')
-        );
-        delete from sync_base where kind = 'video'
-          or (kind = 'show' and json_extract(data, '\$.showKind') in ('youtube', 'youtubeFeed', 'own'))
-          or (kind = 'show' and data is null
-            and (show like 'https://www.youtube.com/%' or show not like 'http%'));
-      ''');
-    }
-    if (version < 7) {
-      // An episode of a show made of sources (a YouTube video, playlist or
-      // channel, a podcast of the listener's own, or the ListenJar feed of
-      // one) is its source, once: the canonical URL of what it was made
-      // from. A video added twice to one of the listener's own podcasts
-      // goes, keeping the copy the feed has, else the one listened to.
-      db.execute('alter table episodes add column source_url text');
-      db.execute('begin');
-      try {
-        for (final row in db.select("select id from podcasts where kind != 'rss' or cloud_feed_id is not null")) {
-          for (final path in _keySources(db, row['id'] as int)) {
-            try {
-              File('${support.path}/$path').deleteSync();
-            } on FileSystemException {
-              // Gone already.
-            }
-          }
-        }
-        db.execute('commit');
-      } catch (_) {
-        db.execute('rollback');
-        rethrow;
-      }
-    }
-    // Every show's episodes are unique by source; most have none.
-    db.execute('create unique index if not exists episodes_source on episodes (podcast_id, source_url) where source_url is not null');
-    db.execute('pragma user_version = $_schema');
   }
 
   /// The source of an episode with [youtubeId] or [link], in a show made of

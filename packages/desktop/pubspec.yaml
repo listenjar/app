@@ -57,5 +57,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/migrations/library/
+    - assets/migrations/sync/
     - assets/podcast_apps/
     - assets/tray/

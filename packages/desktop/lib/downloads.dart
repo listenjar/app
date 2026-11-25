@@ -41,6 +41,7 @@ final class Downloads {
   /// YouTube downloads in flight, by episode.
   final _youtubeRunning = <int, CancellationToken>{};
   transfer.Journal? _journal;
+  Future<transfer.Journal>? _opening;
   StreamSubscription<TaskUpdate>? _updates;
   Timer? _tidyTimer;
 
@@ -171,7 +172,8 @@ final class Downloads {
 
   String _youtubeKey(int episode) => 'episode-$episode';
 
-  Future<transfer.Journal> _openJournal() async => _journal ??= transfer.Journal.open(Directory('${_library.directory.path}/offline'));
+  Future<transfer.Journal> _openJournal() =>
+    _opening ??= transfer.Journal.open(Directory('${_library.directory.path}/offline')).then((journal) => _journal = journal);
 
   Future<void> _youtubeDownload(PodcastEpisode episode) async {
     final id = episode.youtubeId;

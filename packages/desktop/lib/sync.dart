@@ -119,6 +119,7 @@ final class SyncEngine {
     ..idleTimeout = const Duration(seconds: 30);
 
   Journal? _journal;
+  Future<Journal>? _opening;
   Timer? _notify;
 
   List<Feed> _feeds = const [];
@@ -245,7 +246,7 @@ final class SyncEngine {
     });
   }
 
-  Future<Journal> _openJournal() async => _journal ??= Journal.open(await _support());
+  Future<Journal> _openJournal() => _opening ??= _support().then(Journal.open).then((journal) => _journal = journal);
 
   Future<void> _pass() async {
     _running = true;
