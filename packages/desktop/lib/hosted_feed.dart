@@ -164,6 +164,7 @@ final class FeedSyncLine extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: switch (phase) {
+              FeedPhase.failed when !failed => p.fgFaint,
               FeedPhase.failed => p.danger,
               FeedPhase.upToDate => p.ok,
               FeedPhase.syncing || FeedPhase.scanning => p.link,

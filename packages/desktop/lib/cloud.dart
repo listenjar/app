@@ -9,17 +9,16 @@
 // adds YouTube links and videos to them; Settings holds the account
 // (AccountPanel).
 import 'dart:async';
-import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
 import 'backend/api.dart';
 import 'feeds.dart';
 import 'menu.dart';
+import 'net.dart';
 import 'plans.dart';
 import 'podcast_apps.dart';
 import 'shared_links.dart' show newOwnPodcast;
@@ -167,6 +166,8 @@ final class _ListenInState extends State<ListenIn> {
       return (waiting > 0 ? 'Storage full · $waiting waiting to upload' : 'Storage full', true);
     case FeedSync(phase: FeedPhase.failed, error: PlanLimit()):
       return ('Paused: takes a 10 GB or 100 GB plan', true);
+    case FeedSync(phase: FeedPhase.failed, :final error) when unreachable(error):
+      return ('Offline · syncs when you’re back online', false);
     case FeedSync(phase: FeedPhase.upToDate, episodes: 0) when feed.source == null:
       return ('No episodes yet', false);
   }
@@ -198,6 +199,7 @@ final class _ListenInState extends State<ListenIn> {
 (String, bool)? feedTileStatus(Feed feed, FeedSync? sync, {required bool playable}) => switch (sync) {
   FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true)) => ('Storage full', true),
   FeedSync(phase: FeedPhase.failed, error: PlanLimit()) => ('Paused: takes a 10 GB or 100 GB plan', true),
+  FeedSync(phase: FeedPhase.failed, :final error) when unreachable(error) => ('Offline', false),
   FeedSync(phase: FeedPhase.failed) => ('Couldn’t sync', true),
   FeedSync(phase: FeedPhase.scanning) => ('Checking YouTube…', false),
   FeedSync(phase: FeedPhase.syncing, :final stage?, :final fraction?) => ('$stage ${(fraction * 100).floor()}%', false),
@@ -559,8 +561,8 @@ final class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
 /// their connection when the network failed, wait when ListenJar's server
 /// did, and [other] otherwise.
 String failure(String what, Object error, {required String other}) => switch (error) {
-  SocketException() || HttpException() || TimeoutException() || CancelledException() || http.ClientException() =>
-    '$what. Check your connection, then try again.',
+  CancelledException() => '$what. Check your connection, then try again.',
+  _ when unreachable(error) => '$what. Check your connection, then try again.',
   ApiStatusException(:final statusCode) when statusCode >= 500 =>
     '$what. Something went wrong on our side, so try again in a minute.',
   _ => '$what. $other',

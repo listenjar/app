@@ -620,19 +620,39 @@ final class EmptyState extends StatelessWidget {
   }
 }
 
-/// A quiet notice of something that went wrong, with what it said.
+/// A quiet notice of something that went wrong, with what it said; in the
+/// colors of the surface it lands on, paper or ink.
 Widget problem(BuildContext context, String message, [Object? error]) => Tooltip(
   message: error == null ? '' : '$error',
-  child: Container(
-    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-    decoration: BoxDecoration(color: const Color(0x14D4483F), borderRadius: BorderRadius.circular(12)),
-    child: Row(children: [
-      Icon(Icons.error_outline_rounded, size: 18, color: brand.Surface.of(context).danger),
-      const SizedBox(width: 10),
-      Expanded(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.Surface.of(context).fg))),
-    ]),
-  ),
+  child: Builder(builder: (context) {
+    final p = brand.Surface.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(color: p.danger.withValues(alpha: p.onInk ? 0.12 : 0.08), borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        Icon(Icons.error_outline_rounded, size: 18, color: p.danger),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: p.fg))),
+      ]),
+    );
+  }),
 );
+
+/// The network is gone: said once, calmly, with what still works.
+final class OfflineLine extends StatelessWidget {
+  const OfflineLine({super.key, this.message = 'Offline · showing what’s saved here'});
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = brand.Surface.of(context);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.cloud_off_rounded, size: 15, color: p.fgFaint),
+      const SizedBox(width: 8),
+      Flexible(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: p.fgSoft))),
+    ]);
+  }
+}
 
 /// Says what happened, at the bottom of the window.
 void tell(BuildContext context, String message) {

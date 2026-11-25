@@ -65,6 +65,13 @@ Future<void> main([List<String> arguments = const []]) async {
   Tray.start(account, feeds);
   unawaited(SyncSchedule().start(feeds, podcasts));
   unawaited(podcasts.refreshAll());
+  // Back online: the feeds that couldn't sync while it was gone sync now.
+  var wasOffline = podcasts.offline;
+  podcasts.addListener(() {
+    if (podcasts.offline == wasOffline) return;
+    wasOffline = podcasts.offline;
+    if (!wasOffline) feeds.syncNow();
+  });
   unawaited(startUpdates());
   services = (
     youtube: youtube,

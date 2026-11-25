@@ -21,6 +21,7 @@ import 'cloud.dart' show ListenIn, StorageFullNotice, failure, removeCloudFeed;
 import 'hosted_feed.dart';
 import 'library.dart';
 import 'menu.dart';
+import 'net.dart';
 import 'plans.dart' show showPlans;
 import 'shared_links.dart' show OwnPodcast;
 import 'sync.dart' show PlanLimit;
@@ -124,11 +125,11 @@ final class _ShowPageState extends State<ShowPage> {
             if (show != null && s.podcasts.paused(show)) ...[
               _paused(context),
               const SizedBox(height: 16),
-            ] else if (show?.refreshError case final error?) ...[
+            ] else if (show?.refreshError case final error? when !s.podcasts.offline) ...[
               problem(context, 'Couldn’t refresh this show: $error'),
               const SizedBox(height: 16),
             ],
-            if (hosted?.loadError case final error?) ...[
+            if (hosted?.loadError case final error? when !unreachable(error)) ...[
               problem(context, failure('Couldn’t load the uploads on their way', error, other: 'Try again in a minute.'), error),
               const SizedBox(height: 16),
             ],
@@ -296,7 +297,10 @@ final class _ShowPageState extends State<ShowPage> {
         if (feed != null) ListenIn(feed: feed, onInk: true),
         if (feed != null && video != null) AddToPodcast(feed: feed, url: video),
       ]),
-      if (feed != null) ...[
+      if (s.podcasts.offline) ...[
+        const SizedBox(height: 16),
+        const OfflineLine(),
+      ] else if (feed != null) ...[
         const SizedBox(height: 16),
         FeedSyncLine(feed: feed),
       ],

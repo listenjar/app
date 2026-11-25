@@ -139,7 +139,7 @@ final class LibraryPage extends StatelessWidget {
         final st? => st,
         _ when s.podcasts.refreshing.contains(show.id) => ('Checking…', false),
         _ when s.podcasts.paused(show) => ('New videos paused', false),
-        _ when show.refreshError != null => ('Couldn’t refresh', true),
+        _ when show.refreshError != null && !s.podcasts.offline => ('Couldn’t refresh', true),
         _ when show.author.isNotEmpty => (show.author, false),
         _ when feed != null => (feed.source == null ? 'Your podcast' : kindLabel(feed.source!.kind), false),
         _ => (' ', false),

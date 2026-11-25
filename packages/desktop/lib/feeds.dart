@@ -21,6 +21,7 @@ import 'package:path_provider/path_provider.dart';
 import 'account.dart';
 import 'artwork.dart';
 import 'backend/api.dart';
+import 'net.dart';
 import 'sync.dart';
 import 'uploads.dart';
 import 'youtube.dart';
@@ -221,12 +222,14 @@ final class Feeds extends ChangeNotifier {
     final phases = [for (final f in feeds) statusOf(f)?.phase ?? FeedPhase.waiting];
     final busy = phases.where((p) => p == FeedPhase.scanning || p == FeedPhase.syncing).length;
     final failed = phases.where((p) => p == FeedPhase.failed).length;
+    final offline = feeds.where((f) => switch (statusOf(f)) { FeedSync(phase: FeedPhase.failed, :final error) => unreachable(error), _ => false }).length;
     return switch ((_account, this)) {
       (Account(user: null, restoring: true), _) => 'Starting…',
       (Account(user: null), _) => 'Sign in to sync',
       (_, Feeds(loading: true, feeds: [])) => 'Loading your podcasts…',
       (_, Feeds(feeds: [])) => 'No podcasts yet',
       _ when busy > 0 => feeds.length == 1 ? 'Syncing…' : 'Syncing $busy of ${feeds.length} podcasts…',
+      _ when offline > 0 && offline == failed => 'Offline · syncs when you’re back online',
       _ when failed > 0 => failed == 1 ? '1 podcast couldn’t sync' : '$failed podcasts couldn’t sync',
       _ when phases.every((p) => p == FeedPhase.upToDate) => 'Up to date',
       _ => 'Waiting to sync',

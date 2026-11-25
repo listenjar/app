@@ -26,11 +26,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
-import 'package:http/http.dart' as http;
 
 import 'backend/api.dart';
 import 'faststart.dart';
 import 'links.dart';
+import 'net.dart';
 import 'transfer.dart';
 import 'uploads.dart';
 import 'youtube.dart';
@@ -501,7 +501,7 @@ String _key(Feed feed, String sourceUrl) => '${feed.id}/$sourceUrl';
 String _clip(String text, int max) => text.length <= max ? text : text.substring(0, max);
 
 bool _retryable(Object e) => switch (e) {
-  SocketException() || HttpException() || TimeoutException() || http.ClientException() => true,
+  _ when unreachable(e) => true,
   TransferStatusException(:final statusCode) || ApiStatusException(:final statusCode) => statusCode >= 500,
   _ => false,
 };

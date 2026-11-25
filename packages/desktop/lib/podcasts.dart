@@ -19,6 +19,7 @@ import 'downloads.dart';
 import 'library.dart';
 import 'links.dart';
 import 'log.dart';
+import 'net.dart';
 import 'rss.dart';
 import 'youtube.dart';
 
@@ -105,6 +106,49 @@ final class Podcasts extends ChangeNotifier {
   Future<void>? _all;
   DateTime? _lastAll;
 
+  /// Shows whose feed couldn't be reached at all the last time: no
+  /// network, or their server is down. They try again on their own, less
+  /// and less often, until they answer.
+  final _unreached = <int>{};
+  Timer? _retry;
+  var _retryIn = _firstRetry;
+  static const _firstRetry = Duration(seconds: 15);
+  static const _lastRetry = Duration(minutes: 5);
+
+  /// Whether no show's feed could be reached: the network is gone. The
+  /// library shows what it has here.
+  bool get offline {
+    if (_unreached.isEmpty) return false;
+    return library.podcasts.where((p) => p.refreshes).every((p) => _unreached.contains(p.id));
+  }
+
+  void _reached(int podcast, bool reached) {
+    final changed = reached ? _unreached.remove(podcast) : _unreached.add(podcast);
+    if (!changed) return;
+    if (_unreached.isEmpty) {
+      _retry?.cancel();
+      _retry = null;
+      _retryIn = _firstRetry;
+    } else {
+      _retryLater();
+    }
+    notifyListeners();
+  }
+
+  /// Tries the shows that couldn't be reached again in a while, unless a
+  /// try is due already.
+  void _retryLater() {
+    if (_unreached.isEmpty || _retry != null || _life.isCancelled) return;
+    _retry = Timer(_retryIn, () {
+      _retry = null;
+      final shows = [for (final id in _unreached) ?library.podcast(id)];
+      _unreached.removeWhere((id) => !shows.any((p) => p.id == id && p.refreshes));
+      unawaited(Future.wait([for (final show in shows) refresh(show)]).whenComplete(_retryLater));
+    });
+    final next = _retryIn * 2;
+    _retryIn = next > _lastRetry ? _lastRetry : next;
+  }
+
   /// Opens the feed at [url] to look at: the show in the library, or added
   /// to it unfollowed, with its episodes.
   Future<Podcast> open(Uri url, CancellationToken token, {bool follow = false}) async {
@@ -181,10 +225,12 @@ final class Podcasts extends ChangeNotifier {
       final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 2)));
       if (podcast.kind == PodcastKind.youtubeFeed) {
         await _refreshYouTube(podcast.id, parseYouTubeLink(podcast.feedUrl)!, token, named: true);
+        _reached(podcast.id, true);
         return;
       }
       final (etag, modified) = library.validators(podcast.id);
       final fetch = await fetchFeed(_http, Uri.parse(podcast.feedUrl), token, etag: etag, lastModified: modified);
+      _reached(podcast.id, true);
       final added = library.refreshed(podcast.id, fetch);
       if (added.isNotEmpty) await _downloads.downloadNew(added);
       // A playlist or channel ListenJar hosts still lists here first: its
@@ -199,7 +245,10 @@ final class Podcasts extends ChangeNotifier {
         library.refreshFailed(podcast.id, podcast.kind == PodcastKind.rss ? 'The feed took too long to answer' : 'YouTube took too long to answer');
       }
     } catch (e) {
-      library.refreshFailed(podcast.id, e);
+      // Unreachable says nothing about the show itself: it tries again on
+      // its own, and the network may be what's gone.
+      library.refreshFailed(podcast.id, unreachable(e) ? 'its server didn’t answer' : e);
+      _reached(podcast.id, !unreachable(e));
     } finally {
       refreshing.remove(podcast.id);
       notifyListeners();
@@ -579,6 +628,7 @@ final class Podcasts extends ChangeNotifier {
 
   @override
   void dispose() {
+    _retry?.cancel();
     _life.cancel();
     _http.close(force: true);
     super.dispose();
