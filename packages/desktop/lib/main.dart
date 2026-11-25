@@ -200,6 +200,10 @@ void control(AppServices? s, Map<String, String> parameters) {
       // A podcast's RSS feed (`url`), followed as the directory does.
       final url = Uri.tryParse(parameters['url'] ?? '') ?? (throw ArgumentError('url?'));
       unawaited(s.podcasts.follow(url, CancellationToken()));
+    case 'follow':
+      // A YouTube playlist or channel `url`, followed on this device.
+      final link = parseYouTubeLink(parameters['url'] ?? '') ?? (throw ArgumentError('not a YouTube link'));
+      unawaited(s.podcasts.followYouTube(link, TimeoutCancellationToken(const Duration(minutes: 3))));
     case 'unfollow':
       final show = s.library.podcast(int.tryParse(parameters['show'] ?? '') ?? -1) ?? (throw ArgumentError('no show ${parameters['show']}'));
       unawaited(s.podcasts.unfollow(show));

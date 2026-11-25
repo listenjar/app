@@ -482,7 +482,24 @@ final class Library extends ChangeNotifier {
 
   /// Any show in the library, followed or not.
   Podcast? podcast(int id) => _podcasts.where((p) => p.id == id).firstOrNull;
-  Podcast? podcastByUrl(String feedUrl) => _podcasts.where((p) => p.feedUrl == feedUrl).firstOrNull;
+
+  /// The show at [feedUrl], however it's spelled: `http` or `https`, the
+  /// host's case, a trailing slash, YouTube's other links to the same
+  /// playlist or channel ([canonicalSourceUrl]). One show per feed.
+  Podcast? podcastByUrl(String feedUrl) {
+    final url = canonicalSourceUrl(feedUrl);
+    return _podcasts.where((p) => p.feedUrl == feedUrl).firstOrNull
+      ?? _podcasts.where((p) => canonicalSourceUrl(p.feedUrl) == url).firstOrNull;
+  }
+
+  /// The show of the YouTube playlist or channel at [url]: followed here
+  /// as it is, or the RSS show ListenJar hosts of it, whose `<link>` is
+  /// its source (apps/backend/src/rss.ts). One show per source.
+  Podcast? podcastBySource(String url) {
+    final source = canonicalSourceUrl(url);
+    return podcastByUrl(source)
+      ?? _podcasts.where((p) => p.cloudFeedId != null && p.link != null && canonicalSourceUrl(p.link!) == source).firstOrNull;
+  }
 
   /// Follows a show the listener was only looking at.
   void follow(int podcast) {

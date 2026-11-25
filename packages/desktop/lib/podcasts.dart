@@ -116,10 +116,13 @@ final class Podcasts extends ChangeNotifier {
     final fetch = await fetchFeed(_http, url, _life.merge(token));
     final feed = fetch.feed!;
     final at = fetch.url.toString();
-    // The feed moved: the show may be in the library under its new address.
-    if (library.podcastByUrl(at) case final moved?) {
-      if (follow) library.follow(moved.id);
-      return library.podcast(moved.id)!;
+    // The feed moved, or says it did: the show may be in the library under
+    // its new address.
+    for (final there in [at, ?feed.newFeedUrl]) {
+      if (library.podcastByUrl(there) case final moved?) {
+        if (follow) library.follow(moved.id);
+        return library.podcast(moved.id)!;
+      }
     }
     return library.subscribe(at, feed, etag: fetch.etag, lastModified: fetch.lastModified, follow: follow);
   }
@@ -345,6 +348,13 @@ final class Podcasts extends ChangeNotifier {
       // itself, not its uploads playlist.
       final channel = link.kind == SourceKind.channel ? await youtube.resolve(_sourceOf(link), merged) : null;
       if (channel != null) link = parseYouTubeLink(channel.url) ?? (throw StateError('YouTube gave no channel for ${link.url}'));
+      // Followed already, here or as the feed ListenJar hosts of it: that
+      // show, not a second one.
+      if (library.podcastBySource(link.url) case final known?) {
+        _log.info('${link.url} is show ${known.id} already');
+        library.follow(known.id);
+        return library.podcast(known.id)!;
+      }
       final snapshot = await youtube.snapshot(_sourceOf(link), merged);
       final title = channel?.title ?? snapshot.title;
       final artwork = channel?.artworkUrl ?? snapshot.artworkUrl;
