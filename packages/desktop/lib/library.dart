@@ -279,7 +279,7 @@ typedef StoredDownload = ({PodcastEpisode episode, DateTime? playedAt, DateTime 
 /// How a show's episodes are listed.
 enum EpisodeFilter { all, unplayed, downloaded }
 
-const _schema = 6;
+const _schema = 7;
 
 
 final class Library extends ChangeNotifier {
@@ -298,11 +298,11 @@ final class Library extends ChangeNotifier {
     final db = sqlite3.open('${support.path}/library.sqlite')
       ..execute('pragma journal_mode = wal')
       ..execute('pragma foreign_keys = on');
-    _migrate(db);
+    _migrate(db, support);
     return Library._(db, support);
   }
 
-  static void _migrate(Database db) {
+  static void _migrate(Database db, Directory support) {
     final version = db.select('pragma user_version').first.columnAt(0) as int;
     if (version < 1) {
       db.execute('''
@@ -422,7 +422,90 @@ final class Library extends ChangeNotifier {
             and (show like 'https://www.youtube.com/%' or show not like 'http%'));
       ''');
     }
+    if (version < 7) {
+      // An episode of a show made of sources (a YouTube video, playlist or
+      // channel, a podcast of the listener's own, or the ListenJar feed of
+      // one) is its source, once: the canonical URL of what it was made
+      // from. A video added twice to one of the listener's own podcasts
+      // goes, keeping the copy the feed has, else the one listened to.
+      db.execute('alter table episodes add column source_url text');
+      db.execute('begin');
+      try {
+        for (final row in db.select("select id from podcasts where kind != 'rss' or cloud_feed_id is not null")) {
+          for (final path in _keySources(db, row['id'] as int)) {
+            try {
+              File('${support.path}/$path').deleteSync();
+            } on FileSystemException {
+              // Gone already.
+            }
+          }
+        }
+        db.execute('commit');
+      } catch (_) {
+        db.execute('rollback');
+        rethrow;
+      }
+    }
+    // Every show's episodes are unique by source; most have none.
+    db.execute('create unique index if not exists episodes_source on episodes (podcast_id, source_url) where source_url is not null');
     db.execute('pragma user_version = $_schema');
+  }
+
+  /// The source of an episode with [youtubeId] or [link], in a show made of
+  /// sources: its canonical URL ([canonicalSourceUrl]).
+  static String? _sourceOf({String? youtubeId, String? link}) => switch ((youtubeId, link)) {
+    (final id?, _) => _watchUrl(id),
+    (null, final link?) => canonicalSourceUrl(link),
+    _ => null,
+  };
+
+  /// Keys [podcast]'s episodes by source, a show made of sources from now
+  /// on: of several made from one source, one stays, the copy its ListenJar
+  /// feed has, else the one listened to, with where the listener was, Up
+  /// Next and Now Playing moved to it. Returns the download paths of those
+  /// that went, to delete. Run inside a transaction.
+  static List<String> _keySources(Database db, int podcast) {
+    final rows = db.select('''
+      select e.id, e.youtube_id, e.link, e.audio_url, e.download_state, e.download_path, e.played, e.position_ms,
+        e.played_at, e.id in (select episode_id from queue) as queued,
+        e.id in (select episode_id from now_playing where episode_id is not null) as playing
+      from episodes e where e.podcast_id = ?
+    ''', [podcast]);
+    final bySource = <String, List<Row>>{};
+    for (final r in rows) {
+      if (_sourceOf(youtubeId: r['youtube_id'] as String?, link: r['link'] as String?) case final source?) {
+        (bySource[source] ??= []).add(r);
+      }
+    }
+    final dropped = <String>[];
+    int rank(Row r) =>
+      (r['audio_url'] != null ? 16 : 0) + (r['download_state'] == 'done' ? 8 : 0) + (r['playing'] == 1 ? 4 : 0) +
+      (r['queued'] == 1 ? 2 : 0) + (r['position_ms'] as int > 0 || r['played'] == 1 ? 1 : 0);
+    for (final MapEntry(key: source, value: same) in bySource.entries) {
+      same.sort((a, b) => switch (rank(b).compareTo(rank(a))) {
+        0 => (a['id'] as int).compareTo(b['id'] as int),
+        final c => c,
+      });
+      final keep = same.first['id'] as int;
+      final others = same.skip(1).toList();
+      if (others.isNotEmpty) {
+        final last = [...same]..sort((a, b) => ((b['played_at'] as int?) ?? 0).compareTo((a['played_at'] as int?) ?? 0));
+        final played = same.any((r) => r['played'] == 1);
+        db.execute(
+          'update episodes set played = ?, position_ms = ?, played_at = ? where id = ?',
+          [played ? 1 : 0, played ? 0 : last.first['position_ms'], last.first['played_at'], keep],
+        );
+        for (final r in others) {
+          final id = r['id'] as int;
+          if (r['queued'] == 1) db.execute('update or ignore queue set episode_id = ? where episode_id = ?', [keep, id]);
+          if (r['playing'] == 1) db.execute('update now_playing set episode_id = ? where id = 1', [keep]);
+          if (r['download_path'] case final String path when path != same.first['download_path']) dropped.add(path);
+          db.execute('delete from episodes where id = ?', [id]);
+        }
+      }
+      db.execute('update episodes set source_url = ? where id = ?', [source, keep]);
+    }
+    return dropped;
   }
 
   List<Podcast> _podcasts = const [];
@@ -664,47 +747,61 @@ final class Library extends ChangeNotifier {
     final known = {
       for (final row in _db.select('select guid from episodes where podcast_id = ?', [podcast])) row['guid'] as String,
     };
-    final streaming = <String, String>{
-      for (final row in _db.select('''
-        select e.guid, e.link from episodes e join podcasts p on p.id = e.podcast_id
-        where e.podcast_id = ? and p.cloud_feed_id is not null and e.audio_url is null and e.link is not null
-      ''', [podcast]))
-        canonicalSourceUrl(row['link'] as String): row['guid'] as String,
+    // A ListenJar feed is made of sources, one episode each: the feed's
+    // episode of a source here already, streaming or under a guid the feed
+    // had for it before, is that row.
+    final keyed = _db.select('select 1 from podcasts where id = ? and cloud_feed_id is not null', [podcast]).isNotEmpty;
+    final bySource = <String, String>{
+      if (keyed)
+        for (final row in _db.select('select guid, source_url from episodes where podcast_id = ? and source_url is not null', [podcast]))
+          row['source_url'] as String: row['guid'] as String,
     };
     final handOver = _db.prepare('update episodes set guid = ? where podcast_id = ? and guid = ?');
     final added = <int>[];
+    // Of two the feed lists from one source, the first stays.
     final insert = _db.prepare('''
       insert into episodes (podcast_id, guid, title, description, published_at, duration_ms, audio_url, audio_type,
-        audio_bytes, artwork_url, link, season, number, played, added_at)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        audio_bytes, artwork_url, link, season, number, played, added_at, source_url)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict do nothing
+      returning id
     ''');
     final update = _db.prepare('''
-      update episodes set title = ?, description = ?, published_at = ?, duration_ms = coalesce(?, duration_ms),
-        audio_url = ?, audio_type = ?, audio_bytes = ?, artwork_url = ?, link = ?, season = ?, number = ?
+      update or ignore episodes set title = ?, description = ?, published_at = ?, duration_ms = coalesce(?, duration_ms),
+        audio_url = ?, audio_type = ?, audio_bytes = ?, artwork_url = ?, link = ?, season = ?, number = ?,
+        source_url = ?
       where podcast_id = ? and guid = ?
     ''');
     _db.execute('begin');
     try {
       for (final (i, e) in sorted.indexed) {
+        final source = keyed ? _sourceOf(link: e.link) : null;
         if (!known.contains(e.guid)) {
-          if (streaming[canonicalSourceUrl(e.link ?? '')] case final was?) {
+          if (bySource[source] case final was?) {
             handOver.execute([e.guid, podcast, was]);
-            known.add(e.guid);
+            known
+              ..remove(was)
+              ..add(e.guid);
+            bySource[source!] = e.guid;
           }
         }
         if (known.contains(e.guid)) {
           update.execute([
             e.title, e.description, e.publishedAt?.millisecondsSinceEpoch, e.duration?.inMilliseconds, e.audioUrl,
-            e.audioType, e.audioBytes, e.artworkUrl, e.link, e.season, e.number, podcast, e.guid,
+            e.audioType, e.audioBytes, e.artworkUrl, e.link, e.season, e.number, source, podcast, e.guid,
           ]);
           continue;
         }
-        insert.execute([
+        final rows = insert.select([
           podcast, e.guid, e.title, e.description, e.publishedAt?.millisecondsSinceEpoch, e.duration?.inMilliseconds,
           e.audioUrl, e.audioType, e.audioBytes, e.artworkUrl, e.link, e.season, e.number,
-          playedBefore != null && i >= playedBefore ? 1 : 0, now,
+          playedBefore != null && i >= playedBefore ? 1 : 0, now, source,
         ]);
-        added.add(_db.lastInsertRowId);
+        if (rows.firstOrNull case final row?) {
+          added.add(row['id'] as int);
+          known.add(e.guid);
+          if (source != null) bySource[source] = e.guid;
+        }
       }
       _db.execute('commit');
     } catch (_) {
@@ -777,12 +874,12 @@ final class Library extends ChangeNotifier {
     ''', [url, title, channel, description, artworkUrl, url, now, now, follow ? 1 : 0]);
     final id = _db.select('select id from podcasts where feed_url = ?', [url]).first['id'] as int;
     _db.execute('''
-      insert into episodes (podcast_id, guid, title, description, published_at, duration_ms, artwork_url, link, youtube_id, added_at)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      insert into episodes (podcast_id, guid, title, description, published_at, duration_ms, artwork_url, link, youtube_id, added_at, source_url)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict (podcast_id, guid) do update set
         description = case when episodes.description = '' then excluded.description else episodes.description end,
         published_at = coalesce(episodes.published_at, excluded.published_at)
-    ''', [id, 'yt:$videoId', title, description, publishedAt?.millisecondsSinceEpoch, duration?.inMilliseconds, artworkUrl, url, videoId, now]);
+    ''', [id, 'yt:$videoId', title, description, publishedAt?.millisecondsSinceEpoch, duration?.inMilliseconds, artworkUrl, url, videoId, now, url]);
     _changed();
     return podcast(id)!;
   }
@@ -838,16 +935,15 @@ final class Library extends ChangeNotifier {
       for (final (i, v) in videos.indexed.toList().reversed) {
         final url = _watchUrl(v.id);
         // A video the show has already, uploaded to its ListenJar feed
-        // under the feed's guid, is the same episode.
-        if (_db.select('select 1 from episodes where podcast_id = ? and link = ?', [podcast, url]).isNotEmpty) continue;
+        // under the feed's guid, is the same episode: one per source.
         final rows = _db.select('''
-          insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at)
-          values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-          on conflict (podcast_id, guid) do nothing
+          insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at, source_url)
+          values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          on conflict do nothing
           returning id
         ''', [
           podcast, 'yt:${v.id}', v.title, dated ? now : null, v.seconds == null ? null : v.seconds! * 1000, url, v.id,
-          !dated && i >= _newestCount ? 1 : 0, now,
+          !dated && i >= _newestCount ? 1 : 0, now, url,
         ]);
         if (rows.isNotEmpty) added.add(rows.first['id'] as int);
       }
@@ -878,15 +974,17 @@ final class Library extends ChangeNotifier {
 
   /// Adds the YouTube video [videoId] to [podcast], a podcast of the
   /// listener's own, dated [addedAt] (now by default), as ListenJar Cloud
-  /// dates what is added to one there. Null when it's already there.
+  /// dates what is added to one there. Null when it's already there,
+  /// streaming or uploaded to its ListenJar feed: one episode per source.
   PodcastEpisode? addOwnVideo(int podcast, {required String videoId, required String title, Duration? duration, DateTime? addedAt}) {
     final now = DateTime.now().millisecondsSinceEpoch;
+    final url = _watchUrl(videoId);
     final rows = _db.select('''
-      insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, added_at)
-      values (?, ?, ?, ?, ?, ?, ?, ?)
-      on conflict (podcast_id, guid) do nothing
+      insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, added_at, source_url)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      on conflict do nothing
       returning id
-    ''', [podcast, 'yt:$videoId', title, addedAt?.millisecondsSinceEpoch ?? now, duration?.inMilliseconds, _watchUrl(videoId), videoId, now]);
+    ''', [podcast, 'yt:$videoId', title, addedAt?.millisecondsSinceEpoch ?? now, duration?.inMilliseconds, url, videoId, now, url]);
     _changed();
     return rows.isEmpty ? null : episode(rows.first['id'] as int);
   }
@@ -961,8 +1059,8 @@ final class Library extends ChangeNotifier {
         // As a playlist's refresh and an own podcast's videos have them, so
         // neither adds it again.
         _db.execute(
-          'update episodes set guid = ?, youtube_id = ?, link = ?, audio_url = null, audio_type = null, audio_bytes = null where id = ?',
-          ['yt:$id', id, _watchUrl(id), e.id],
+          'update episodes set guid = ?, youtube_id = ?, link = ?, source_url = ?, audio_url = null, audio_type = null, audio_bytes = null where id = ?',
+          ['yt:$id', id, _watchUrl(id), _watchUrl(id), e.id],
         );
       }
       _db.execute('commit');
@@ -993,8 +1091,21 @@ final class Library extends ChangeNotifier {
   }
 
   /// Links [podcast] to the listener's ListenJar feed, or unlinks it.
+  /// A show linked to a feed is made of sources from then on, its episodes
+  /// keyed by theirs ([_keySources]).
   void setCloudFeed(int podcast, String? feedId) {
-    _db.execute('update podcasts set cloud_feed_id = ? where id = ?', [feedId, podcast]);
+    _db.execute('begin');
+    try {
+      _db.execute('update podcasts set cloud_feed_id = ? where id = ?', [feedId, podcast]);
+      final files = feedId == null ? const <String>[] : _keySources(_db, podcast);
+      _db.execute('commit');
+      for (final path in files) {
+        File('${directory.path}/$path').delete().ignore();
+      }
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    }
     _changed();
   }
 

@@ -376,9 +376,11 @@ Future<OwnPodcast?> addVideoToOwnPodcast(BuildContext context, String url, OwnPo
     final feed = target.feed ?? s.feeds.feeds.where((f) => f.id == target.show!.cloudFeedId).firstOrNull;
     final show = target.show ?? s.library.podcasts.where((p) => p.cloudFeedId == feed!.id).firstOrNull;
     final episode = show == null ? null : await s.podcasts.addToOwn(show, link, token, title: title, duration: duration);
-    if (feed != null) await s.feeds.addVideo(feed, link.url, token);
+    // One episode per video: one it has already, it has in its feed too.
+    final there = show != null && episode == null;
+    if (feed != null && !there) await s.feeds.addVideo(feed, link.url, token);
     if (context.mounted) {
-      tell(context, show != null && episode == null ? 'It’s already in “${target.title}”.' : 'Added to “${target.title}”.');
+      tell(context, there ? 'It’s already in “${target.title}”.' : 'Added to “${target.title}”.');
     }
     added = true;
   });
