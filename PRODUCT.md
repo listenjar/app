@@ -19,19 +19,20 @@ refresh, download for offline, Up Next, playback speed, a sleep timer, and the s
 controls and headphone buttons. All of it is free and needs no account. A single YouTube video
 plays here as an episode of its own, also free.
 
-On a paid plan, a YouTube playlist or channel can be followed, and the plan at the time says
-where it starts, never the listener: on ListenJar Local, on this device, where its videos list
-as episodes and stream from YouTube as they play, with nothing downloaded or uploaded; on a plan
-with storage, in ListenJar Cloud. A podcast of the listener's own, YouTube videos they gather
-under their own name and artwork, starts where the plan says too. Neither moves on the
-listener's say; if the plan loses its storage, what was in the Cloud stays on this device. The
-Library shows which each one is.
+A paid plan adds YouTube playlists and channels, followed like any show, and podcasts of the
+listener's own: YouTube videos they gather under their own name and artwork. Every one starts on
+the device, in the app's library: its videos list at once and stream from YouTube. The plans
+differ in what happens next:
 
-Signed in, it is also the syncing side of ListenJar Cloud: YouTube playlists, channels and custom
-podcasts become feeds ListenJar hosts. The app downloads what the listener added on their own
-device, uploads it to ListenJar, and deletes the local files once the upload is done; the feeds
-then play here like any podcast, and in any other podcast app. The paid plans pay for that
-storage.
+- ListenJar Local: that's all. The library stays on this device.
+- ListenJar Cloud (10 GB or 100 GB): the same device sync also uploads each video's audio to
+  ListenJar, and the show becomes a classic podcast: an RSS feed ListenJar hosts, for any podcast
+  app. From there the library syncs between the listener's devices the classic way, RSS shows,
+  places and Up Next, with nothing in it about YouTube. The plan's storage pays for the audio.
+
+Shows, episodes and stored audio all match by source URL, rewritten to one canonical form per
+source (YouTube's short and mobile links become its watch link), so another source than YouTube
+fits the same way. The listener never picks where a show lives: the plan says.
 
 Success: a listener who came for a podcast player stays for one that is quiet, fast and
 complete; a Cloud listener sets their feeds up once and forgets them.

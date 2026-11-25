@@ -205,7 +205,7 @@ final class SyncEngine {
         .createEpisode(
           feedId: feed.id,
           body: NewEpisode(
-            videoId: link.id,
+            sourceUrl: link.url,
             title: _clip(media.title, 500),
             description: _clip(media.description, 10000),
             publishedAt: media.publishedAt.toIso8601String(),
@@ -309,25 +309,30 @@ final class SyncEngine {
         ? Snapshot(
             title: feed.title,
             artworkUrl: feed.imageUrl,
-            videos: [for (final e in inventory) Video(id: e.videoId, title: e.title, durationSeconds: e.durationSeconds)],
+            videos: [
+              for (final e in inventory)
+                if (parseYouTubeLink(e.sourceUrl) case YouTubeLink(kind: SourceKind.video, :final id))
+                  Video(id: id, title: e.title, durationSeconds: e.durationSeconds),
+            ],
             canRemove: false,
           )
         : await youtube.snapshot(source, token);
-      final present = {for (final v in snapshot.videos) v.id};
+      // Episodes match by source URL, whatever the source.
+      final present = {for (final v in snapshot.videos) youTubeVideoUrl(v.id)};
 
       if (snapshot.canRemove) {
         for (final episode in inventory) {
-          if (present.contains(episode.videoId)) continue;
+          if (present.contains(episode.sourceUrl)) continue;
           await _retry(() => _api.deleteEpisode(feedId: feed.id, episodeId: episode.id).asCancellable(token), token);
-          await journal.forget(_key(feed, episode.videoId));
+          await journal.forget(_key(feed, episode.sourceUrl));
         }
       }
 
-      final uploaded = {for (final e in inventory) if (e.uploadedAt != null) e.videoId};
+      final uploaded = {for (final e in inventory) if (e.uploadedAt != null) e.sourceUrl};
       status.episodes = uploaded.where(present.contains).length + (snapshot.canRemove ? 0 : uploaded.difference(present).length);
       final additions = [
         for (final video in snapshot.videos)
-          if (!uploaded.contains(video.id) && journal.skipped(_key(feed, video.id), _skipMemory) == null) video,
+          if (!uploaded.contains(youTubeVideoUrl(video.id)) && journal.skipped(_key(feed, youTubeVideoUrl(video.id)), _skipMemory) == null) video,
       ];
       status
         ..phase = additions.isEmpty ? FeedPhase.upToDate : FeedPhase.syncing
@@ -395,7 +400,7 @@ final class SyncEngine {
     FeedSync status,
     CancellationToken token,
   ) async {
-    final key = _key(feed, video.id);
+    final key = _key(feed, youTubeVideoUrl(video.id));
     void show(String stage, [int done = 0, int total = 0]) {
       status
         ..current = video.title
@@ -419,7 +424,7 @@ final class SyncEngine {
           .createEpisode(
             feedId: feed.id,
             body: NewEpisode(
-              videoId: video.id,
+              sourceUrl: youTubeVideoUrl(video.id),
               title: _clip(media.title, 500),
               description: _clip(media.description, 10000),
               publishedAt: media.publishedAt.toIso8601String(),
@@ -489,7 +494,8 @@ final class SyncEngine {
   }
 }
 
-String _key(Feed feed, String videoId) => '${feed.id}/$videoId';
+/// What the journal remembers of the episode of [feed] made from [sourceUrl].
+String _key(Feed feed, String sourceUrl) => '${feed.id}/$sourceUrl';
 
 String _clip(String text, int max) => text.length <= max ? text : text.substring(0, max);
 

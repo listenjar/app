@@ -3,8 +3,11 @@
 // searchable by title and show notes. Opened
 // from the library, search or an episode; a show looked at from search is
 // in the library unfollowed until the listener follows it. A podcast of the
-// listener's own on this device is filled from Search instead, and moves to
-// ListenJar Cloud from here.
+// listener's own is filled from Search instead. Every show opens here,
+// whatever the plan: on one with ListenJar Cloud, a YouTube playlist,
+// channel or podcast of the listener's own is a classic podcast ListenJar
+// hosts, and its page also says how its uploads go (hosted_feed.dart). One
+// with nothing uploaded yet isn't in the library, and opens by its feed.
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
@@ -12,20 +15,29 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'artwork.dart' show artworkExtensions;
-import 'cloud.dart' show CloudShowPage, failure;
+import 'artwork.dart' show UnreadablePicture, artworkExtensions;
+import 'backend/api.dart' show Feed, Plan, SourceKind;
+import 'cloud.dart' show ListenIn, StorageFullNotice, failure, removeCloudFeed;
+import 'hosted_feed.dart';
 import 'library.dart';
 import 'menu.dart';
 import 'plans.dart' show showPlans;
-import 'shared_links.dart' show LocalOwn;
+import 'shared_links.dart' show OwnPodcast;
+import 'sync.dart' show PlanLimit;
 import 'shell.dart';
 import 'sleeve.dart';
 import 'theme.dart' as brand;
 import 'ui.dart';
 
 final class ShowPage extends StatefulWidget {
-  const ShowPage({super.key, required this.podcastId});
-  final int podcastId;
+  const ShowPage({super.key, required int this.podcastId}) : feedId = null;
+
+  /// A ListenJar feed with nothing uploaded yet, so no show in the library:
+  /// its page, which becomes the show's once the first upload lands.
+  const ShowPage.feed({super.key, required String this.feedId}) : podcastId = null;
+
+  final int? podcastId;
+  final String? feedId;
 
   @override
   State<ShowPage> createState() => _ShowPageState();
@@ -42,8 +54,24 @@ final class _ShowPageState extends State<ShowPage> {
   static const _page = 100;
   int _shown = _page;
 
+  /// The show's ListenJar feed's episodes, while it has one.
+  FeedEpisodes? _hosted;
+
+  FeedEpisodes? _hostedFor(Feed? feed) {
+    if (feed?.id == _hosted?.feedId) return _hosted;
+    _hosted?.dispose();
+    final s = Services.of(context);
+    _hosted = feed == null ? null : (FeedEpisodes(feedId: feed.id, feeds: s.feeds, podcasts: s.podcasts)..addListener(_changed));
+    return _hosted;
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _hosted?.dispose();
     _query.dispose();
     _queryFocus.dispose();
     super.dispose();
@@ -55,46 +83,67 @@ final class _ShowPageState extends State<ShowPage> {
     return ListenableBuilder(
       listenable: Listenable.merge([s.library, s.podcasts, s.feeds, s.account]),
       builder: (context, _) {
-        final show = s.library.podcast(widget.podcastId);
-        // One of the listener's ListenJar feeds: its page says how each
-        // episode syncs, and manages the feed.
-        if (show?.cloudFeedId case final id? when s.feeds.feeds.any((f) => f.id == id)) return CloudShowPage(feedId: id);
-        if (show == null) {
+        final show = switch (widget.podcastId) {
+          final id? => s.library.podcast(id),
+          null => s.library.podcasts.where((p) => p.cloudFeedId == widget.feedId).firstOrNull,
+        };
+        final feedId = show?.cloudFeedId ?? widget.feedId;
+        final feed = feedId == null ? null : s.feeds.feeds.where((f) => f.id == feedId).firstOrNull;
+        final hosted = _hostedFor(feed);
+        if (show == null && feed == null) {
           return PageBody(children: [
             backButton(context, 'Back'),
             const EmptyState(title: 'This show is gone', body: 'It was removed from your library.'),
           ]);
         }
-        final episodes = s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst, query: _query.text);
+        final own = feed != null ? feed.source == null : show!.isOwn;
+        final episodes = show == null
+          ? const <PodcastEpisode>[]
+          : s.library.episodes(show.id, filter: _filter, oldestFirst: _oldestFirst, query: _query.text);
         final query = _query.text.trim();
-        final videos = show.fromYouTube || episodes.any((e) => e.videoId != null);
+        final videos = feed != null || show!.fromYouTube || episodes.any((e) => e.videoId != null);
         const p = brand.Palette.ink;
-        return Shown(show: show.id, child: SleevePage(
-          artwork: show.artworkUrl,
-          title: show.title,
-          info: _info(context, show),
+        final page = SleevePage(
+          artwork: feed?.imageUrl ?? show?.artworkUrl,
+          title: show?.title ?? feed!.title,
+          info: _info(context, show, feed, own),
           actions: [
-            if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
+            if (show?.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
               Builder(
                 builder: (context) => GlassIcon(
                   icon: Icons.adaptive.share,
                   tooltip: 'Share',
                   size: 21,
-                  onPressed: () => unawaited(shareLink(context, link, title: show.title)),
+                  onPressed: () => unawaited(shareLink(context, link, title: show!.title)),
                 ),
               ),
-            glassMore(_menu(context, show)),
+            glassMore(_menu(context, show, feed, own)),
           ],
           children: [
-            if (s.podcasts.paused(show)) ...[
+            if (feed != null && s.feeds.storageFull) ...[const StorageFullNotice(), const SizedBox(height: 16)],
+            if (show != null && s.podcasts.paused(show)) ...[
               _paused(context),
               const SizedBox(height: 16),
-            ] else if (show.refreshError case final error?) ...[
+            ] else if (show?.refreshError case final error?) ...[
               problem(context, 'Couldn’t refresh this show: $error'),
               const SizedBox(height: 16),
             ],
-            _toolbar(context, show, episodes),
-            const SizedBox(height: 12),
+            if (hosted?.loadError case final error?) ...[
+              problem(context, failure('Couldn’t load the uploads on their way', error, other: 'Try again in a minute.'), error),
+              const SizedBox(height: 16),
+            ],
+            if (hosted?.removeError case final error?) ...[
+              problem(context, failure('Couldn’t remove that episode', error, other: 'Try again.'), error),
+              const SizedBox(height: 16),
+            ],
+            if (hosted != null && hosted.onTheWay.isNotEmpty) ...[
+              OnTheWay(episodes: hosted, own: own),
+              const SizedBox(height: 28),
+            ],
+            if (show != null) ...[
+              _toolbar(context, show, episodes),
+              const SizedBox(height: 12),
+            ],
             if (episodes.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 24),
@@ -105,7 +154,8 @@ final class _ShowPageState extends State<ShowPage> {
                       EpisodeFilter.unplayed => 'No unplayed episodes match “$query”.',
                       EpisodeFilter.downloaded => 'No downloaded episodes match “$query”.',
                     },
-                    EpisodeFilter.all when show.isOwn => 'Add videos: search YouTube or paste a video link, and it’s added here.',
+                    EpisodeFilter.all when own => 'Add videos: search YouTube or paste a video link, and it’s added here.',
+                    EpisodeFilter.all when show == null => 'Its videos arrive here as they upload.',
                     EpisodeFilter.all => 'This feed lists no episodes with audio.',
                     EpisodeFilter.unplayed => 'You’ve heard every episode.',
                     EpisodeFilter.downloaded => 'No episodes downloaded.',
@@ -119,10 +169,16 @@ final class _ShowPageState extends State<ShowPage> {
                   EpisodeRow(
                     episode: e,
                     thumbnail: videos,
-                    trailing: !show.isOwn ? null : IconButton(
+                    trailing: !own ? null : IconButton(
                       tooltip: 'Remove episode',
                       visualDensity: VisualDensity.compact,
-                      onPressed: () => s.library.removeEpisode(e.id),
+                      onPressed: switch (hosted) {
+                        null => () => s.library.removeEpisode(e.id),
+                        final h => switch (h.of(e)) {
+                          final up? when !h.removing.contains(up.id) => () => unawaited(h.remove(up)),
+                          _ => null,
+                        },
+                      },
                       icon: Icon(Icons.close_rounded, size: 17, color: p.fgFaint),
                     ),
                   ),
@@ -140,7 +196,8 @@ final class _ShowPageState extends State<ShowPage> {
                 ),
             ],
           ],
-        ));
+        );
+        return show == null ? page : Shown(show: show.id, child: page);
       },
     );
   }
@@ -175,42 +232,48 @@ final class _ShowPageState extends State<ShowPage> {
 
   /// What sits under the hero (beside the artwork on a wide window): who
   /// makes it, its title, play and the show's actions, and what it's about.
-  Widget _info(BuildContext context, Podcast show) {
+  /// [feed] is the show's ListenJar feed, when it has one; [show] is null
+  /// for a feed with nothing uploaded yet.
+  Widget _info(BuildContext context, Podcast? show, Feed? feed, bool own) {
     final s = Services.of(context);
     final text = Theme.of(context).textTheme;
     final wide = MediaQuery.sizeOf(context).width >= wideWidth;
-    final about = show.description.replaceAll(RegExp(r'<[^>]+>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-    final newest = s.library.episodes(show.id, filter: EpisodeFilter.unplayed).firstOrNull
-      ?? s.library.episodes(show.id).firstOrNull;
-    final refreshing = s.podcasts.refreshing.contains(show.id);
-    final note = switch (show) {
-      Podcast(cloudFeedId: _?) => 'One of your ListenJar feeds. Sign in, in Settings, to manage it.',
-      _ when show.kind == PodcastKind.youtubeFeed || show.isOwn =>
-        'On this device: its videos stream from YouTube as you play them, and nothing is downloaded or uploaded. '
-          'Only this app has it.',
+    final about = (show?.description ?? '').replaceAll(RegExp(r'<[^>]+>'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+    final newest = show == null
+      ? null
+      : s.library.episodes(show.id, filter: EpisodeFilter.unplayed).firstOrNull ?? s.library.episodes(show.id).firstOrNull;
+    final refreshing = show != null && s.podcasts.refreshing.contains(show.id);
+    // Signed out, a ListenJar feed's show stays and plays, but the feed
+    // isn't there to manage.
+    final note = show?.cloudFeedId != null && feed == null ? 'One of your ListenJar feeds. Sign in, in Settings, to manage it.' : null;
+    final author = own ? 'Podcast of your own' : show?.author ?? '';
+    final video = switch (feed?.source) {
+      final source? when source.kind == SourceKind.video && s.account.user?.plan == Plan.paid => source.url,
       _ => null,
     };
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      if (show.author.isNotEmpty || show.isOwn) ...[
+      if (author.isNotEmpty) ...[
         Text(
-          show.isOwn ? 'Podcast of your own' : show.author,
+          author,
           style: text.bodyMedium!.copyWith(color: brand.snowSoft, fontSize: 14, fontWeight: FontWeight.w600, height: 1.3),
         ),
         const SizedBox(height: 6),
       ],
       Text(
-        show.title,
+        show?.title ?? feed!.title,
         style: text.headlineMedium!.copyWith(color: brand.snow, fontSize: wide ? 40 : 28, height: wide ? 1.08 : 1.1),
       ),
       const SizedBox(height: 20),
       Wrap(spacing: 10, runSpacing: 10, crossAxisAlignment: WrapCrossAlignment.center, children: [
         if (newest != null) PlayPill(episode: newest),
-        if (show.isOwn)
+        if (own)
           SleeveCircle(
             icon: Icons.add_rounded,
             tooltip: 'Add videos',
-            onPressed: () => Navigation.of(context).openSearch(youtube: true, into: LocalOwn(show).id),
+            onPressed: () => Navigation.of(context).openSearch(youtube: true, into: feed?.id ?? OwnPodcast.show(show!).id),
           )
+        else if (show == null)
+          const SizedBox.shrink()
         else if (show.followed)
           SleeveCircle(
             icon: Icons.check_rounded,
@@ -223,14 +286,20 @@ final class _ShowPageState extends State<ShowPage> {
             tooltip: show.isYouTube ? 'Add to Library' : 'Follow',
             onPressed: () => s.podcasts.followShow(show),
           ),
-        if (show.refreshes)
+        if (show?.refreshes ?? false)
           SleeveCircle(
             icon: Icons.refresh_rounded,
             tooltip: 'Check for new episodes',
             busy: refreshing,
-            onPressed: () => unawaited(s.podcasts.refresh(show)),
+            onPressed: () => unawaited(s.podcasts.refresh(show!)),
           ),
+        if (feed != null) ListenIn(feed: feed, onInk: true),
+        if (feed != null && video != null) AddToPodcast(feed: feed, url: video),
       ]),
+      if (feed != null) ...[
+        const SizedBox(height: 16),
+        FeedSyncLine(feed: feed),
+      ],
       if (note != null) ...[
         const SizedBox(height: 16),
         ConstrainedBox(
@@ -265,10 +334,11 @@ final class _ShowPageState extends State<ShowPage> {
   }
 
   /// The show's more menu, in the glass cluster at the top right.
-  List<Widget> _menu(BuildContext context, Podcast show) {
+  List<Widget> _menu(BuildContext context, Podcast? show, Feed? feed, bool own) {
     final s = Services.of(context);
+    final link = feed?.source?.url ?? show?.link;
     return [
-      if (show.followed && show.kind == PodcastKind.rss) ...[
+      if (show != null && show.followed && show.kind == PodcastKind.rss) ...[
         MenuEntry(
           'Download new episodes',
           checked: show.autoDownload,
@@ -276,21 +346,35 @@ final class _ShowPageState extends State<ShowPage> {
         ),
         const MenuDivider(),
       ],
-      if (show.isOwn) ...[
-        MenuEntry('Change artwork', icon: Icons.image_outlined, onPressed: () => unawaited(_pickArtwork(context, show))),
+      if (own) ...[
+        MenuEntry('Change artwork', icon: Icons.image_outlined, onPressed: () {
+          unawaited(feed != null ? _uploadArtwork(context, feed) : _pickArtwork(context, show!));
+        }),
         const MenuDivider(),
       ],
-      MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
-      MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
-        s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
-      }),
-      if (show.kind == PodcastKind.rss)
-        MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
-      if (show.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
-        MenuEntry(show.fromYouTube ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
+      if (show != null) ...[
+        MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
+        MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
+          s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
+        }),
+        if (show.kind == PodcastKind.rss)
+          MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
+      ],
+      if (link case final link? when !own && (Uri.tryParse(link)?.hasScheme ?? false))
+        MenuEntry(feed?.source != null || (show?.fromYouTube ?? false) ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
           unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
         }),
-      if (show.followed && show.cloudFeedId == null) ...[
+      if (feed != null)
+        MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: s.feeds.loading ? null : s.feeds.syncNow),
+      if (feed != null) ...[
+        const MenuDivider(),
+        MenuEntry(
+          own ? 'Delete podcast' : 'Remove',
+          icon: Icons.remove_circle_outline_rounded,
+          danger: true,
+          onPressed: () => unawaited(removeCloudFeed(context, feed)),
+        ),
+      ] else if (show != null && show.followed && show.cloudFeedId == null) ...[
         const MenuDivider(),
         MenuEntry(
           show.isOwn ? 'Delete podcast' : show.isYouTube ? 'Remove from Library' : 'Unfollow',
@@ -461,8 +545,29 @@ final class _ShowPageState extends State<ShowPage> {
     if (navigator.canPop()) navigator.pop();
   }
 
+  /// Makes a picture the listener picks the artwork of [feed], a podcast of
+  /// their own ListenJar hosts: uploaded, and in the feed once it's up.
+  Future<void> _uploadArtwork(BuildContext context, Feed feed) async {
+    final feeds = Services.of(context).feeds;
+    final file = await openFile(acceptedTypeGroups: const [
+      XTypeGroup(label: 'Pictures', extensions: artworkExtensions, uniformTypeIdentifiers: ['public.image']),
+    ]);
+    if (file == null || !context.mounted) return;
+    tell(context, 'Uploading the artwork…');
+    try {
+      await feeds.setArtwork(feed, await file.readAsBytes());
+      if (context.mounted) tell(context, 'Artwork changed.');
+    } catch (e) {
+      if (!context.mounted) return;
+      tell(context, switch (e) {
+        UnreadablePicture() || PlanLimit() => '$e',
+        _ => failure('Couldn’t change the artwork', e, other: 'Try another picture.'),
+      });
+    }
+  }
+
   /// Makes a picture the listener picks the artwork of [show], a podcast of
-  /// their own on this device.
+  /// their own in the library.
   Future<void> _pickArtwork(BuildContext context, Podcast show) async {
     final podcasts = Services.of(context).podcasts;
     final file = await openFile(acceptedTypeGroups: const [

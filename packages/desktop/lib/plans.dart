@@ -701,22 +701,10 @@ final class _PlanTileState extends State<_PlanTile> {
 }
 
 /// Asks for a podcast of the listener's own's name; null if they cancel.
-/// A podcast of the listener's own to make: its name, and whether it lives
-/// in ListenJar Cloud or on this device.
-typedef NewPodcast = ({String title, bool cloud});
-
 /// Asks what to call a new podcast of the listener's own, offering [name].
-/// Where it lives is the plan's to say ([startsInCloud]), not a question.
-Future<NewPodcast?> askNewPodcast(BuildContext context, {String? name}) async {
-  final s = Services.of(context);
-  final title = await showDialog<String>(context: context, builder: (context) => _NewPodcastSheet(name: name));
-  return title == null ? null : (title: title, cloud: startsInCloud(s));
-}
-
-/// Whether something new of the listener's (a playlist or channel they
-/// follow, a podcast they make) starts in ListenJar Cloud: on a plan that
-/// has it. Otherwise on this device.
-bool startsInCloud(Services s) => hasCloud(s.account.user);
+/// Whether ListenJar also hosts it is the plan's to say, not a question.
+Future<String?> askNewPodcast(BuildContext context, {String? name}) =>
+  showDialog<String>(context: context, builder: (context) => _NewPodcastSheet(name: name));
 
 final class _NewPodcastSheet extends StatefulWidget {
   const _NewPodcastSheet({this.name});

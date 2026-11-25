@@ -273,18 +273,16 @@ final class _SearchPageState extends State<SearchPage> {
     }
   }, 'Couldn’t play that video');
 
-  /// Playlists and channels take a plan, and the plan says where they go:
-  /// ListenJar Cloud on a plan that has it, else this device, where they
-  /// stream.
+  /// Playlists and channels take a plan; they stream here at once, and on
+  /// a plan with ListenJar Cloud they upload too.
   Future<void> _follow(String url, String title) async {
     final link = parseYouTubeLink(url);
     if (link == null) return;
     await _run(url, () => followYouTube(context, link, '“$title”'), 'Couldn’t follow that');
   }
 
-  /// Adds the video to [own], a podcast of the listener's own on this
-  /// device or in ListenJar Cloud, or to a new one they make. Signed out or
-  /// on Free, says what that takes instead.
+  /// Adds the video to [own], a podcast of the listener's own, or to a new
+  /// one they make. Signed out or on Free, says what that takes instead.
   Future<void> _addToPodcast(YouTubeLink link, OwnPodcast? own, {String? title}) async {
     await _run(link.url, () async {
       final target = await addVideoToOwnPodcast(context, link.url, own, title: title);
@@ -569,7 +567,7 @@ final class _SearchPageState extends State<SearchPage> {
           const MenuDivider(),
           const MenuHeader('Add to a podcast of yours'),
           for (final o in own)
-            MenuEntry(o.title, icon: o.icon, onPressed: () => unawaited(_addToPodcast(link, o, title: r?.title))),
+            MenuEntry(o.title, icon: Icons.podcasts_rounded, onPressed: () => unawaited(_addToPodcast(link, o, title: r?.title))),
           MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_addToPodcast(link, null, title: r?.title))),
         ],
         builder: (context, menu) => IconButton(
@@ -607,8 +605,8 @@ final class _SearchPageState extends State<SearchPage> {
     ]);
   }
 
-  /// Follow: where the plan keeps new podcasts, the Cloud on a plan that
-  /// has it, else this device; its page can move it. Without a plan, says
+  /// Follow: it lists here at once, and uploads on a plan with ListenJar
+  /// Cloud. Without a plan, says
   /// what following takes.
   Widget _followButton(BuildContext context, String url, String title) => TextButton.icon(
     style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
@@ -637,9 +635,9 @@ final class _SearchPageState extends State<SearchPage> {
             Text(
               video
                 ? 'Plays here as an episode of its own. Free, on this device.'
-                : startsInCloud(Services.of(context))
-                  ? 'Follow it in ListenJar Cloud, for any podcast app.'
-                  : 'Follow it on this device. Its videos stream from YouTube.',
+                : hasCloud(Services.of(context).account.user)
+                  ? 'Follow it here, and as a podcast for any podcast app.'
+                  : 'Follow it. Its videos stream from YouTube.',
               style: text.bodySmall!.copyWith(color: brand.fgSoft),
             ),
           ]),

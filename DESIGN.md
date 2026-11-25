@@ -258,7 +258,8 @@ Wide windows only. A glass panel 216px wide, inset 10px from the window's top, l
 - **Tone follows the page.** Light glass (white at 72%, the paper hairline, a faint shadow) over paper; dark glass (ink at 45%, the ink hairline, a deeper shadow) over a sleeve, so its glow shows through. Pages say which they are while in front (`Shown` in shell.dart); the panel crossfades over 300ms (instantly with reduced motion).
 - **Top.** On macOS the window buttons sit in the panel's top, which is also the window's handle; elsewhere a 20px mark. No large logo.
 - **Rows.** 34px rows with 10px corners: an 18px icon (or the show's artwork at 22px with 5px corners) and a 13.5px label in the primary colour, weight 500. The row in front gets a soft held pill (ink at 7% on paper, white at 12% on ink), weight 600 and a periwinkle icon; hover is half that pill. No white tile, no shadow. Counts (Up Next, Downloads) are plain tabular numbers in the faint colour, never a chip.
-- **Following.** Under the sections, a quiet "Following" label and every followed show by its artwork, which opens the show. The show in front takes the pill, and its section keeps only its periwinkle icon, so one row is ever held.
+- **Following.** Under the sections, a quiet "Following" label and every followed show by its artwork. A row opens its show the way a section opens: in place of the page in front, on no stack, so there's no Back and no section stays lit. A show opened from inside a section (Library's grid, search) is that section's page: it takes the pill, and its section keeps only its periwinkle icon, so one row is ever held.
+- **Rows replace, never stack.** Picking a sidebar row swaps the middle of the window; it never pushes a page. Picking the row already in front goes back to its first page.
 - **Settings** is the panel's last row.
 
 ### Paper pages

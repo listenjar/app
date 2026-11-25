@@ -43,17 +43,28 @@ final class Account extends ChangeNotifier {
   CancellationToken timeout() => _life.merge(TimeoutCancellationToken(callTimeout));
 
   /// Reads the token a previous run kept and asks the API whose it is,
-  /// dropping it if it no longer works.
+  /// dropping it if it no longer works. When the API can't say (offline, or
+  /// failing), the listener stays who they were last time, with their plan,
+  /// and the API is asked again until it answers.
   Future<void> restore() async {
     restoring = true;
     notifyListeners();
     try {
       _token = await loadToken();
       if (_token != null) {
-        user = await currentUser(api, timeout());
-        if (user == null) {
-          _token = null;
-          await forgetToken();
+        try {
+          user = await currentUser(api, timeout());
+          if (user == null) {
+            await _forget();
+          } else {
+            await keepUser(user!);
+          }
+        } on CancelledException {
+          rethrow;
+        } catch (e) {
+          _log.info('Couldn’t ask the API who is signed in; going on as last time', e);
+          user = await loadKeptUser();
+          _retrySoon();
         }
       }
     } on CancelledException {
@@ -65,22 +76,59 @@ final class Account extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// While the API hasn't answered since the start, asks again, less often
+  /// each time.
+  Timer? _retry;
+  var _retryIn = _firstRetry;
+  static const _firstRetry = Duration(seconds: 5);
+  static const _lastRetry = Duration(minutes: 5);
+
+  bool get _retrying => _retry != null;
+
+  void _stopRetrying() {
+    _retry?.cancel();
+    _retry = null;
+    _retryIn = _firstRetry;
+  }
+
+  void _retrySoon() {
+    _retry?.cancel();
+    _retry = Timer(_retryIn, () => unawaited(refresh(force: true)));
+    _retryIn = _retryIn * 2 > _lastRetry ? _lastRetry : _retryIn * 2;
+  }
+
+  /// Signed out here: the token was revoked or expired.
+  Future<void> _forget() async {
+    _stopRetrying();
+    _token = null;
+    user = null;
+    await forgetToken();
+  }
+
   /// Asks the API for the listener again: their plan and storage change
   /// on Stripe (checkout, the billing portal) and as uploads land. At most every few
-  /// seconds unless [force]d; failures keep what is shown.
+  /// seconds unless [force]d; failures keep what is shown, and a token the
+  /// API no longer takes signs out.
   Future<void> refresh({bool force = false}) async {
     final now = DateTime.now();
     if (_token == null || _refreshing || (!force && now.difference(_refreshed) < _refreshEvery)) return;
     _refreshing = true;
     _refreshed = now;
+    final asked = _token;
     try {
-      final fresh = await api.getMe().asCancellable(timeout());
-      if (_token != null) {
+      final fresh = await currentUser(api, timeout());
+      if (_token != asked) return;
+      _stopRetrying();
+      if (fresh == null) {
+        await _forget();
+      } else {
         user = fresh;
-        notifyListeners();
+        await keepUser(fresh);
       }
+      notifyListeners();
     } catch (_) {
       // Shown as it was; the next refresh tries again.
+      if (_retrying && _token == asked) _retrySoon();
     } finally {
       _refreshing = false;
     }
@@ -116,6 +164,7 @@ final class Account extends ChangeNotifier {
     try {
       final session = await how(_life.merge(token));
       await saveToken(session.token);
+      await keepUser(session.user);
       _token = session.token;
       user = session.user;
     } on CancelledException {
@@ -134,6 +183,7 @@ final class Account extends ChangeNotifier {
   /// Revokes the token and forgets it, even when the API is unreachable.
   Future<void> signOut() async {
     final revoked = _token;
+    _stopRetrying();
     user = null;
     _token = null;
     notifyListeners();
@@ -179,6 +229,7 @@ final class Account extends ChangeNotifier {
   @override
   void dispose() {
     _life.cancel();
+    _retry?.cancel();
     _http.close();
     super.dispose();
   }

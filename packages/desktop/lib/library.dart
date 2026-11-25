@@ -279,7 +279,7 @@ typedef StoredDownload = ({PodcastEpisode episode, DateTime? playedAt, DateTime 
 /// How a show's episodes are listed.
 enum EpisodeFilter { all, unplayed, downloaded }
 
-const _schema = 5;
+const _schema = 6;
 
 
 final class Library extends ChangeNotifier {
@@ -405,6 +405,21 @@ final class Library extends ChangeNotifier {
           pending integer not null default 0,
           primary key (kind, show, item)
         ) strict, without rowid;
+      ''');
+    }
+    if (version < 6) {
+      // The library syncs the classic way, RSS shows only: what the base
+      // held of YouTube shows and of the videos of podcasts of the
+      // listener's own goes, as it went from the Cloud.
+      db.execute('''
+        delete from sync_base where kind = 'listen' and show in (
+          select show from sync_base where kind = 'show'
+            and json_extract(data, '\$.showKind') in ('youtube', 'youtubeFeed', 'own')
+        );
+        delete from sync_base where kind = 'video'
+          or (kind = 'show' and json_extract(data, '\$.showKind') in ('youtube', 'youtubeFeed', 'own'))
+          or (kind = 'show' and data is null
+            and (show like 'https://www.youtube.com/%' or show not like 'http%'));
       ''');
     }
     db.execute('pragma user_version = $_schema');
@@ -639,13 +654,24 @@ final class Library extends ChangeNotifier {
   static const _newestCount = 3;
 
   /// Stores [episodes] of [podcast] and updates the ones it has; returns the
-  /// ids of the new ones.
+  /// ids of the new ones. In a show ListenJar hosts, an episode still
+  /// streaming from its source becomes the feed's once its upload is in
+  /// it, matched by source URL ([canonicalSourceUrl]): the same row, so
+  /// where the listener is, its download and its place in Up Next stay.
   List<int> _store(int podcast, List<ParsedEpisode> episodes, {int? playedBefore}) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final sorted = [...episodes]..sort((a, b) => (b.publishedAt ?? DateTime(0)).compareTo(a.publishedAt ?? DateTime(0)));
     final known = {
       for (final row in _db.select('select guid from episodes where podcast_id = ?', [podcast])) row['guid'] as String,
     };
+    final streaming = <String, String>{
+      for (final row in _db.select('''
+        select e.guid, e.link from episodes e join podcasts p on p.id = e.podcast_id
+        where e.podcast_id = ? and p.cloud_feed_id is not null and e.audio_url is null and e.link is not null
+      ''', [podcast]))
+        canonicalSourceUrl(row['link'] as String): row['guid'] as String,
+    };
+    final handOver = _db.prepare('update episodes set guid = ? where podcast_id = ? and guid = ?');
     final added = <int>[];
     final insert = _db.prepare('''
       insert into episodes (podcast_id, guid, title, description, published_at, duration_ms, audio_url, audio_type,
@@ -660,6 +686,12 @@ final class Library extends ChangeNotifier {
     _db.execute('begin');
     try {
       for (final (i, e) in sorted.indexed) {
+        if (!known.contains(e.guid)) {
+          if (streaming[canonicalSourceUrl(e.link ?? '')] case final was?) {
+            handOver.execute([e.guid, podcast, was]);
+            known.add(e.guid);
+          }
+        }
         if (known.contains(e.guid)) {
           update.execute([
             e.title, e.description, e.publishedAt?.millisecondsSinceEpoch, e.duration?.inMilliseconds, e.audioUrl,
@@ -681,6 +713,7 @@ final class Library extends ChangeNotifier {
     } finally {
       insert.close();
       update.close();
+      handOver.close();
     }
     return added;
   }
@@ -804,6 +837,9 @@ final class Library extends ChangeNotifier {
       // Oldest first, so the newest gets the highest id and lists first.
       for (final (i, v) in videos.indexed.toList().reversed) {
         final url = _watchUrl(v.id);
+        // A video the show has already, uploaded to its ListenJar feed
+        // under the feed's guid, is the same episode.
+        if (_db.select('select 1 from episodes where podcast_id = ? and link = ?', [podcast, url]).isNotEmpty) continue;
         final rows = _db.select('''
           insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at)
           values (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -826,20 +862,16 @@ final class Library extends ChangeNotifier {
 
   // Podcasts of the listener's own on this device.
 
-  /// Makes a podcast of the listener's own on this device, empty until they
-  /// add videos.
-  /// [feedUrl] and [subscribedAt] are another device's, when ListenJar
-  /// Cloud brings one made there (library_sync.dart).
-  Podcast createOwn(String title, {String? artworkUrl, String? feedUrl, DateTime? subscribedAt}) {
+  /// Makes a podcast of the listener's own, empty until they add videos. On
+  /// a plan with ListenJar Cloud it becomes a feed ListenJar hosts
+  /// ([hostedAt]).
+  Podcast createOwn(String title) {
     final now = DateTime.now();
     final rows = _db.select('''
-      insert into podcasts (feed_url, kind, title, author, artwork_url, subscribed_at, refreshed_at, followed)
-      values (?, 'own', ?, 'Podcast of your own', ?, ?, ?, 1)
+      insert into podcasts (feed_url, kind, title, author, subscribed_at, refreshed_at, followed)
+      values (?, 'own', ?, 'Podcast of your own', ?, ?, 1)
       returning id
-    ''', [
-      feedUrl ?? 'listenjar:own:${now.microsecondsSinceEpoch}', title, artworkUrl,
-      (subscribedAt ?? now).millisecondsSinceEpoch, now.millisecondsSinceEpoch,
-    ]);
+    ''', ['listenjar:own:${now.microsecondsSinceEpoch}', title, now.millisecondsSinceEpoch, now.millisecondsSinceEpoch]);
     _changed();
     return podcast(rows.first['id'] as int)!;
   }
@@ -868,6 +900,32 @@ final class Library extends ChangeNotifier {
   void setArtwork(int podcast, String? artworkUrl) {
     _db.execute('update podcasts set artwork_url = ? where id = ?', [artworkUrl, podcast]);
     _changed();
+  }
+
+  /// [podcast], a YouTube playlist or channel or a podcast of the
+  /// listener's own, now that ListenJar hosts it at [rssUrl]: a classic
+  /// podcast of that feed from here on, which syncs between the listener's
+  /// devices like any other (library_sync.dart). Its episodes stay as they
+  /// are, streaming from their source, until the feed's refresh hands each
+  /// its upload ([_store]). False, and nothing changes, when the feed is
+  /// followed here already, as another show.
+  bool hostedAt(int podcast, String rssUrl) {
+    final there = podcastByUrl(rssUrl);
+    if (there != null && there.id != podcast && there.followed) return false;
+    _db.execute('begin');
+    try {
+      if (there != null && there.id != podcast) _db.execute('delete from podcasts where id = ?', [there.id]);
+      _db.execute(
+        "update podcasts set kind = 'rss', feed_url = ?, etag = null, last_modified = null, refresh_error = null where id = ?",
+        [rssUrl, podcast],
+      );
+      _db.execute('commit');
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    }
+    _changed();
+    return true;
   }
 
   /// Keeps [podcast], a ListenJar Cloud show whose feed is gone, on this

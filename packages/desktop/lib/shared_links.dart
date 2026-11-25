@@ -33,7 +33,7 @@ import 'library.dart' show Podcast;
 import 'config.dart' show appScheme;
 import 'links.dart';
 import 'log.dart';
-import 'plans.dart' show askNewPodcast, hasCloud, isPaid, showPlans, startsInCloud;
+import 'plans.dart' show askNewPodcast, hasCloud, isPaid, showPlans;
 import 'shared_links.g.dart' as android;
 import 'shared_links_ios.g.dart' as ios;
 import 'sync.dart' show PlanLimit;
@@ -193,7 +193,7 @@ Future<void> openWebLink(BuildContext context, Uri url) async {
   await _guard(here, () async {
     tell(here, 'Opening the video…');
     final episode = await s.podcasts.youtubeVideo(youtube, TimeoutCancellationToken(const Duration(minutes: 1)));
-    if (!root.mounted) return;
+    if (!here.mounted) return;
     ScaffoldMessenger.maybeOf(here)?.hideCurrentSnackBar();
     navigation.openShow(episode.podcastId);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -241,35 +241,18 @@ Future<void> openApplePodcasts(BuildContext context, ApplePodcastsLink link, Uri
 }
 
 /// Follows the YouTube playlist or channel [link], called [what], with a
-/// plan: on this device, where its videos stream from YouTube as they play
-/// and nothing downloads, or in ListenJar Cloud, which uploads them for any
-/// podcast app. [cloud] says which; null goes where the plan keeps new
-/// podcasts ([startsInCloud]): the Cloud on a plan that has it.
-/// Its page can move it later.
-Future<void> followYouTube(BuildContext context, YouTubeLink link, String what, {bool? cloud}) async {
+/// plan: its videos list here and stream from YouTube at once. On a plan
+/// with ListenJar Cloud this device then uploads them too, and it becomes a
+/// podcast for any podcast app (cloud_shows.dart).
+Future<void> followYouTube(BuildContext context, YouTubeLink link, String what) async {
   if (!await mayFollowInCloud(context, what) || !context.mounted) return;
   final s = Services.of(context);
-  if (cloud ?? startsInCloud(s)) return addToCloud(context, link.url);
   final navigation = Navigation.of(context);
   await _guard(context, () async {
     tell(context, 'Listing its videos…');
     final show = await s.podcasts.followYouTube(link, TimeoutCancellationToken(const Duration(minutes: 3)));
     navigation.openShow(show.id);
-    if (context.mounted) tell(context, 'Following “${show.title}” on this device. Its videos stream from YouTube.');
-  });
-}
-
-/// Adds [url] to ListenJar Cloud as a feed of its own, and opens it in the
-/// Library. Without the Cloud, offers the plans that have it.
-Future<void> addToCloud(BuildContext context, String url) async {
-  if (!await mayUseCloud(context, 'Follow it in ListenJar Cloud') || !context.mounted) return;
-  await _guard(context, () async {
-  final s = Services.of(context);
-  final navigation = Navigation.of(context);
-  tell(context, 'Adding it to ListenJar Cloud…');
-  final feed = await s.feeds.add(url, CancellationToken().merge(TimeoutCancellationToken(const Duration(minutes: 2))));
-  navigation.openFeed(feed.id);
-  if (context.mounted) tell(context, '“${feed.title}” is now a ListenJar feed. Its episodes arrive as this device syncs them.');
+    if (context.mounted) tell(context, 'Following “${show.title}”.');
   });
 }
 
@@ -330,46 +313,29 @@ Future<bool> mayMakePodcast(BuildContext context) async {
 /// A podcast of the listener's own: on this device, where its videos
 /// stream from YouTube, or in ListenJar Cloud, which uploads them for any
 /// podcast app. Where the videos they pick can go.
-sealed class OwnPodcast {
-  const OwnPodcast();
+/// A podcast of the listener's own: a show in the library, or, made on a
+/// plan with ListenJar Cloud, a feed ListenJar hosts. Which one is the
+/// plan's business; it lists, opens and fills the same either way.
+final class OwnPodcast {
+  const OwnPodcast.show(Podcast this.show) : feed = null;
+  const OwnPodcast.feed(Feed this.feed) : show = null;
+  final Podcast? show;
+  final Feed? feed;
 
   /// Its id for [Navigation.openSearch]'s `into`.
-  String get id;
-  String get title;
-
-  /// Where it is: this device or the Cloud.
-  IconData get icon => switch (this) {
-    LocalOwn() => brand.thisDevice,
-    CloudOwn() => Icons.cloud_outlined,
-  };
+  String get id => feed?.id ?? 'local:${show!.id}';
+  String get title => feed?.title ?? show!.title;
 }
 
-final class CloudOwn extends OwnPodcast {
-  const CloudOwn(this.feed);
-  final Feed feed;
-
-  @override
-  String get id => feed.id;
-  @override
-  String get title => feed.title;
-}
-
-final class LocalOwn extends OwnPodcast {
-  const LocalOwn(this.show);
-  final Podcast show;
-
-  @override
-  String get id => 'local:${show.id}';
-  @override
-  String get title => show.title;
-}
-
-/// The listener's podcasts of their own, those on this device first.
+/// The listener's podcasts of their own: those here, then those ListenJar
+/// hosts that aren't one of them on its way up.
 List<OwnPodcast> ownPodcasts(BuildContext context) {
   final s = Services.of(context);
+  final here = [for (final p in s.library.podcasts) if (p.isOwn) p];
+  final linked = {for (final p in here) ?p.cloudFeedId};
   return [
-    for (final p in s.library.podcasts) if (p.isOwn) LocalOwn(p),
-    for (final f in s.feeds.own) CloudOwn(f),
+    for (final p in here) OwnPodcast.show(p),
+    for (final f in s.feeds.own) if (!linked.contains(f.id)) OwnPodcast.feed(f),
   ];
 }
 
@@ -377,20 +343,14 @@ List<OwnPodcast> ownPodcasts(BuildContext context) {
 OwnPodcast? ownPodcast(BuildContext context, String id) => ownPodcasts(context).where((o) => o.id == id).firstOrNull;
 
 /// Makes a podcast of the listener's own, asking its name, offered as
-/// [name]; it lives where the plan says ([startsInCloud]). Null when they
-/// cancel or it fails, which it says.
+/// [name]. It starts here; on a plan with ListenJar Cloud it becomes a
+/// feed ListenJar hosts too (cloud_shows.dart). Null when they cancel or
+/// it fails, which it says.
 Future<OwnPodcast?> newOwnPodcast(BuildContext context, {String? name}) async {
   if (!await mayMakePodcast(context) || !context.mounted) return null;
-  final asked = await askNewPodcast(context, name: name);
-  if (asked == null || !context.mounted) return null;
-  final s = Services.of(context);
-  if (asked.cloud && !await mayUseCloud(context, 'Podcasts of your own in ListenJar Cloud')) return null;
-  if (!context.mounted) return null;
-  OwnPodcast? made;
-  await _guard(context, () async {
-    made = asked.cloud ? CloudOwn(await s.feeds.create(asked.title)) : LocalOwn(s.library.createOwn(asked.title));
-  });
-  return made;
+  final title = await askNewPodcast(context, name: name);
+  if (title == null || !context.mounted) return null;
+  return OwnPodcast.show(Services.of(context).library.createOwn(title));
 }
 
 /// Adds the YouTube video at [url] to [own], a podcast of the listener's
@@ -405,19 +365,20 @@ Future<OwnPodcast?> addVideoToOwnPodcast(BuildContext context, String url, OwnPo
   final target = own ?? await newOwnPodcast(context, name: title);
   if (target == null || !context.mounted) return null;
   // One of theirs in the Cloud from when the plan had it.
-  if (target is CloudOwn && !await mayUseCloud(context, 'Add to “${target.title}” in ListenJar Cloud')) return null;
+  if (target.feed != null && !await mayUseCloud(context, 'Add to “${target.title}”')) return null;
   if (!context.mounted) return null;
   final s = Services.of(context);
   final token = TimeoutCancellationToken(const Duration(minutes: 2));
   var added = false;
   await _guard(context, () async {
-    switch (target) {
-      case CloudOwn(:final feed):
-        await s.feeds.addVideo(feed, link.url, token);
-        if (context.mounted) tell(context, 'Added to “${feed.title}”. It uploads from this device.');
-      case LocalOwn(:final show):
-        final episode = await s.podcasts.addToOwn(show, link, token, title: title, duration: duration);
-        if (context.mounted) tell(context, episode == null ? 'It’s already in “${show.title}”.' : 'Added to “${show.title}”.');
+    // Here first, streaming at once; then in its ListenJar feed, if it has
+    // one, which uploads it.
+    final feed = target.feed ?? s.feeds.feeds.where((f) => f.id == target.show!.cloudFeedId).firstOrNull;
+    final show = target.show ?? s.library.podcasts.where((p) => p.cloudFeedId == feed!.id).firstOrNull;
+    final episode = show == null ? null : await s.podcasts.addToOwn(show, link, token, title: title, duration: duration);
+    if (feed != null) await s.feeds.addVideo(feed, link.url, token);
+    if (context.mounted) {
+      tell(context, show != null && episode == null ? 'It’s already in “${target.title}”.' : 'Added to “${target.title}”.');
     }
     added = true;
   });

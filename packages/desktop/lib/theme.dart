@@ -348,9 +348,3 @@ Widget panel({required Widget child, double padding = 28}) => DecoratedBox(
   ),
   child: Padding(padding: EdgeInsets.all(padding), child: child),
 );
-
-/// “This device”, as what it is: a phone, a tablet or a computer.
-IconData get thisDevice => switch (defaultTargetPlatform) {
-  TargetPlatform.iOS || TargetPlatform.android => Icons.smartphone_rounded,
-  _ => Icons.laptop_mac_rounded,
-};

@@ -1,11 +1,12 @@
-// The listener's whole library, the same on each of their devices, on a
-// ListenJar Cloud plan (10 GB, 100 GB): every show they follow, classic RSS
-// podcasts as well as YouTube playlists, channels, videos and podcasts of
-// their own on a device; where they are in each episode; and Up Next.
-// ListenJar Cloud feeds (feeds.dart) sync on their own and are left out,
-// though where the listener is in their episodes comes along. Downloads and
+// The listener's library, the same on each of their devices, on a
+// ListenJar Cloud plan (10 GB, 100 GB): a classic podcast library. Every RSS
+// show they follow, where they are in each episode, and Up Next, by feed
+// URL and episode guid. Nothing here is YouTube's: a YouTube playlist,
+// channel or podcast of the listener's own joins once ListenJar hosts it
+// and it is an RSS show like any other (cloud_shows.dart); until then, and
+// for a single video, it stays on the device it was made on. Downloads and
 // settings stay each device's. None of it counts against the plan's
-// storage, which is YouTube audio only.
+// storage, which is uploaded audio only.
 //
 // A three-way merge, with no change log: `sync_base` (library.dart) holds
 // each record as the Cloud and this device last agreed on it. A pass
@@ -15,10 +16,9 @@
 //    becomes the base, `pending` until the library has it; one both changed
 //    goes to the newer change, by when the listener played, followed or
 //    added it here, and a change here otherwise.
-// 2. applies what is pending: follows and lets go of shows, adds and removes
-//    the videos of podcasts of the listener's own, puts where they are on
-//    episodes that are here (the rest wait for their show's next refresh),
-//    and lays out Up Next.
+// 2. applies what is pending: follows and lets go of shows, puts where they
+//    are on episodes that are here (the rest wait for their show's next
+//    refresh), and lays out Up Next.
 // 3. pushes what differs from the base (pushLibrary), which becomes the
 //    base.
 //
@@ -38,7 +38,6 @@ import 'package:sqlite3/sqlite3.dart';
 import 'account.dart';
 import 'backend/api.dart';
 import 'library.dart';
-import 'links.dart';
 import 'podcasts.dart';
 
 final _log = Logger('library sync');
@@ -268,12 +267,9 @@ final class LibrarySync extends ChangeNotifier {
   Future<void> _applyPending() async {
     _applying = true;
     try {
-      // Shows first: videos and episodes go in them.
+      // Shows first: episodes are in them.
       for (final (key, base) in _pendingOf(LibraryKind.show)) {
         if (await _applyShow(key.$2, base.json)) _settled(key);
-      }
-      for (final (key, base) in _pendingOf(LibraryKind.video)) {
-        if (_applyVideo(key.$2, key.$3, base.json)) _settled(key);
       }
       _applyListens();
       for (final (key, base) in _pendingOf(LibraryKind.queue)) {
@@ -285,65 +281,21 @@ final class LibrarySync extends ChangeNotifier {
     }
   }
 
-  /// Follows the show at [url] as [json] has it, or lets it go without;
-  /// false to try again on a later pass.
+  /// Follows the RSS show at [url], or lets it go when [json] is gone;
+  /// false to try again on a later pass. A show ListenJar hosts comes and
+  /// goes with its feed ([Podcasts.followCloud]), and a show here that
+  /// isn't RSS yet is this device's alone.
   Future<bool> _applyShow(String url, String? json) async {
     final here = _library.podcastByUrl(url);
-    final followed = here != null && here.followed && here.cloudFeedId == null;
+    if (here != null && (here.cloudFeedId != null || here.kind != PodcastKind.rss)) return true;
     if (json == null) {
-      // A ListenJar Cloud show, or not here: nothing to let go.
-      if (followed) await _podcasts.unfollow(here);
+      if (here != null && here.followed) await _podcasts.unfollow(here);
       return true;
     }
-    final data = LibraryData.fromJson(jsonDecode(json));
-    if (here?.cloudFeedId != null) return true;
-    if (followed) {
-      // Renamed on another device.
-      if (here.isOwn && data.title != null && data.title != here.title) {
-        _db.execute('update podcasts set title = ? where id = ?', [data.title, here.id]);
-      }
-      return true;
-    }
+    if (here != null && here.followed) return true;
     if (_failed[url] case final at? when DateTime.now().difference(at) < _retryFollow) return false;
     try {
-      final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 2)));
-      switch (data.showKind) {
-        case LibraryDataShowKind.rss || null:
-          await _podcasts.follow(Uri.parse(url), token);
-        case LibraryDataShowKind.youtubeFeed:
-          // Waits for the account to say the plan.
-          if (_podcasts.paid() != true) return false;
-          final link = parseYouTubeLink(url) ?? (throw FormatException('Not a YouTube link: $url'));
-          await _podcasts.followYouTube(link, token);
-        case LibraryDataShowKind.youtube:
-          final link = parseYouTubeLink(url);
-          if (link == null || link.kind != SourceKind.video) throw FormatException('Not a YouTube video: $url');
-          _library.addYouTubeVideo(
-            videoId: link.id,
-            title: data.title ?? 'YouTube video',
-            channel: data.author ?? 'YouTube',
-            artworkUrl: data.artworkUrl,
-            duration: switch (data.durationMs) {
-              final ms? => Duration(milliseconds: ms),
-              null => null,
-            },
-            description: '',
-            publishedAt: null,
-          );
-        case LibraryDataShowKind.own:
-          if (here != null) _library.follow(here.id);
-          if (here == null) {
-            _library.createOwn(
-              data.title ?? 'Podcast of your own',
-              artworkUrl: data.artworkUrl,
-              feedUrl: url,
-              subscribedAt: switch (data.subscribedAt) {
-                final ms? => DateTime.fromMillisecondsSinceEpoch(ms),
-                null => null,
-              },
-            );
-          }
-      }
+      await _podcasts.follow(Uri.parse(url), _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
       _failed.remove(url);
       return true;
     } on CancelledException {
@@ -355,35 +307,6 @@ final class LibrarySync extends ChangeNotifier {
       _failed[url] = DateTime.now();
       return false;
     }
-  }
-
-  /// Adds the video [videoId] to [show], a podcast of the listener's own,
-  /// as [json] has it, or takes it out without; false while the show
-  /// isn't here.
-  bool _applyVideo(String show, String videoId, String? json) {
-    final own = _library.podcastByUrl(show);
-    if (own == null || !own.isOwn) return json == null;
-    final here = _library.episodes(own.id).where((e) => e.youtubeId == videoId).firstOrNull;
-    if (json == null) {
-      if (here != null) _library.removeEpisode(here.id);
-      return true;
-    }
-    if (here != null) return true;
-    final data = LibraryData.fromJson(jsonDecode(json));
-    _library.addOwnVideo(
-      own.id,
-      videoId: videoId,
-      title: data.title ?? videoId,
-      duration: switch (data.durationMs) {
-        final ms? => Duration(milliseconds: ms),
-        null => null,
-      },
-      addedAt: switch (data.addedAt) {
-        final ms? => DateTime.fromMillisecondsSinceEpoch(ms),
-        null => null,
-      },
-    );
-    return true;
   }
 
   /// Where the listener is, on the episodes here that other devices moved,
@@ -481,58 +404,44 @@ final class LibrarySync extends ChangeNotifier {
 
   Map<_Key, _Local> _snapshot() => {
     ..._showsHere(),
-    ..._videosHere(),
     ..._listensHere(),
     (LibraryKind.queue, '', ''): ?_queueHere(),
   };
 
   static _Local _local(LibraryKind kind, LibraryData data, int? changedAt) => (sig: _sig(kind, data)!, data: data, changedAt: changedAt);
 
-  /// Shows the listener follows, but for ListenJar Cloud feeds.
+  /// The RSS shows the listener follows, those ListenJar hosts among them.
   Map<_Key, _Local> _showsHere() => {
     for (final r in _db.select('''
-      select p.feed_url, p.kind, p.title, p.author, p.artwork_url, p.subscribed_at,
-        (select max(e.duration_ms) from episodes e where e.podcast_id = p.id) as duration_ms
-      from podcasts p where p.followed = 1 and p.cloud_feed_id is null
+      select p.feed_url, p.title, p.author, p.artwork_url, p.subscribed_at
+      from podcasts p where p.followed = 1 and p.kind = 'rss'
     '''))
       (LibraryKind.show, r['feed_url'] as String, ''): _local(
         LibraryKind.show,
         LibraryData(
-          showKind: LibraryDataShowKind.fromJson(r['kind']),
           title: r['title'] as String,
           author: r['author'] as String,
-          // A picture kept on this device stays here.
           artworkUrl: switch (r['artwork_url']) {
             final String url when url.startsWith('https://') || url.startsWith('http://') => url,
             _ => null,
           },
           subscribedAt: r['subscribed_at'] as int,
-          durationMs: r['kind'] == 'youtube' ? r['duration_ms'] as int? : null,
         ),
         r['subscribed_at'] as int,
       ),
   };
 
-  /// The videos of the listener's own podcasts here.
-  Map<_Key, _Local> _videosHere() => {
-    for (final r in _db.select('''
-      select p.feed_url, e.youtube_id, e.title, e.duration_ms, e.published_at, e.added_at
-      from episodes e join podcasts p on p.id = e.podcast_id
-      where p.kind = 'own' and p.followed = 1 and e.youtube_id is not null
-    '''))
-      (LibraryKind.video, r['feed_url'] as String, r['youtube_id'] as String): _local(
-        LibraryKind.video,
-        LibraryData(title: r['title'] as String, durationMs: r['duration_ms'] as int?, addedAt: r['published_at'] as int?),
-        r['added_at'] as int,
-      ),
-  };
+  /// The episodes of RSS shows, in [alias], by the guid their feed gives
+  /// them: not one still streaming from its source until its upload is in
+  /// its show's feed ([Library.hostedAt]).
+  static String _classic(String alias) => "$alias.kind = 'rss' and e.audio_url is not null";
 
   /// Where the listener is in each episode they played or marked.
   Map<_Key, _Local> _listensHere() => {
     for (final r in _db.select('''
       select p.feed_url, e.guid, e.position_ms, e.played, e.played_at
       from episodes e join podcasts p on p.id = e.podcast_id
-      where e.played_at is not null
+      where e.played_at is not null and ${_classic('p')}
     '''))
       (LibraryKind.listen, r['feed_url'] as String, r['guid'] as String): _local(
         LibraryKind.listen,
@@ -545,7 +454,7 @@ final class LibrarySync extends ChangeNotifier {
     final refs = [
       for (final r in _db.select('''
         select p.feed_url, e.guid from queue q join episodes e on e.id = q.episode_id
-        join podcasts p on p.id = e.podcast_id order by q.position
+        join podcasts p on p.id = e.podcast_id where ${_classic('p')} order by q.position
       '''))
         LibraryEpisodeRef(show: r['feed_url'] as String, item: r['guid'] as String),
     ];
@@ -606,14 +515,12 @@ final class LibrarySync extends ChangeNotifier {
 
   /// What two devices must agree on for a record to be the same on both,
   /// and nothing else, so that what each reads from its own feeds (titles,
-  /// artwork, when it followed) doesn't bounce between them: a show's
-  /// kind, and the name of a podcast of the listener's own; that a video
-  /// is in one; where the listener is in an episode; and Up Next. Null for
+  /// artwork, when it followed) doesn't bounce between them: that a show is
+  /// followed; where the listener is in an episode; and Up Next. Null for
   /// none, as an empty Up Next is.
   static String? _sig(LibraryKind kind, LibraryData? data) => switch ((kind, data)) {
     (_, null) => null,
-    (LibraryKind.show, final d?) => jsonEncode([d.showKind?.value, if (d.showKind == LibraryDataShowKind.own) d.title]),
-    (LibraryKind.video, _) => 'in',
+    (LibraryKind.show, _) => 'followed',
     (LibraryKind.listen, final d?) => jsonEncode([d.positionMs ?? 0, d.played ?? false]),
     (LibraryKind.queue, LibraryData(queue: null || [])) => null,
     (LibraryKind.queue, final d?) => jsonEncode([for (final r in d.queue!) [r.show, r.item]]),

@@ -6,7 +6,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
-import 'package:flutter/physics.dart' show Simulation;
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -172,6 +171,9 @@ final class _SwipePhysics extends ScrollPhysics {
       // Up: the page goes back up, then the content scrolls.
       offset -= route.swipe(offset, position);
     }
+    // The page took all of it: nothing left for the content, and the
+    // platform's physics only take a move.
+    if (offset == 0) return 0;
     return super.applyPhysicsToUserOffset(position, offset);
   }
 
@@ -1425,7 +1427,7 @@ final class _AddVideoButtonState extends State<_AddVideoButton> {
             for (final own in ownPodcasts(context))
               MenuEntry(
                 own.title,
-                icon: own.icon,
+                icon: Icons.podcasts_rounded,
                 onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, own, title: e.title))),
               ),
             MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null, title: e.title)))),

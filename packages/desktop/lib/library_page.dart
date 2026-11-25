@@ -1,7 +1,7 @@
 // Library: every show the listener follows, as covers, newest episode
 // first, with how many episodes they haven't heard. The listener's
 // ListenJar Cloud feeds are shows here like any other, each saying what its
-// sync is doing, and one not yet published waits here too (cloud.dart).
+// sync is doing, and one with nothing uploaded yet waits here too.
 // Podcasts of the listener's own start here; OPML in and out lives here,
 // and on phones the way to Downloads and Settings.
 import 'dart:async';
@@ -133,12 +133,7 @@ final class LibraryPage extends StatelessWidget {
       artworkUrl: show.artworkUrl,
       size: size,
       count: unplayed,
-      badge: switch (show) {
-        Podcast(kind: PodcastKind.youtubeFeed || PodcastKind.own) => (brand.thisDevice, 'On this device'),
-        Podcast(cloudFeedId: _?) => (Icons.cloud_outlined, 'Cloud'),
-        Podcast(isYouTube: true) => (Icons.smart_display_outlined, 'YouTube'),
-        _ => null,
-      },
+      badge: show.isYouTube ? (Icons.smart_display_outlined, 'YouTube') : null,
       semantics: '${show.title}${unplayed.isEmpty ? '' : ', $unplayed unplayed'}${status == null ? '' : ', ${status.$1}'}',
       subtitle: switch (status) {
         final st? => st,
@@ -150,9 +145,7 @@ final class LibraryPage extends StatelessWidget {
         _ => (' ', false),
       },
       fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
-      onTap: () => feed == null
-        ? Navigation.of(context).openShow(show.id)
-        : Navigator.of(context).push(pageRoute(CloudShowPage(feedId: feed.id))),
+      onTap: () => Navigation.of(context).openShow(show.id),
     );
   }
 
@@ -166,11 +159,11 @@ final class LibraryPage extends StatelessWidget {
       artworkUrl: feed.imageUrl,
       size: size,
       count: '',
-      badge: (Icons.cloud_outlined, 'Cloud'),
+      badge: null,
       semantics: '${feed.title}, ${status.$1}',
       subtitle: status,
       fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
-      onTap: () => Navigator.of(context).push(pageRoute(CloudShowPage(feedId: feed.id))),
+      onTap: () => Navigation.of(context).openFeed(feed.id),
     );
   }
 }
@@ -195,8 +188,7 @@ final class _ShowTile extends StatefulWidget {
   /// Unplayed episodes, or empty.
   final String count;
 
-  /// Where the show lives, when it isn't a plain podcast feed: a YouTube
-  /// playlist or channel on this device, a ListenJar Cloud feed, a video.
+  /// A single YouTube video kept as a show, rather than a podcast.
   final (IconData, String)? badge;
   final String semantics;
 

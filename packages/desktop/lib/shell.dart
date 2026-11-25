@@ -2,7 +2,9 @@
 // its feeds are shows in the Library (cloud.dart). Wide windows (desktop, tablets) get a sidebar; phones a bottom bar. The
 // mini player sits under every section once something is loaded and opens
 // Now Playing (now_playing.dart). Each section keeps one stack of pages, so
-// a show opened from search comes back with the search behind it.
+// a show opened from search comes back with the search behind it. A show
+// picked in the sidebar is a destination of its own, like a section: it
+// takes the middle's place rather than going on a stack.
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -14,6 +16,7 @@ import 'package:material_ui/material_ui.dart';
 import 'cloud.dart';
 import 'downloads_page.dart';
 import 'home_page.dart';
+import 'library.dart' show Library, Podcast;
 import 'library_page.dart';
 import 'marks.dart';
 import 'now_playing.dart';
@@ -84,6 +87,17 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   double _miniPlayer = 0;
   final _navigators = {for (final s in Section.values) s: GlobalKey<NavigatorState>()};
 
+  /// The show the sidebar opened, in front of every section; null while a
+  /// section shows.
+  int? _sidebarShow;
+
+  /// The sidebar show's own stack, new for each show picked.
+  var _showNavigator = GlobalKey<NavigatorState>();
+
+  /// The stack in front.
+  NavigatorState? get _front =>
+    (_sidebarShow == null ? _navigators[_section]! : _showNavigator).currentState;
+
   /// What the page in front is, for the sidebar's glass.
   final _showing = Showing();
 
@@ -101,12 +115,24 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   );
 
   late Navigation _navigation;
+  Library? _library;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _navigation = Navigation.of(context)..target = this;
+    final library = Services.of(context).library;
+    if (library != _library) {
+      _library?.removeListener(_libraryChanged);
+      _library = library..addListener(_libraryChanged);
+    }
     _lifecycle;
+  }
+
+  /// A sidebar show unfollowed leaves for the Library, where it was.
+  void _libraryChanged() {
+    final id = _sidebarShow;
+    if (id != null && _library?.podcast(id) == null) _go(Section.library);
   }
 
   @override
@@ -148,6 +174,7 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     widget.links.removeListener(_linksArrived);
     _menu.setMethodCallHandler(null);
     if (_navigation.target == this) _navigation.target = null;
+    _library?.removeListener(_libraryChanged);
     _lifecycle.dispose();
     search.dispose();
     _showing.dispose();
@@ -155,23 +182,51 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   }
 
   void _go(Section section) {
-    if (section == _section) {
+    if (section == _section && _sidebarShow == null) {
       // A second tap goes back to the section's first page; on Search it
       // also puts the caret in the field, as Apple Podcasts does.
       _navigators[section]!.currentState?.popUntil((r) => r.isFirst);
       if (section == Section.search) search.focus();
       return;
     }
-    setState(() => _section = section);
+    setState(() {
+      _section = section;
+      _sidebarShow = null;
+    });
+  }
+
+  /// Puts [show] in the middle in place of whatever was there, with nothing
+  /// behind it; picked again, it goes back to the show's own page.
+  void _goShow(Podcast show) {
+    if (show.id == _sidebarShow) {
+      _showNavigator.currentState?.popUntil((r) => r.isFirst);
+      return;
+    }
+    setState(() {
+      _sidebarShow = show.id;
+      _showNavigator = GlobalKey();
+    });
+  }
+
+  /// The sidebar show's first page: a podcast of the listener's own on
+  /// ListenJar Cloud by its feed.
+  Widget _sidebarShowPage(int id) {
+    final s = Services.of(context);
+    final feed = s.library.podcast(id)?.cloudFeedId;
+    return feed != null && s.feeds.feeds.any((f) => f.id == feed) ? ShowPage.feed(feedId: feed) : ShowPage(podcastId: id);
   }
 
   @override
   void openShow(int podcastId) {
+    if (_sidebarShow != null) {
+      _front?.push(_route(ShowPage(podcastId: podcastId)));
+      return;
+    }
     _push(_section == Section.settings ? Section.library : _section, ShowPage(podcastId: podcastId));
   }
 
   @override
-  void openFeed(String feedId) => _push(Section.library, CloudShowPage(feedId: feedId), fresh: true);
+  void openFeed(String feedId) => _push(Section.library, ShowPage.feed(feedId: feedId), fresh: true);
 
   @override
   void openSettings() => _go(Section.settings);
@@ -179,15 +234,21 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   /// Shows [section] with [page] on top; [fresh] first goes back to the
   /// section's first page.
   void _push(Section section, Widget page, {bool fresh = false}) {
-    setState(() => _section = section);
+    setState(() {
+      _section = section;
+      _sidebarShow = null;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final navigator = _navigators[section]!.currentState;
       if (fresh) navigator?.popUntil((r) => r.isFirst);
-      // iOS slides it in as its own pages do, so an edge swipe takes it
-      // back; the fade has no back gesture.
-      navigator?.push(defaultTargetPlatform == TargetPlatform.iOS ? pageRoute(page) : _page(page));
+      navigator?.push(_route(page));
     });
   }
+
+  // iOS slides a page in as its own pages do, so an edge swipe takes it
+  // back; the fade has no back gesture.
+  static Route<void> _route(Widget page) =>
+    defaultTargetPlatform == TargetPlatform.iOS ? pageRoute(page) : _page(page);
 
   @override
   void openNowPlaying() => unawaited(showNowPlaying(context));
@@ -202,7 +263,10 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   @override
   void openSearch({String? query, bool youtube = false, String? into}) {
     _navigators[Section.search]!.currentState?.popUntil((r) => r.isFirst);
-    setState(() => _section = Section.search);
+    setState(() {
+      _section = Section.search;
+      _sidebarShow = null;
+    });
     search.ask(query: query, youtube: youtube, into: into);
   }
 
@@ -232,15 +296,23 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     Section.settings => const SettingsPage(),
   };
 
-  /// Each section's stack, kept while another shows.
+  /// Each section's stack, kept while another shows, and the sidebar's
+  /// show over them all.
   Widget _stacks() => IndexedStack(
-    index: _section.index,
+    index: _sidebarShow == null ? _section.index : Section.values.length,
     children: [
       for (final section in Section.values)
         HeroControllerScope.none(
           child: Navigator(
             key: _navigators[section],
             onGenerateRoute: (_) => _page(_root(section)),
+          ),
+        ),
+      if (_sidebarShow case final show?)
+        HeroControllerScope.none(
+          child: Navigator(
+            key: _showNavigator,
+            onGenerateRoute: (_) => _page(_sidebarShowPage(show)),
           ),
         ),
     ],
@@ -255,8 +327,7 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
       bindings: {
         SingleActivator(LogicalKeyboardKey.keyF, meta: mac, control: !mac): () => openSearch(),
         SingleActivator(LogicalKeyboardKey.keyL, meta: mac, control: !mac): () => openSearch(),
-        SingleActivator(LogicalKeyboardKey.bracketLeft, meta: mac, control: !mac): () =>
-          _navigators[_section]!.currentState?.maybePop(),
+        SingleActivator(LogicalKeyboardKey.bracketLeft, meta: mac, control: !mac): () => _front?.maybePop(),
         for (final (i, section) in [Section.home, Section.library, Section.search, Section.queue, Section.downloads].indexed)
           SingleActivator(LogicalKeyboardKey(LogicalKeyboardKey.digit1.keyId + i), meta: mac, control: !mac): () => _go(section),
       },
@@ -270,9 +341,9 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
           canPop: false,
           onPopInvokedWithResult: (didPop, _) async {
             if (didPop) return;
-            final navigator = _navigators[_section]!.currentState;
+            final navigator = _front;
             if (navigator != null && await navigator.maybePop()) return;
-            if (_section != Section.home) setState(() => _section = Section.home);
+            if (_section != Section.home || _sidebarShow != null) _go(Section.home);
           },
           child: Scaffold(
             body: wide
@@ -309,7 +380,7 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
                     top: _railInset,
                     bottom: _railInset,
                     width: _railWidth,
-                    child: _Sidebar(section: _section, showing: _showing, onGo: _go),
+                    child: _Sidebar(section: _sidebarShow == null ? _section : null, showing: _showing, onGo: _go, onShow: _goShow),
                   ),
                 ])
               // No top inset here: a show's artwork runs under the status
@@ -446,10 +517,13 @@ final class _RailTone {
 }
 
 final class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.section, required this.showing, required this.onGo});
-  final Section section;
+  const _Sidebar({required this.section, required this.showing, required this.onGo, required this.onShow});
+
+  /// The section in front; null while a show the sidebar opened is.
+  final Section? section;
   final Showing showing;
   final void Function(Section) onGo;
+  final void Function(Podcast) onShow;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -499,7 +573,6 @@ final class _Sidebar extends StatelessWidget {
                 final queued = s.library.queue.length;
                 final downloading = s.library.unfinishedDownloads().length;
                 final shows = s.library.podcasts;
-                final feeds = {for (final f in s.feeds.feeds) f.id};
                 return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 8), children: [
                   for (final item in [Section.home, Section.library, Section.search, Section.queue, Section.downloads])
                     _RailItem(
@@ -530,11 +603,7 @@ final class _Sidebar extends StatelessWidget {
                         selected: show.id == showing.show,
                         icon: Artwork(url: show.artworkUrl, title: show.title, size: 22, radius: 5),
                         label: show.title,
-                        onTap: () => switch (show.cloudFeedId) {
-                          final feed? when feeds.contains(feed) => Navigation.of(context).openFeed(feed),
-                          _ when show.id == showing.show => null,
-                          _ => Navigation.of(context).openShow(show.id),
-                        },
+                        onTap: () => onShow(show),
                       ),
                   ],
                 ]);

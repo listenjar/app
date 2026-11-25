@@ -95,27 +95,55 @@ PublicApiClient apiClient(Uri api, http.Client client, String? Function() token)
 // backend, in a file in the app's support directory instead: each rebuild is
 // signed afresh, so the Keychain would ask for the login password on every
 // run to hand an item to the "new" app.
-Future<File> _debugTokenFile() async => File('${(await getApplicationSupportDirectory()).path}/$_tokenKey');
+Future<File> _debugFile(String key) async => File('${(await getApplicationSupportDirectory()).path}/$key');
 
-/// The token a previous run kept, null if there is none.
-Future<String?> loadToken() async {
-  if (!kDebugMode) return _storage.read(key: _tokenKey);
-  final file = await _debugTokenFile();
+Future<String?> _read(String key) async {
+  if (!kDebugMode) return _storage.read(key: key);
+  final file = await _debugFile(key);
   return await file.exists() ? file.readAsString() : null;
 }
 
-Future<void> saveToken(String value) async {
-  if (!kDebugMode) return _storage.write(key: _tokenKey, value: value);
-  final file = await _debugTokenFile();
+Future<void> _write(String key, String value) async {
+  if (!kDebugMode) return _storage.write(key: key, value: value);
+  final file = await _debugFile(key);
   await file.parent.create(recursive: true);
   await file.writeAsString(value, flush: true);
 }
 
-Future<void> forgetToken() async {
-  if (!kDebugMode) return _storage.delete(key: _tokenKey);
-  final file = await _debugTokenFile();
+Future<void> _delete(String key) async {
+  if (!kDebugMode) return _storage.delete(key: key);
+  final file = await _debugFile(key);
   if (await file.exists()) await file.delete();
 }
+
+/// The token a previous run kept, null if there is none.
+Future<String?> loadToken() => _read(_tokenKey);
+
+Future<void> saveToken(String value) => _write(_tokenKey, value);
+
+/// Forgets the token and who it was.
+Future<void> forgetToken() async {
+  await _delete(_tokenKey);
+  await _delete(_userKey);
+}
+
+/// Who the kept token was when the API last said, beside it: the listener
+/// and their plan, for a start while the API can't be reached.
+const _userKey = 'api-user';
+
+/// The listener the kept token was last known to be; null if none, or if
+/// what was kept no longer reads.
+Future<User?> loadKeptUser() async {
+  final json = await _read(_userKey);
+  if (json == null) return null;
+  try {
+    return User.fromJson(jsonDecode(json));
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<void> keepUser(User user) => _write(_userKey, jsonEncode(user.toJson()));
 
 /// Whose the token is: null when it no longer works.
 Future<User?> currentUser(PublicApiClient api, CancellationToken token) async {

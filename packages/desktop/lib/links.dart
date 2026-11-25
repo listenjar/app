@@ -52,6 +52,29 @@ YouTubeLink? parseYouTubeLink(String input) {
 
 YouTubeLink _video(String id) => YouTubeLink(SourceKind.video, id, 'https://www.youtube.com/watch?v=$id');
 
+/// The canonical URL of the YouTube video [id], its source URL.
+String youTubeVideoUrl(String id) => _video(id).url;
+
+/// The one spelling of a source's URL: a show's (a playlist, a channel) or
+/// an episode's (a video). Sources match by it everywhere: a show here and
+/// the ListenJar feed made of it, an episode streaming from its source and
+/// the same one uploaded, and the media bucket's key for its audio, a hash
+/// of it (apps/backend/src/media.ts). Each source rewrites its own
+/// variants statically, as YouTube's short, mobile and embed links become
+/// its watch link; any other URL loses what never tells two apart.
+String canonicalSourceUrl(String url) {
+  if (parseYouTubeLink(url) case final youtube?) return youtube.url;
+  final parsed = Uri.tryParse(url.trim());
+  if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) return url.trim();
+  final path = parsed.path.length > 1 && parsed.path.endsWith('/') ? parsed.path.substring(0, parsed.path.length - 1) : parsed.path;
+  return parsed.replace(
+    scheme: parsed.scheme == 'http' ? 'https' : parsed.scheme.toLowerCase(),
+    host: parsed.host.toLowerCase(),
+    path: path,
+    fragment: null,
+  ).removeFragment().toString();
+}
+
 String kindLabel(SourceKind kind) => switch (kind) {
   SourceKind.video => 'YouTube video',
   SourceKind.playlist => 'YouTube playlist',

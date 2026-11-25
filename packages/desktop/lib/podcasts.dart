@@ -175,15 +175,22 @@ final class Podcasts extends ChangeNotifier {
     if (!podcast.refreshes || !refreshing.add(podcast.id)) return;
     notifyListeners();
     try {
+      final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 2)));
       if (podcast.kind == PodcastKind.youtubeFeed) {
-        await _refreshYouTube(podcast, _life.merge(TimeoutCancellationToken(const Duration(minutes: 2))));
+        await _refreshYouTube(podcast.id, parseYouTubeLink(podcast.feedUrl)!, token, named: true);
         return;
       }
       final (etag, modified) = library.validators(podcast.id);
-      final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 2)));
       final fetch = await fetchFeed(_http, Uri.parse(podcast.feedUrl), token, etag: etag, lastModified: modified);
       final added = library.refreshed(podcast.id, fetch);
       if (added.isNotEmpty) await _downloads.downloadNew(added);
+      // A playlist or channel ListenJar hosts still lists here first: its
+      // new videos stream from YouTube until their uploads reach the feed.
+      if (podcast.cloudFeedId != null && paid() == true) {
+        if (parseYouTubeLink(podcast.link ?? '') case final source? when source.kind != SourceKind.video) {
+          await _refreshYouTube(podcast.id, source, token, named: false);
+        }
+      }
     } on CancelledException {
       if (!_life.isCancelled) {
         library.refreshFailed(podcast.id, podcast.kind == PodcastKind.rss ? 'The feed took too long to answer' : 'YouTube took too long to answer');
@@ -353,10 +360,10 @@ final class Podcasts extends ChangeNotifier {
     describe: (p) => 'show ${p.id}',
   );
 
-  /// Lists a followed playlist's videos again, or a channel's newest
-  /// uploads, and keeps the new ones.
-  Future<void> _refreshYouTube(Podcast podcast, CancellationToken token) async {
-    final link = parseYouTubeLink(podcast.feedUrl) ?? (throw StateError('Not a YouTube link: ${podcast.feedUrl}'));
+  /// Lists the videos of [link], a followed playlist, again, or a
+  /// channel's newest uploads, and keeps the new ones in [podcast]. A
+  /// playlist [named] by YouTube takes its name and picture from there.
+  Future<void> _refreshYouTube(int podcast, YouTubeLink link, CancellationToken token, {required bool named}) async {
     final snapshot = await (await _youtube.session(token)).snapshot(
       _sourceOf(link),
       token,
@@ -364,9 +371,9 @@ final class Podcasts extends ChangeNotifier {
     );
     // A channel's listing is its uploads playlist, named for that: it keeps
     // the name and picture it was followed with.
-    final playlist = link.kind == SourceKind.playlist;
+    final playlist = named && link.kind == SourceKind.playlist;
     library.youtubeFeedRefreshed(
-      podcast.id,
+      podcast,
       title: playlist ? snapshot.title : null,
       artworkUrl: playlist ? snapshot.artworkUrl : null,
       videos: _videos(snapshot),
@@ -387,7 +394,10 @@ final class Podcasts extends ChangeNotifier {
   // The listener's ListenJar feeds.
 
   /// Follows each of the signed-in listener's ListenJar feeds once it has an
-  /// RSS address, and lets go of ones they removed. Signed out, the shows
+  /// RSS address, and lets go of ones they removed. A playlist, channel or
+  /// podcast of their own here that the feed was made of ([CloudShows])
+  /// becomes that RSS show in place ([Library.hostedAt]); one made on
+  /// another device or the website is followed. Signed out, the shows
   /// stay: their addresses still work in any podcast app. Without a plan,
   /// a playlist, channel or podcast of their own the cleanup removed stays
   /// on this device ([keepOnDevice]); one they removed here ([removed])
@@ -395,13 +405,26 @@ final class Podcasts extends ChangeNotifier {
   Future<void> followCloud(List<Feed> feeds, {Set<String> removed = const {}}) async {
     final live = {for (final f in feeds) f.id};
     for (final show in library.podcasts.where((p) => p.cloudFeedId != null && !live.contains(p.cloudFeedId))) {
-      if (paid() == false && !removed.contains(show.cloudFeedId) && await keepOnDevice(show)) continue;
+      if (paid() == false && !removed.contains(show.cloudFeedId)) {
+        // Never hosted: it stays the show it is.
+        if (show.kind != PodcastKind.rss) {
+          library.setCloudFeed(show.id, null);
+          continue;
+        }
+        if (await keepOnDevice(show)) continue;
+      }
       await unfollow(show);
     }
     if (paid() == false) unawaited(_keepCloudArtwork());
     for (final feed in feeds) {
       final rss = feed.rssUrl;
       if (rss == null) continue;
+      final source = library.podcasts.where((p) => p.cloudFeedId == feed.id && p.kind != PodcastKind.rss).firstOrNull;
+      if (source != null && library.hostedAt(source.id, rss)) {
+        _log.info('Show ${source.id} is ListenJar feed ${feed.id} now');
+        await refresh(library.podcast(source.id)!);
+        continue;
+      }
       final known = library.podcastByUrl(rss);
       if (known != null) {
         if (known.cloudFeedId != feed.id) library.setCloudFeed(known.id, feed.id);

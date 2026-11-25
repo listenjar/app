@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
+import 'cloud_shows.dart';
 import 'backend/api.dart' show Plan;
 import 'directory.dart';
 import 'downloads.dart';
@@ -254,6 +255,8 @@ void control(AppServices? s, Map<String, String> parameters) {
 
 /// [logical] down and up, through the focus tree as a keyboard's would go.
 void _press(PhysicalKeyboardKey physical, LogicalKeyboardKey logical) {
+  // The key message handler is what still routes a key through the focus tree.
+  // ignore: deprecated_member_use
   final handler = ServicesBinding.instance.keyEventManager.keyMessageHandler ?? (throw StateError('no key handler'));
   final keyboard = HardwareKeyboard.instance;
   for (final event in <KeyEvent>[
@@ -261,6 +264,7 @@ void _press(PhysicalKeyboardKey physical, LogicalKeyboardKey logical) {
     KeyUpEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero),
   ]) {
     keyboard.handleKeyEvent(event);
+    // ignore: deprecated_member_use
     handler(KeyMessage([event], null));
   }
 }
@@ -346,44 +350,5 @@ class _AppState extends State<App> {
         ),
       ),
     );
-  }
-}
-
-/// Keeps the signed-in listener's ListenJar feeds in the library, so they
-/// play here like any podcast, and refreshes one as soon as it publishes.
-final class CloudShows {
-  CloudShows(this._account, this._feeds, this._podcasts) {
-    _feeds.addListener(_changed);
-  }
-
-  final Account _account;
-  final Feeds _feeds;
-  final Podcasts _podcasts;
-
-  /// Each feed's RSS address and episode count as last seen.
-  Map<String, (String?, int?)> _seen = const {};
-  bool _wasLoading = false;
-  bool _loaded = false;
-
-  void _changed() {
-    if (_account.user == null) {
-      _seen = const {};
-      _loaded = false;
-      return;
-    }
-    if (_wasLoading && !_feeds.loading && _feeds.feedsError == null) _loaded = true;
-    _wasLoading = _feeds.loading;
-    // Until the list has loaded, an empty one says nothing.
-    if (!_loaded && _feeds.feeds.isEmpty) return;
-    final now = {for (final f in _feeds.feeds) f.id: (f.rssUrl, f.episodeCount)};
-    if (mapEquals(now, _seen)) return;
-    final before = _seen;
-    _seen = now;
-    unawaited(_podcasts.followCloud(_feeds.feeds, removed: _feeds.removed).then((_) async {
-      for (final MapEntry(key: id, value: (_, count)) in now.entries) {
-        final was = before[id];
-        if (was != null && was.$2 != count) await _podcasts.cloudPublished(id);
-      }
-    }));
   }
 }

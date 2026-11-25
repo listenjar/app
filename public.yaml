@@ -54,12 +54,15 @@ info:
 
     Syncing: the app keeps each feed in step with its source. It lists what the
     feed has (`listEpisodes`) and adds each missing video (`createEpisode`).
-    Every video's audio is stored once, shared by every feed that has it, so
-    an episode whose video someone already uploaded is live at once. For the
+    An episode is keyed by its source, the canonical URL of what it was made
+    from (`Episode.sourceUrl`, a YouTube video's watch URL), and each source's
+    audio is stored once, shared by every feed that has it, under a key that
+    is a hash of that URL, so an episode whose source someone already
+    uploaded is live at once. For the
     rest, the app downloads the audio on the listener's computer, asks for an
     upload address (`createUpload`, a presigned S3 `PUT` straight to the R2
     media bucket), uploads, and confirms (`completeEpisode`), which puts the
-    episode in the RSS of every feed that has the video. Videos gone from a
+    episode in the RSS of every feed that has the source. Videos gone from a
     playlist or channel leave the feed through `deleteEpisode`; a podcast of
     the listener's own changes only when they add or remove videos.
 
@@ -78,21 +81,22 @@ info:
     (`createImageUpload`, then `completeImage`), from images.listenjar.com.
 
 
-    Storage: the server counts who holds each video's audio, per listener and
-    video, one for each episode of theirs that has it. Adding an episode counts
+    Storage: the server counts who holds each source's audio, per listener and
+    source, one for each episode of theirs that has it. Adding an episode counts
     it; removing an episode or a feed (`deleteEpisode`, `deleteFeed`, or a free
-    feed expiring) uncounts it. A listener's storage is every video they hold,
+    feed expiring) uncounts it. A listener's storage is every source they hold,
     once; audio nobody holds any more is deleted from the media bucket.
     Only YouTube audio the app uploads counts: classic podcasts play from
     their own publishers' servers and never use the plan's storage, nor does
     artwork or the library.
 
 
-    Library: with ListenJar Cloud, the app keeps the listener's whole library
-    the same on every device (`pullLibrary`, `pushLibrary`,
-    `watchLibrary`): every show they follow, classic RSS podcasts as well as
-    YouTube, where they are in each episode, the videos of their podcasts of
-    their own kept on a device, and Up Next. The server stores each
+    Library: with ListenJar Cloud, the app keeps the listener's library the
+    same on every device the classic way (`pullLibrary`, `pushLibrary`,
+    `watchLibrary`): the RSS shows they follow, where they are in each
+    episode, and Up Next. Nothing in it is about YouTube: a playlist, channel
+    or podcast of the listener's own joins it as the RSS feed ListenJar
+    hosts for it (`Feed.rssUrl`). The server stores each
     `LibraryRecord` as the app sends it and never reads its `data`; the
     newest `updatedAt` wins, and a removed record stays, `deleted`, so every
     device learns it went. Feeds under `/me/feeds` sync on their own.
@@ -929,13 +933,17 @@ components:
           format: uri
     Episode:
       type: object
-      required: [id, videoId, title, publishedAt, createdAt]
+      required: [id, sourceUrl, title, publishedAt, createdAt]
       properties:
         id:
           type: string
-        videoId:
+        sourceUrl:
           type: string
-          description: The YouTube video id.
+          format: uri
+          description: >-
+            What the episode was made from, its canonical URL: a YouTube
+            video's watch URL. Episodes, and the audio stored for them, are
+            keyed by it, and it is the episode's `<link>` in the RSS.
         title:
           type: string
         publishedAt:
@@ -964,11 +972,13 @@ components:
           description: The public media URL; present once uploaded.
     NewEpisode:
       type: object
-      required: [videoId, title, publishedAt]
+      required: [sourceUrl, title, publishedAt]
       properties:
-        videoId:
+        sourceUrl:
           type: string
-          pattern: "^[A-Za-z0-9_-]{11}$"
+          format: uri
+          pattern: "^https://www\\.youtube\\.com/watch\\?v=[A-Za-z0-9_-]{11}$"
+          description: The canonical URL of what the episode is made from, a YouTube video's watch URL.
         title:
           type: string
           maxLength: 500
@@ -1020,12 +1030,11 @@ components:
           format: date-time
     LibraryKind:
       type: string
-      enum: [show, listen, video, queue]
+      enum: [show, listen, queue]
       description: >-
-        `show`: a show the listener follows, its feed URL `show`. `listen`:
-        where they are in the episode `item` (its guid) of `show`. `video`:
-        the YouTube video `item` in `show`, a podcast of their own on a
-        device. `queue`: Up Next, `show` and `item` empty.
+        `show`: an RSS show the listener follows, its feed URL `show`.
+        `listen`: where they are in the episode `item` (its guid) of `show`.
+        `queue`: Up Next, `show` and `item` empty.
     LibraryRecord:
       type: object
       required: [kind, show, item, updatedAt]
@@ -1035,11 +1044,11 @@ components:
         show:
           type: string
           maxLength: 2000
-          description: The show's feed URL, or an address the app made for a podcast of the listener's own; empty for the queue.
+          description: The show's RSS feed URL; empty for the queue.
         item:
           type: string
           maxLength: 2000
-          description: An episode's guid or a video's id; empty for a show and the queue.
+          description: An episode's guid; empty for a show and the queue.
         updatedAt:
           type: integer
           minimum: 0
@@ -1060,10 +1069,6 @@ components:
         A record's contents, which only the app reads; each kind uses some of
         these. Up to 256 KB.
       properties:
-        showKind:
-          type: string
-          enum: [rss, youtube, youtubeFeed, own]
-          description: "`show`: a podcast's RSS feed, a single YouTube video, a YouTube playlist or channel, or a podcast of the listener's own."
         title:
           type: string
         author:
@@ -1084,13 +1089,6 @@ components:
         playedAt:
           type: integer
           description: "`listen`: when they last played it or marked it, in ms."
-        durationMs:
-          type: integer
-          minimum: 1
-          description: "`video`, `show` of a single video: its length."
-        addedAt:
-          type: integer
-          description: "`video`: when it was added, in ms."
         queue:
           type: array
           description: "`queue`: Up Next, in order."

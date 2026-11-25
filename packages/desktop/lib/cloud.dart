@@ -2,14 +2,12 @@
 // ListenJar feeds (account.dart) and how each syncs from this device
 // (feeds.dart, sync.dart) through the ListenJar API (public.yaml) and its
 // oasmith client in lib/backend (`moon run desktop:codegen`). There is no
-// Cloud section: the feeds are shows in the Library (library_page.dart),
-// each with what its sync is doing, and one opens here (CloudShowPage) with
-// its episodes, uploaded or on their way (podcast.dart). Library makes
-// podcasts of the listener's own, on this device or here; Search
-// (search_page.dart) adds YouTube links and videos to them; Settings holds
-// the account (AccountPanel). A followed playlist or channel, or a podcast
-// of the listener's own, moves between this device and here either way,
-// and where the listener was in each video comes along.
+// Cloud section and no Cloud page: a feed is a show like any other, in the
+// Library (library_page.dart) and on its show page (show_page.dart), which
+// also says how its uploads go (hosted_feed.dart). Library makes podcasts
+// of the listener's own, where the plan says; Search (search_page.dart)
+// adds YouTube links and videos to them; Settings holds the account
+// (AccountPanel).
 import 'dart:async';
 import 'dart:io';
 
@@ -23,61 +21,21 @@ import 'backend/api.dart';
 import 'feeds.dart';
 import 'menu.dart';
 import 'plans.dart';
-import 'podcast.dart';
 import 'podcast_apps.dart';
-import 'shared_links.dart' show CloudOwn, LocalOwn, newOwnPodcast;
-import 'shell.dart' show PageBody, backButton;
+import 'shared_links.dart' show newOwnPodcast;
 import 'sign_in_form.dart';
 import 'sync.dart';
 import 'theme.dart' as brand;
 import 'ui.dart' show Navigation, Services, tell;
 
-/// One ListenJar feed, pushed onto a section's stack: what went wrong
-/// syncing, then its page (podcast.dart). Gone once it is removed.
-final class CloudShowPage extends StatelessWidget {
-  const CloudShowPage({super.key, required this.feedId});
-  final String feedId;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Services.of(context);
-    return ListenableBuilder(
-      listenable: Listenable.merge([s.feeds, s.account]),
-      builder: (context, _) {
-        final feed = s.feeds.feeds.where((f) => f.id == feedId).firstOrNull;
-        if (feed == null) {
-          return PageBody(children: [
-            if (Navigator.of(context).canPop()) backButton(context, 'Back'),
-            Text('This podcast is gone', style: Theme.of(context).textTheme.titleLarge),
-          ]);
-        }
-        return PageBody(children: [
-          if (Navigator.of(context).canPop()) backButton(context, 'Back'),
-          if (s.feeds.storageFull) ...[const StorageFullNotice(), const SizedBox(height: 20)],
-          PodcastPage(
-            key: ValueKey(feed.id),
-            feed: feed,
-            feeds: s.feeds,
-            onRemove: () => unawaited(removeCloudFeed(context, feed)),
-          ),
-        ]);
-      },
-    );
-  }
-}
-
-/// Makes a podcast of the listener's own, named by them, on this device or
-/// in ListenJar Cloud, and opens it to fill from Search. Asks them to sign
-/// in or pick a plan first if they need to.
+/// Makes a podcast of the listener's own, named by them, and opens it to
+/// fill from Search. Asks them to sign in or pick a plan first if they need
+/// to.
 Future<void> createPodcast(BuildContext context) async {
   final navigation = Navigation.of(context);
-  switch (await newOwnPodcast(context)) {
-    case CloudOwn(:final feed):
-      navigation.openFeed(feed.id);
-    case LocalOwn(:final show):
-      navigation.openShow(show.id);
-    case null:
-  }
+  final made = await newOwnPodcast(context);
+  if (made?.feed case final feed?) navigation.openFeed(feed.id);
+  if (made?.show case final show?) navigation.openShow(show.id);
 }
 
 /// What removing [feed] does, in its own terms: what leaves the podcast
@@ -141,8 +99,11 @@ Future<void> removeCloudFeed(BuildContext context, Feed feed) async {
 /// Until the feed's first episode is uploaded it has no RSS, so the button
 /// waits, disabled, while the page shows the sync.
 final class ListenIn extends StatefulWidget {
-  const ListenIn({super.key, required this.feed});
+  const ListenIn({super.key, required this.feed, this.onInk = false});
   final Feed feed;
+
+  /// On a show's sleeve rather than paper.
+  final bool onInk;
 
   @override
   State<ListenIn> createState() => _ListenInState();
@@ -169,7 +130,7 @@ final class _ListenInState extends State<ListenIn> {
       return Tooltip(
         message: 'Ready once the first episode is uploaded',
         child: TextButton(
-          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          style: brand.button(widget.onInk ? brand.Tone.quietOnInk : brand.Tone.quiet, brand.ButtonSize.sm),
           onPressed: null,
           child: const Text('Listen in…'),
         ),
@@ -189,7 +150,7 @@ final class _ListenInState extends State<ListenIn> {
           MenuEntry('Copy feed link', leading: _menuIcon(podcastAppIcon('rss')), onPressed: () => _copyFeedLink(rss)),
         ],
         builder: (context, menu) => TextButton(
-          style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
+          style: brand.button(widget.onInk ? brand.Tone.quietOnInk : brand.Tone.quiet, brand.ButtonSize.sm),
           onPressed: menu.toggle,
           child: const Text('Listen in…'),
         ),
