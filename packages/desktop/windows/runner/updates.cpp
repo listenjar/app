@@ -16,7 +16,7 @@ constexpr char kRegistryPath[] = "Software\\ListenJar\\Updates";
 #define LISTENJAR_APPCAST_PLATFORM "windows-x64"
 #endif
 constexpr char kAppcast[] =
-    "https://github.com/listenjar/desktop/releases/latest/download/"
+    "https://github.com/listenjar/app/releases/latest/download/"
     "appcast-" LISTENJAR_APPCAST_PLATFORM ".xml";
 
 #define LISTENJAR_WIDEN2(text) L##text

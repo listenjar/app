@@ -7,7 +7,7 @@ Free, and you don't need an account.
 
 ## Get it
 
-- **Mac, Windows, Linux and Android:** download it from the [latest release](https://github.com/listenjar/desktop/releases/latest).
+- **Mac, Windows, Linux and Android:** download it from the [latest release](https://github.com/listenjar/app/releases/latest).
   - Mac: the `.dmg`.
   - Windows: the `x64` installer for most PCs, the `arm64` one for Windows on Arm.
   - Linux: the `.tar.gz`. It needs mpv's library to play: `libmpv2` on Debian and Ubuntu,

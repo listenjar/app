@@ -2,7 +2,7 @@
 # Builds the release macOS app as a release would, with Sparkle's update key,
 # signs it with this Mac's Developer ID (tool/sign-macos.sh) and replaces
 # /Applications/ListenJar.app with it, quitting and reopening the app
-# (`moon run desktop:reinstall`). It isn't notarized: an app built here
+# (`moon run app:reinstall`). It isn't notarized: an app built here
 # carries no quarantine, so Gatekeeper never asks.
 #
 # The update key, the identity and the provisioning profile come from

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the release iOS app and exports it for App Store Connect as
-# build/release/ListenJar-X.Y.Z-ios.ipa (`moon run desktop:package-ios`), which
+# build/release/ListenJar-X.Y.Z-ios.ipa (`moon run app:package-ios`), which
 # tool/testflight.ts uploads to TestFlight.
 #
 #   LISTENJAR_IOS_PROFILE        an App Store provisioning profile for

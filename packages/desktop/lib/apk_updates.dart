@@ -1,9 +1,9 @@
 // Android's in-app updates, the APK's Sparkle: ListenJar isn't in a store, so
-// it reads the manifest of its ABI's APK in listenjar/desktop's latest GitHub
+// it reads the manifest of its ABI's APK in listenjar/app's latest GitHub
 // release (tool/release.ts publishes one APK per ABI beside its manifest, and
 // makes a release the latest only once everything is up):
 //
-//   https://github.com/listenjar/desktop/releases/latest/download/manifest-android-<abi>.json
+//   https://github.com/listenjar/app/releases/latest/download/manifest-android-<abi>.json
 //
 // once a day while automatic checks are on, or when asked. A newer build asks
 // the listener (UpdatePrompt), downloads the APK into the cache, checks its
@@ -33,11 +33,11 @@ import 'package:path_provider/path_provider.dart';
 import 'apk_installer.g.dart';
 import 'log.dart';
 
-/// listenjar/desktop's releases. A test build can point elsewhere with
+/// listenjar/app's releases. A test build can point elsewhere with
 /// `--dart-define=LISTENJAR_RELEASES=http://10.0.2.2:8000` (the emulator's
 /// host), serving `releases/latest/download/manifest-android-<abi>.json` and
 /// `releases/download/<tag>/<asset>` as GitHub does.
-const _releases = String.fromEnvironment('LISTENJAR_RELEASES', defaultValue: 'https://github.com/listenjar/desktop');
+const _releases = String.fromEnvironment('LISTENJAR_RELEASES', defaultValue: 'https://github.com/listenjar/app');
 
 /// The ABI this app was installed as, which its update's APK must carry: the
 /// one Dart runs as, named as tool/release.dart names the APKs.

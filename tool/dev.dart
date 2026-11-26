@@ -1,4 +1,4 @@
-// `moon run desktop:dev`: runs the app with `flutter run` and hot reloads it
+// `moon run app:dev`: runs the app with `flutter run` and hot reloads it
 // whenever a Dart file under packages/*/lib is saved, the way an IDE does.
 // `flutter run` hot reloads on SIGUSR1 (`--pid-file` says where to send it).
 // `r`, `R` and `q` still work in the terminal. `--print-dtd` prints the Dart
@@ -8,10 +8,10 @@
 // Native code (packages/youtubei/native) is not hot reloadable; restart.
 //
 // One debug app runs per device, from any checkout: this stands aside while
-// another `desktop:dev` holds that device's lock in the temp directory (another
+// another `app:dev` holds that device's lock in the temp directory (another
 // session or checkout running the same device), or, on macOS, while a debug
 // ListenJar.app is still running (from an IDE, or left behind by a
-// `desktop:dev` that was killed outright). Standing aside exits 0, so
+// `app:dev` that was killed outright). Standing aside exits 0, so
 // `moonx dev` keeps the backend and web running instead of stopping them all.
 import 'dart:async';
 import 'dart:io';
@@ -29,7 +29,7 @@ Future<void> main(List<String> args) async {
   } on FileSystemException {
     final holder = lockFile.readAsStringSync().trim();
     stderr.writeln(
-      'desktop:dev is already running on $device (pid $holder): use that one, or stop it and run desktop:dev again.',
+      'app:dev is already running on $device (pid $holder): use that one, or stop it and run app:dev again.',
     );
     exit(0);
   }
@@ -43,7 +43,7 @@ Future<void> main(List<String> args) async {
     final apps = (running.stdout as String).trim().split('\n').where((line) => line.isNotEmpty);
     if (apps.isNotEmpty) {
       stderr.writeln(
-        'A debug ListenJar is already running (pid ${apps.join(', ')}): quit it, then run desktop:dev again.',
+        'A debug ListenJar is already running (pid ${apps.join(', ')}): quit it, then run app:dev again.',
       );
       exit(0);
     }

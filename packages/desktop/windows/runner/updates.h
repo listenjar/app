@@ -4,7 +4,7 @@
 #include <windows.h>
 
 // In-app updates with WinSparkle, for lib/updates.dart: the appcast on
-// listenjar/desktop's latest GitHub release, whose installers are signed with
+// listenjar/app's latest GitHub release, whose installers are signed with
 // the Ed25519 key release builds carry (LISTENJAR_UPDATE_PUBLIC_KEY, which
 // CMakeLists.txt takes from the environment). Debug and local builds have no
 // key, so no updater. WinSparkle keeps its preferences under

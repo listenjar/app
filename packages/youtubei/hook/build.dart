@@ -16,8 +16,8 @@ const _sources = [
 ];
 
 /// The scripts native/scripts.g.c holds, as tool/scripts.mjs writes it
-/// (`moon run desktop:scripts`); youtubejs.js is the bundle `moon run
-/// desktop:bundle` builds from packages/youtubejs.
+/// (`moon run app:scripts`); youtubejs.js is the bundle `moon run
+/// app:bundle` builds from packages/youtubejs.
 const _scripts = ['native/host.js', 'native/youtubejs.js', 'native/bindings.js'];
 
 const _assetName = 'src/bindings.g.dart';
@@ -52,7 +52,7 @@ void main(List<String> args) async {
 /// Fails unless [generated] holds the [scripts] as they are now: its first
 /// lines are their SHA-256s.
 void _checkGenerated(Uri generated, List<Uri> scripts) {
-  const run = 'run `moon run desktop:scripts`';
+  const run = 'run `moon run app:scripts`';
   final file = File.fromUri(generated);
   if (!file.existsSync()) throw StateError('${file.path} is missing: $run');
   final lines = file.readAsLinesSync().take(scripts.length).toList();

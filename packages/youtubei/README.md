@@ -70,7 +70,7 @@ Where the APIs differ, Dart forces it:
   committer time, `Bundle.sequence`); the app needs no JavaScript runtime or download at run time.
   `Innertube.create(bundle: …)` runs another bundle's source instead (a signed release of the fork
   for `Bundle.abi`, which the caller fetches and verifies); one that fails to evaluate throws a
-  `BundleError`. [tool/scripts.mjs](tool/scripts.mjs) writes it (`moon run desktop:scripts`, cached
+  `BundleError`. [tool/scripts.mjs](tool/scripts.mjs) writes it (`moon run app:scripts`, cached
   on the scripts), heading it with each script's SHA-256, and the build hook stops with that
   command when it is missing or older than a script.
 - [hook/build.dart](hook/build.dart) builds it all as a code asset with
@@ -79,10 +79,10 @@ Where the APIs differ, Dart forces it:
   and Clang for arm64 (`C:\msys64\clangarm64\bin\clang.exe`), or
   `hooks.user_defines.youtubei.mingw_cc`.
 - [lib/src/bindings.g.dart](lib/src/bindings.g.dart): `@Native` bindings FFIgen generates from
-  bridge.h (`moon run desktop:ffigen`).
+  bridge.h (`moon run app:ffigen`).
 
-`native/youtubejs.js` is the Git-ignored bundle `moon run desktop:bundle` builds from the pinned
-fork; `desktop:scripts` builds it first.
+`native/youtubejs.js` is the Git-ignored bundle `moon run app:bundle` builds from the pinned
+fork; `app:scripts` builds it first.
 
 ## QuickJS
 

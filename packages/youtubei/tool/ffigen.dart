@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:ffigen/ffigen.dart';
 
 /// Generates lib/src/bindings.g.dart from native/bridge.h:
-/// `moon run desktop:ffigen`.
+/// `moon run app:ffigen`.
 Future<void> main() async {
   final root = Platform.script.resolve('../');
   await FfiGenerator(

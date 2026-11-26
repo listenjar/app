@@ -60,16 +60,16 @@ Flutter 3.50 and [oasmith](https://github.com/responsibleapi/oasmith), and [aube
 for the YouTube.js bundle, all pinned in [mise.toml](mise.toml). Initialize submodules recursively first.
 
 ```sh
-moon run desktop:dev       # macOS against backend:dev on :8787, hot reloads on save (tool/dev.dart)
-moon run desktop:build     # release macOS app in packages/desktop/build/macos
-moon run desktop:reinstall # it, Developer ID signed, into /Applications
-moon run desktop:check     # flutter analyze
+moon run app:dev       # macOS against backend:dev on :8787, hot reloads on save (tool/dev.dart)
+moon run app:build     # release macOS app in packages/desktop/build/macos
+moon run app:reinstall # it, Developer ID signed, into /Applications
+moon run app:check     # flutter analyze
 ```
 
-`desktop:codegen` (public.yaml → `lib/backend`, [pricing](pricing) → `lib/pricing`) and `desktop:scripts` (packages/youtubejs →
+`app:codegen` (public.yaml → `lib/backend`, [pricing](pricing) → `lib/pricing`) and `app:scripts` (packages/youtubejs →
 `packages/youtubei/native/youtubejs.js` → `native/scripts.g.c`) run before each of those, and
-moon caches both on their inputs. For other platforms run `moon run desktop:codegen
-desktop:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `packages/desktop`.
+moon caches both on their inputs. For other platforms run `moon run app:codegen
+app:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `packages/desktop`.
 
 - Windows builds QuickJS with MSYS2's MinGW-w64 compiler (MSVC can't build it): UCRT64's GCC on
   x64, CLANGARM64's Clang on arm64; see [packages/youtubei](packages/youtubei). The media
@@ -85,10 +85,10 @@ desktop:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `p
 
 Off their platforms, two checks type-check the native runners:
 
-- `moon run desktop:swift-check` (Linux): the iOS and macOS AppDelegates against stub UIKit,
+- `moon run app:swift-check` (Linux): the iOS and macOS AppDelegates against stub UIKit,
   Cocoa and Flutter modules, with [Swift for Linux](https://www.swift.org/install/linux/)
   ([tool/swift-check](tool/swift-check)).
-- `moon run desktop:windows-check` (Linux, macOS): the Windows runner's C++ against the Flutter
+- `moon run app:windows-check` (Linux, macOS): the Windows runner's C++ against the Flutter
   engine's headers, with `zig c++ -target x86_64-windows-gnu` (and the updater for aarch64)
   ([tool/windows-check](tool/windows-check)).
 
@@ -107,7 +107,7 @@ flutter run -d localhost:5555
 
 Every push to master releases the app:
 
-1. [version.yaml](.github/workflows/version.yaml) runs `desktop:release-prepare`
+1. [version.yaml](.github/workflows/version.yaml) runs `app:release-prepare`
    ([tool/release.dart](tool/release.dart)), which takes the next version: the next patch above
    the newest `vX.Y.Z` tag, or the `version:` in [packages/desktop/pubspec.yaml](packages/desktop/pubspec.yaml)
    when that is newer, with the next build number (Android's versionCode, and what the updaters
@@ -115,22 +115,22 @@ Every push to master releases the app:
    `Source-commit:` trailer, and pushes only the tag; master never moves. Raise the pubspec's
    version for a new minor or major.
 2. It then dispatches [release.yaml](.github/workflows/release.yaml) on that tag, which builds
-   every platform on its own runner into `build/release/`: `desktop:package-macos` (a Developer
+   every platform on its own runner into `build/release/`: `app:package-macos` (a Developer
    ID signed, notarized DMG; [tool/package-macos.sh](tool/package-macos.sh)),
    [tool/package-windows.ps1](tool/package-windows.ps1) (an Inno Setup installer each for x64
    and arm64, on a runner of that architecture),
-   `desktop:package-linux` (a tar.gz) and `desktop:package-android` (an APK per ABI, arm64-v8a,
+   `app:package-linux` (a tar.gz) and `app:package-android` (an APK per ABI, arm64-v8a,
    armeabi-v7a and x86_64, each signed with the permanent release key, which
    [tool/release.dart](tool/release.dart) checks).
 3. [tool/release.ts](tool/release.ts) signs the DMG and the installers for the updaters
    (Ed25519), writes `appcast-macos.xml`, `appcast-windows-x64.xml` and `appcast-windows-arm64.xml`,
    attests each package's build provenance (`gh attestation verify <file> --repo
-   listenjar/desktop`), uploads all seven with
+   listenjar/app`), uploads all seven with
    their manifests, and only then makes the release the latest, whose appcasts the apps read
    (Android's reads its ABI's `manifest-android-<abi>.json`, and installs only an APK signed with its own key).
 4. Beside them, the ios job sends the release to TestFlight for iPhone and iPad. It runs on
    GitHub's `xcode-27` image, as App Store Connect takes only iOS 27 SDK builds from April 2027:
-   `desktop:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for
+   `app:package-ios` ([tool/package-ios.sh](tool/package-ios.sh)) builds an IPA signed for
    the App Store, and [tool/testflight.ts](tool/testflight.ts) uploads it, waits for App Store
    Connect to process it, adds it to the external **Public** group and submits it to Beta App
    Review. Apple queues only a few builds for review, so older builds still waiting are expired
@@ -175,7 +175,7 @@ build fails. The app's Gradle build resolves everything from Google's repositori
 ([settings.gradle.kts](packages/desktop/android/settings.gradle.kts)): Maven Central only through
 Google's mirror, as Maven Central turns Gradle away (429 on GitHub's runners, 403 on some
 networks). `cp tool/maven-mirror.gradle ~/.gradle/init.d/` does the same for every other Gradle
-build, as the release workflow does. `desktop:package-android` also refuses an APK whose certificate isn't the one
+build, as the release workflow does. `app:package-android` also refuses an APK whose certificate isn't the one
 [passkeys.ts](passkeys.ts) lists.
 
 This repo builds on its own, without the monorepo: [mise.toml](mise.toml) pins every tool the
@@ -224,7 +224,7 @@ runtime errors show (the MCP's `get_runtime_errors`).
 
 ## Icons
 
-[resources/icon.svg](resources/icon.svg) is the one source. `moon run desktop:icons` renders it
+[resources/icon.svg](resources/icon.svg) is the one source. `moon run app:icons` renders it
 for macOS, Windows, Android and Linux: as is for release and profile builds, and with a red
 DEBUG ribbon for debug builds, so a dev build never passes for the installed app. iOS gets one
 opaque, full-bleed 1024 px icon, without the ribbon, as iOS rounds the corners itself.

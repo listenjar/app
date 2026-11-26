@@ -1,7 +1,7 @@
 // ListenJar Cloud inside the one player: the signed-in listener's own
 // ListenJar feeds (account.dart) and how each syncs from this device
 // (feeds.dart, sync.dart) through the ListenJar API (public.yaml) and its
-// oasmith client in lib/backend (`moon run desktop:codegen`). There is no
+// oasmith client in lib/backend (`moon run app:codegen`). There is no
 // Cloud section and no Cloud page: a feed is a show like any other, in the
 // Library (library_page.dart) and on its show page (show_page.dart), which
 // also says how its uploads go (hosted_feed.dart). Library makes podcasts

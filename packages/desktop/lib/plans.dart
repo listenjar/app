@@ -1,7 +1,7 @@
 // Plans in the window: which plan the listener is on and how much of its
 // storage they use, the sheet that sends them to Stripe Checkout, which the
 // API makes for the signed-in listener (prices from lib/pricing, `moon run
-// desktop:codegen`), the sheet that makes
+// app:codegen`), the sheet that makes
 // room when the storage is full, and naming a podcast of their own. The
 // backend decides what a plan allows (public.yaml); this only shows it.
 //

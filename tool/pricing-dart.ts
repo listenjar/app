@@ -1,5 +1,5 @@
 // Writes the live pricing catalog (pricing/catalog.ts) as Dart constants for
-// the desktop app's upgrade prompts: `moon run desktop:codegen`.
+// the desktop app's upgrade prompts: `moon run app:codegen`.
 //
 //   node tool/pricing-dart.ts OUTPUT.dart
 import { mkdirSync, writeFileSync } from "node:fs"
@@ -30,7 +30,7 @@ ${plan.prices
 mkdirSync(dirname(output), { recursive: true })
 writeFileSync(
   output,
-  `// Generated from pricing/catalog.live.json by \`moon run desktop:codegen\`. Do not edit.
+  `// Generated from pricing/catalog.live.json by \`moon run app:codegen\`. Do not edit.
 
 enum PlanInterval { monthly, yearly }
 

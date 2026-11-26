@@ -1,6 +1,6 @@
 // In-app updates: Sparkle on macOS (macos/Runner/AppDelegate.swift) and
 // WinSparkle on Windows (windows/runner/updates.h), over `listenjar/updates`,
-// and apk_updates.dart on Android. Each checks listenjar/desktop's latest
+// and apk_updates.dart on Android. Each checks listenjar/app's latest
 // GitHub release once a day and installs only what is signed with the key
 // release builds carry (tool/release.ts; on Android, the APK's own signing
 // key); debug and local builds have no key, so no updater. Linux and iOS

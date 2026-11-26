@@ -1,7 +1,7 @@
 // Regenerates the JNI bindings Dart calls the app's Java helpers through, one
 // file per class: lib/apk_installer.g.dart (ApkInstaller.java, for
 // lib/apk_updates.dart) and lib/shared_links.g.dart (SharedLinks.java, for
-// lib/shared_links.dart). `moon run desktop:jnigen` after changing either.
+// lib/shared_links.dart). `moon run app:jnigen` after changing either.
 // JNIgen reads the Java source and asks the app's Gradle build for the
 // Android SDK's classpath.
 //

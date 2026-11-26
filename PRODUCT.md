@@ -56,7 +56,7 @@ open source and sends no telemetry, tracing or crash reports.
 - Ships on macOS, Windows, Linux, Android and iOS.
 - A Flutter app: one Dart codebase drawn by Flutter on every OS. No HTML, no webview, no browser
   build. One design language everywhere. Preview it by running the native app
-  (`moon run desktop:dev`).
+  (`moon run app:dev`).
 - `adaptive` above routes design work to the native, source-based reviews instead of browser
   tooling. It does not mean the design changes per OS, and there is no SwiftUI, UIKit or Compose
   here: apply iOS/Android guidance only where it is about platform conventions (shortcuts, menus,

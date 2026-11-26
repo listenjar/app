@@ -1,8 +1,8 @@
-# The desktop repo on its own (CI, or a checkout outside the monorepo). Inside
-# the listenjar monorepo, its workspace runs these tasks as desktop:<task> too.
-defaultProject: desktop
+# The app repo on its own (CI, or a checkout outside the monorepo). Inside
+# the listenjar monorepo, its workspace runs these tasks as app:<task> too.
+defaultProject: app
 projects:
-  desktop: .
+  app: .
 versionConstraint: ">=2.6.5 <3.0.0"
 vcs:
   client: git

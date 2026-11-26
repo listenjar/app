@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the release macOS app with Sparkle's update key and packages it as
 # build/release/ListenJar-X.Y.Z-macos.dmg, the download and
-# the update payload both (`moon run desktop:package-macos`).
+# the update payload both (`moon run app:package-macos`).
 #
 #   LISTENJAR_UPDATE_PUBLIC_KEY  the Ed25519 public key updates are signed
 #                                with (Info.plist's SUPublicEDKey); required

@@ -1,9 +1,9 @@
 // Release identity, update signatures, appcasts and publication: every
-// platform's package goes up to listenjar/desktop's GitHub release, and the
+// platform's package goes up to listenjar/app's GitHub release, and the
 // in-app updaters (lib/updates.dart: Sparkle on macOS, WinSparkle on Windows
 // x64 and arm64) read their platform's appcast from the latest release:
 //
-//   https://github.com/listenjar/desktop/releases/latest/download/appcast-<platform>.xml
+//   https://github.com/listenjar/app/releases/latest/download/appcast-<platform>.xml
 //
 // Android's (lib/apk_updates.dart) reads its ABI's manifest from there instead,
 // manifest-android-<abi>.json: the build it compares, the APK's name, length
@@ -40,7 +40,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { androidApps } from "../passkeys.ts"
 
-const repository = "listenjar/desktop"
+const repository = "listenjar/app"
 // The APK's signing certificate (tool/release.dart checks the APK against it).
 const [androidCertificate] = androidApps[0].sha256
 const pubspec = path.join(import.meta.dirname, "../packages/desktop/pubspec.yaml")

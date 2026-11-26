@@ -1,4 +1,4 @@
 # The YouTube.js fork youtubei embeds, kept apart from the root workspace;
-# apps/web links it too (its cf-worker build). Bundle: moon run desktop:bundle.
+# apps/web links it too (its cf-worker build). Bundle: moon run app:bundle.
 packages:
   - youtubejs

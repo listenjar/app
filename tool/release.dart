@@ -23,7 +23,7 @@
 import 'dart:io';
 import 'dart:math';
 
-const _repository = 'listenjar/desktop';
+const _repository = 'listenjar/app';
 const _manifest = 'packages/desktop/pubspec.yaml';
 const _platforms = ['linux', 'android'];
 

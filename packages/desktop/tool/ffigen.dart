@@ -1,6 +1,6 @@
 // Regenerates lib/shared_links_ios.g.dart, the Objective-C bindings
 // lib/shared_links.dart calls ios/Runner/SharedLinks.swift through:
-// `moon run desktop:ffigen-ios` after changing that file. swiftc writes the
+// `moon run app:ffigen-ios` after changing that file. swiftc writes the
 // class's Objective-C header, as the app's build would, and FFIgen reads it.
 import 'dart:io';
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`moon run desktop:icons`: every platform's app icon, from resources/icon.svg.
+"""`moon run app:icons`: every platform's app icon, from resources/icon.svg.
 
 Also the tray icons (lib/tray.dart): the mark alone, black on clear, as the
 macOS menu bar's template image, and the tile for Windows' notification area.
