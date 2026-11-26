@@ -265,6 +265,11 @@ Wide windows only. A glass panel 216px wide, inset 10px from the window's top, l
 ### Paper pages
 Home, Library, Search, Up Next, Downloads and Settings keep the core's paper surfaces, panels and rows, with two changes: artwork leads wherever a show appears (shelves of 160px squares; 56px in rows), and a page's large title at the top folds into the light-glass title bar on scroll, the same way a sleeve does.
 
+### Search
+- **Source switch:** Podcasts and YouTube as one 44px segmented pill under the field: a paper-deep track, the chosen source on a white thumb that slides between them (300ms, ease-out-expo; instant with reduced motion). The chosen source's icon is periwinkle, its label the primary colour; the other is soft. YouTube is drawn as the app's own mark (`YouTubeMark`: a rounded screen with the play triangle cut out), in periwinkle or soft, never YouTube's red.
+- **Video rows:** the frame leads, 16:9 with 12px corners: 160px wide, 120px where the row is under 480px. Its length sits on it as a small ink tag (white, tabular figures, 6px corners) at the bottom right; a playlist's tag carries its size, a playing video's turns periwinkle and says Playing. A started video's progress runs along the frame's foot in periwinkle. Below 480px the row itself plays and only the add menu stays beside it, so titles keep two lines.
+- **Loading** shows rows of the shape that's coming: squares for shows, frames for videos.
+
 ## Do's and Don'ts
 
 ### Do:

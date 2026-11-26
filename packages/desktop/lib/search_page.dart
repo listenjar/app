@@ -369,34 +369,7 @@ final class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _modes(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    Widget tab(_Mode mode, IconData icon, String label) {
-      final on = _mode == mode;
-      return Semantics(
-        selected: on,
-        button: true,
-        child: TextButton.icon(
-          onPressed: () => _setMode(mode),
-          style: TextButton.styleFrom(
-            backgroundColor: on ? brand.ink : brand.white,
-            foregroundColor: on ? brand.white : brand.fg,
-            minimumSize: const Size(0, 36),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            shape: StadiumBorder(side: BorderSide(color: on ? brand.ink : brand.line)),
-            textStyle: text.labelLarge!.copyWith(fontSize: 14),
-          ),
-          icon: Icon(icon, size: 18),
-          label: Text(label),
-        ),
-      );
-    }
-
-    return Wrap(spacing: 8, children: [
-      tab(_Mode.podcasts, Icons.podcasts_rounded, 'Podcasts'),
-      tab(_Mode.youtube, Icons.smart_display_outlined, 'YouTube'),
-    ]);
-  }
+  Widget _modes(BuildContext context) => _SourceSwitch(youtube: _mode == _Mode.youtube, onChanged: (youtube) => _setMode(youtube ? _Mode.youtube : _Mode.podcasts));
 
   /// Search opened from a podcast of the listener's own: the videos found
   /// go into it, until they're done.
@@ -436,12 +409,12 @@ final class _SearchPageState extends State<SearchPage> {
       // Should YouTube not say, the link still plays or follows as it is.
       if (_linkFailed.containsKey(link.url)) return [_linkCard(context, link)];
       WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_lookUp(link)));
-      return [const _ResultsSkeleton(rows: 1)];
+      return [const _ResultsSkeleton(rows: 1, videos: true)];
     }
     if (_feed case final url?) return [_feedCard(context, url)];
     final key = '${_mode.name}:$_query';
     if (_query.isEmpty) return _mode == _Mode.podcasts ? _chartsList(context) : [_youtubeIntro(context)];
-    if (_answered != key) return [const _ResultsSkeleton()];
+    if (_answered != key) return [_ResultsSkeleton(videos: _mode == _Mode.youtube)];
     if (_error case final error?) {
       return [problem(context, _mode == _Mode.podcasts ? 'Couldn’t reach Apple’s podcast directory.' : 'Couldn’t search YouTube.', error)];
     }
@@ -513,30 +486,34 @@ final class _SearchPageState extends State<SearchPage> {
       SourceRefKind.playlist => 'Playlist',
       SourceRefKind.channel => 'Channel',
     };
-    return _ResultRow(
-      onTap: link == null
-        ? null
-        : r.kind != SourceRefKind.video
-          ? () => unawaited(_follow(r.url, r.title))
-          : episode != null
-            ? () {
-                doneTyping();
-                unawaited(Services.of(context).player.playEpisode(episode));
-              }
-            : () {
-                doneTyping();
-                unawaited(_playVideo(link, result: r));
-              },
-      leading: _Thumbnail(result: r),
-      title: r.title,
-      subtitle: [?kind, ...r.details].join(' · '),
-      progress: episode == null ? null : _progress(episode),
-      trailing: busy || link == null
-        ? (busy ? const _Spinner() : null)
-        : r.kind == SourceRefKind.video
-          ? _videoActions(context, link, r, episode)
-          : _followButton(context, r.url, r.title),
-    );
+    return LayoutBuilder(builder: (context, box) {
+      // Narrow, the row itself plays and only the add menu stays beside it,
+      // so the title keeps room for two lines.
+      final compact = box.maxWidth < _compactRow;
+      return _ResultRow(
+        onTap: link == null
+          ? null
+          : r.kind != SourceRefKind.video
+            ? () => unawaited(_follow(r.url, r.title))
+            : episode != null
+              ? () {
+                  doneTyping();
+                  unawaited(Services.of(context).player.playEpisode(episode));
+                }
+              : () {
+                  doneTyping();
+                  unawaited(_playVideo(link, result: r));
+                },
+        leading: _Thumbnail(result: r, width: compact ? 120 : 160, episode: episode),
+        title: r.title,
+        subtitle: [?kind, ...r.details].join(' · '),
+        trailing: busy || link == null
+          ? (busy ? const _Spinner() : null)
+          : r.kind == SourceRefKind.video
+            ? _videoActions(context, link, r, episode, play: !compact)
+            : _followButton(context, r.url, r.title),
+      );
+    });
   }
 
   /// How far the listener got in [e], once they started it.
@@ -549,7 +526,7 @@ final class _SearchPageState extends State<SearchPage> {
   /// podcast of the listener's own. Once the video is an
   /// episode, play is the same button every episode has: it pauses while
   /// this one plays and resumes it.
-  Widget _videoActions(BuildContext context, YouTubeLink link, SearchResult? r, PodcastEpisode? episode) {
+  Widget _videoActions(BuildContext context, YouTubeLink link, SearchResult? r, PodcastEpisode? episode, {bool play = true}) {
     final s = Services.of(context);
     final kept = episode != null && (s.library.podcast(episode.podcastId)?.followed ?? false);
     final own = ownPodcasts(context);
@@ -584,9 +561,11 @@ final class _SearchPageState extends State<SearchPage> {
           icon: Icon(added ? Icons.check_rounded : Icons.add_rounded, size: 18),
           label: Text(added ? 'Added' : 'Add'),
         ),
-        const SizedBox(width: 8),
+        if (play) const SizedBox(width: 8),
       ],
-      if (episode != null)
+      if (!play)
+        const SizedBox.shrink()
+      else if (episode != null)
         PlayButton(episode: episode)
       else
         SizedBox.square(
@@ -625,7 +604,7 @@ final class _SearchPageState extends State<SearchPage> {
           width: 52,
           height: 52,
           decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(14)),
-          child: const Icon(Icons.smart_display_outlined, color: brand.accent),
+          child: const Center(child: YouTubeMark(size: 24, color: brand.accent)),
         ),
         const SizedBox(width: 16),
         Expanded(
@@ -721,14 +700,14 @@ final class _SearchPageState extends State<SearchPage> {
   }
 }
 
+/// Below this width a video's row drops its play button: the row plays.
+const _compactRow = 480.0;
+
 final class _ResultRow extends StatefulWidget {
-  const _ResultRow({required this.leading, required this.title, required this.subtitle, required this.trailing, required this.onTap, this.progress});
+  const _ResultRow({required this.leading, required this.title, required this.subtitle, required this.trailing, required this.onTap});
   final Widget leading;
   final String title;
   final String subtitle;
-
-  /// How far the listener got, for a video they started.
-  final double? progress;
   final Widget? trailing;
   final VoidCallback? onTap;
 
@@ -752,7 +731,7 @@ final class _ResultRowState extends State<_ResultRow> {
           borderRadius: BorderRadius.circular(14),
           onTap: widget.onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+            padding: const EdgeInsets.all(10),
             child: Row(children: [
               widget.leading,
               const SizedBox(width: 14),
@@ -760,23 +739,12 @@ final class _ResultRowState extends State<_ResultRow> {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(widget.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleMedium!.copyWith(fontSize: 15, height: 1.3)),
                   if (widget.subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 3),
+                    const SizedBox(height: 4),
                     Text(widget.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodySmall!.copyWith(color: brand.fgSoft, fontSize: 13)),
-                  ],
-                  if (widget.progress case final progress?) ...[
-                    const SizedBox(height: 8),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(2),
-                      child: SizedBox(
-                        width: 120,
-                        height: 3,
-                        child: LinearProgressIndicator(value: progress, color: brand.accent, backgroundColor: brand.paperDeep),
-                      ),
-                    ),
                   ],
                 ]),
               ),
-              if (widget.trailing case final trailing?) ...[const SizedBox(width: 12), trailing],
+              if (widget.trailing case final trailing?) ...[const SizedBox(width: 8), trailing],
             ]),
           ),
         ),
@@ -785,12 +753,20 @@ final class _ResultRowState extends State<_ResultRow> {
   }
 }
 
+/// A result's picture: a video's frame with its length on it and, once
+/// started, how far the listener got along its foot; a playlist's with its
+/// size; a channel's round avatar.
 final class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({required this.result});
+  const _Thumbnail({required this.result, required this.width, this.episode});
   final SearchResult result;
+  final double width;
+
+  /// The video as an episode, once it was played or kept.
+  final PodcastEpisode? episode;
 
   @override
   Widget build(BuildContext context) {
+    final height = width * 9 / 16;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     const placeholder = ColoredBox(color: brand.paperDeep);
     Widget image(double w) => switch (result.thumbnailUrl) {
@@ -803,13 +779,156 @@ final class _Thumbnail extends StatelessWidget {
         frameBuilder: (_, child, frame, sync) => sync || frame != null ? child : placeholder,
       ),
     };
-    return SizedBox(
-      width: 96,
-      height: 60,
-      child: switch (result.kind) {
-        SourceRefKind.channel => Center(child: ClipOval(child: SizedBox.square(dimension: 56, child: image(56)))),
-        _ => Center(child: ClipRRect(borderRadius: BorderRadius.circular(10), child: SizedBox(width: 96, height: 54, child: image(96)))),
-      },
+    if (result.kind == SourceRefKind.channel) {
+      return SizedBox(
+        width: width,
+        height: height,
+        child: Center(child: ClipOval(child: SizedBox.square(dimension: height, child: image(height)))),
+      );
+    }
+    final player = Services.of(context).player;
+    return Semantics(
+      excludeSemantics: true,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: ListenableBuilder(
+            listenable: player,
+            builder: (context, _) {
+              final e = episode;
+              final playing = e != null && player.current?.id == e.id && player.playing;
+              final progress = e == null ? null : _SearchPageState._progress(e);
+              return Stack(fit: StackFit.expand, children: [
+                image(width),
+                if (playing)
+                  const Positioned(right: 6, bottom: 9, child: _Badge(icon: Icons.graphic_eq_rounded, label: 'Playing', accent: true))
+                else if (result.badge case final badge?)
+                  Positioned(
+                    right: 6,
+                    bottom: progress == null ? 6 : 9,
+                    child: _Badge(icon: result.kind == SourceRefKind.playlist ? Icons.playlist_play_rounded : null, label: badge),
+                  ),
+                if (progress != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    height: 3,
+                    child: ColoredBox(
+                      color: const Color(0x66FFFFFF),
+                      child: FractionallySizedBox(alignment: Alignment.centerLeft, widthFactor: progress, child: const ColoredBox(color: brand.accent)),
+                    ),
+                  ),
+              ]);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A small ink tag over a thumbnail: a length, a playlist's size, or that
+/// it's playing.
+final class _Badge extends StatelessWidget {
+  const _Badge({required this.label, this.icon, this.accent = false});
+  final String label;
+  final IconData? icon;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(color: accent ? brand.accent : const Color(0xD90A0B0F), borderRadius: BorderRadius.circular(6)),
+    child: Padding(
+      padding: EdgeInsets.fromLTRB(icon == null ? 6 : 4, 3, 6, 3),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (icon case final icon?) ...[Icon(icon, size: 13, color: brand.white), const SizedBox(width: 3)],
+        Text(
+          label,
+          style: const TextStyle(color: brand.white, fontSize: 12, fontWeight: FontWeight.w600, height: 1.15, fontFeatures: [FontFeature.tabularFigures()]),
+        ),
+      ]),
+    ),
+  );
+}
+
+/// The two places search asks, as one control: a track with the chosen
+/// source held on a white thumb that slides between them.
+final class _SourceSwitch extends StatelessWidget {
+  const _SourceSwitch({required this.youtube, required this.onChanged});
+  final bool youtube;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final still = MediaQuery.disableAnimationsOf(context);
+    Widget segment(bool isYouTube, String label) {
+      final on = youtube == isYouTube;
+      final color = on ? brand.fg : brand.fgSoft;
+      return Semantics(
+        selected: on,
+        child: TextButton(
+          onPressed: () => onChanged(isYouTube),
+          style: ButtonStyle(
+            minimumSize: const WidgetStatePropertyAll(Size(0, 36)),
+            padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 16)),
+            backgroundColor: const WidgetStatePropertyAll(Color(0x00FFFFFF)),
+            overlayColor: const WidgetStatePropertyAll(Color(0x00FFFFFF)),
+            foregroundColor: WidgetStateProperty.fromMap({WidgetState.hovered: brand.fg, WidgetState.any: color}),
+            textStyle: WidgetStatePropertyAll(Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 14)),
+            shape: WidgetStateProperty.resolveWith((states) => StadiumBorder(side: states.contains(WidgetState.focused) ? brand.focusSide : brand.focusSideOff)),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            AnimatedSwitcher(
+              duration: still ? Duration.zero : brand.quick,
+              child: isYouTube
+                ? YouTubeMark(key: ValueKey(on), size: 18, color: on ? brand.accent : brand.fgSoft)
+                : Icon(Icons.podcasts_rounded, key: ValueKey(on), size: 18, color: on ? brand.accent : brand.fgSoft),
+            ),
+            const SizedBox(width: 8),
+            Text(label),
+          ]),
+        ),
+      );
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(999)),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: IntrinsicWidth(
+            child: Stack(children: [
+              Positioned.fill(
+                child: AnimatedAlign(
+                  duration: still ? Duration.zero : const Duration(milliseconds: 300),
+                  curve: brand.easeOutExpo,
+                  alignment: youtube ? Alignment.centerRight : Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: 0.5,
+                    heightFactor: 1,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: brand.white,
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: const [BoxShadow(color: Color(0x1F171A38), offset: Offset(0, 2), blurRadius: 6, spreadRadius: -1)],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Row(children: [
+                Expanded(child: segment(false, 'Podcasts')),
+                Expanded(child: segment(true, 'YouTube')),
+              ]),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -823,27 +942,36 @@ final class _Spinner extends StatelessWidget {
   );
 }
 
-/// Rows of grey while results come, the shape of what's coming.
+/// Rows of grey while results come, the shape of what's coming: square
+/// artwork for shows, wide frames for videos.
 final class _ResultsSkeleton extends StatelessWidget {
-  const _ResultsSkeleton({this.rows = 5});
+  const _ResultsSkeleton({this.rows = 5, this.videos = false});
   final int rows;
+  final bool videos;
 
   @override
-  Widget build(BuildContext context) => rowsPanel([
-    for (var i = 0; i < rows; i++)
-      Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(children: [
-          Container(width: 60, height: 60, decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(10))),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              FractionallySizedBox(widthFactor: 0.6 - i * 0.05, child: Container(height: 14, decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(4)))),
-              const SizedBox(height: 8),
-              FractionallySizedBox(widthFactor: 0.35, child: Container(height: 11, decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(4)))),
-            ]),
-          ),
-        ]),
-      ),
-  ]);
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
+    final width = videos ? (box.maxWidth - 32 < _compactRow ? 120.0 : 160.0) : 60.0;
+    return rowsPanel([
+      for (var i = 0; i < rows; i++)
+        Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(children: [
+            Container(
+              width: width,
+              height: videos ? width * 9 / 16 : width,
+              decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(videos ? 12 : 10)),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                FractionallySizedBox(widthFactor: 0.6 - i * 0.05, child: Container(height: 14, decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(4)))),
+                const SizedBox(height: 8),
+                FractionallySizedBox(widthFactor: 0.35, child: Container(height: 11, decoration: BoxDecoration(color: brand.paperDeep, borderRadius: BorderRadius.circular(4)))),
+              ]),
+            ),
+          ]),
+        ),
+    ]);
+  });
 }

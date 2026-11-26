@@ -76,6 +76,7 @@ final class SearchResult {
     required this.title,
     required this.details,
     required this.thumbnailUrl,
+    this.badge,
     this.description,
     this.publishedAt,
   });
@@ -84,9 +85,13 @@ final class SearchResult {
   final String url;
   final String title;
 
-  /// Who made it and how big it is: `Cercle · 2:13:48 · 69M views`.
+  /// Who made it and how many watched: `Cercle · 69M views`.
   final List<String> details;
   final String? thumbnailUrl;
+
+  /// What sits on the thumbnail: a video's length (`2:13:48`) or a
+  /// playlist's size (`24 videos`).
+  final String? badge;
 
   /// A pasted video's description and publication, which its lookup reads;
   /// null for what search lists.
@@ -349,11 +354,11 @@ final class YouTube {
       title: title.isEmpty ? 'YouTube video ${source.id}' : title,
       details: [
         if (author.isNotEmpty) author,
-        if (seconds != null && seconds > 0) _clock(seconds),
         if (basic.view_count case final views?) '${_compact(views)} views',
         ?reason,
       ],
       thumbnailUrl: _thumbnail(basic.thumbnail),
+      badge: seconds != null && seconds > 0 ? _clock(seconds) : null,
       description: basic.short_description ?? '',
       publishedAt: _publication(info, channel: false),
     );
@@ -659,8 +664,9 @@ SearchResult? _searchResult(YTNodes.YTNode node) {
         id: video_id,
         url: 'https://www.youtube.com/watch?v=$video_id',
         title: title,
-        details: [?clean(node.author?.name), ?clean(node.duration?.text), if (views != null) views.endsWith('views') ? views : '$views views'],
+        details: [?clean(node.author?.name), if (views != null) views.endsWith('views') ? views : '$views views'],
         thumbnailUrl: _thumbnail(node.thumbnails),
+        badge: clean(node.duration?.text),
       );
     case YTNodes.Channel(:final id) when _channelId.hasMatch(id):
       final title = node.author?.name.trim() ?? '';
@@ -705,10 +711,10 @@ SearchResult? _searchResult(YTNodes.YTNode node) {
             title: title,
             details: [
               ?parts.where((p) => !_views.hasMatch(p) && !p.contains('ago')).firstOrNull,
-              ?badges.where(_length.hasMatch).firstOrNull,
               if (views != null) views.endsWith('views') ? views : '$views views',
             ],
             thumbnailUrl: _thumbnail(thumbnails),
+            badge: badges.where(_length.hasMatch).firstOrNull,
           );
         case 'CHANNEL' when _channelId.hasMatch(id):
           return SearchResult(
@@ -726,11 +732,9 @@ SearchResult? _searchResult(YTNodes.YTNode node) {
             id: id,
             url: 'https://www.youtube.com/playlist?list=$id',
             title: title,
-            details: [
-              ?clean(rows.firstOrNull?.firstOrNull),
-              ...badges.where((b) => b.contains(RegExp(r'\d'))),
-            ],
+            details: [?clean(rows.firstOrNull?.firstOrNull)],
             thumbnailUrl: _thumbnail(thumbnails),
+            badge: badges.where((b) => b.contains(RegExp(r'\d'))).firstOrNull,
           );
       }
       return null;

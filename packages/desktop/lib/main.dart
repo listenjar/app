@@ -216,8 +216,8 @@ void control(AppServices? s, Map<String, String> parameters) {
       unawaited(s.podcasts.unfollow(show));
     case 'open':
       // A ListenJar `feed` (an id), a `show` (an id), `settings`,
-      // `nowPlaying`, `plans` (the sheet, titled by its value if any) or
-      // `newPodcast` (making one, as the Library's button does).
+      // `nowPlaying`, `plans` (the sheet, titled by its value if any),
+      // `newPodcast` (making one, as the Library's button does) or `search`.
       switch (parameters) {
         case {'feed': final id}:
           appNavigation.openFeed(id);
@@ -231,8 +231,12 @@ void control(AppServices? s, Map<String, String> parameters) {
           appNavigation.openPlans(title: title.isEmpty ? null : title);
         case {'newPodcast': _}:
           appNavigation.openNewPodcast();
+        case {'search': final query}:
+          // Search, asking `query` of podcasts, or of YouTube when `youtube`
+          // is true.
+          appNavigation.openSearch(query: query, youtube: parameters['youtube'] == 'true');
         default:
-          throw ArgumentError('open what? feed, show, settings, nowPlaying, plans or newPodcast');
+          throw ArgumentError('open what? feed, show, settings, nowPlaying, plans, newPodcast or search');
       }
     case 'download':
       final episode = s.library.episode(int.tryParse(parameters['episode'] ?? '') ?? -1);

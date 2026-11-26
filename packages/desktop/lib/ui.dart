@@ -211,6 +211,46 @@ final class Artwork extends StatelessWidget {
   }
 }
 
+/// YouTube as a source, drawn in the app's own colour rather than
+/// YouTube's red: a rounded screen with a play triangle cut out of it. [size]
+/// is its width, as an [Icon]'s is; it takes the icon colour unless given one.
+final class YouTubeMark extends StatelessWidget {
+  const YouTubeMark({super.key, this.size = 24, this.color});
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: size,
+    child: CustomPaint(painter: _YouTubeMarkPainter(color ?? IconTheme.of(context).color ?? brand.fg)),
+  );
+}
+
+final class _YouTubeMarkPainter extends CustomPainter {
+  const _YouTubeMarkPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final screen = Rect.fromCenter(center: size.center(Offset.zero), width: w, height: w * 0.7);
+    final c = screen.center;
+    final play = Path()
+      ..moveTo(c.dx - w * 0.12, c.dy - w * 0.15)
+      ..lineTo(c.dx + w * 0.16, c.dy)
+      ..lineTo(c.dx - w * 0.12, c.dy + w * 0.15)
+      ..close();
+    final mark = Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRRect(RRect.fromRectAndRadius(screen, Radius.circular(w * 0.2)))
+      ..addPath(play, Offset.zero);
+    canvas.drawPath(mark, Paint()..color = color..isAntiAlias = true);
+  }
+
+  @override
+  bool shouldRepaint(_YouTubeMarkPainter old) => old.color != color;
+}
+
 // Buttons.
 
 /// The round play button beside an episode: ink on paper (DESIGN.md), a

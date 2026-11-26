@@ -34,20 +34,30 @@
 //                          unfollow (`show`), move (a `show` on this
 //                          device to the Cloud, or a Cloud `feed` here),
 //                          open (a `feed` or `show`
-//                          id, `settings`, `nowPlaying`, `plans` or
-//                          `newPodcast`), download
+//                          id, `settings`, `nowPlaying`, `plans`,
+//                          `newPodcast` or `search` a query, of
+//                          YouTube if `youtube` is true), download
 //                          (`episode`) or key (`key` up, down, left,
 //                          right, space, enter, escape or tab, to
 //                          whatever has focus)
+//   ext.listenjar.screenshot  the window as it's drawn now, a PNG at
+//                          `path` (default one in the app's temp
+//                          directory, which a sandbox allows), at `scale`
+//                          times its logical size (default the screen's);
+//                          answers where it wrote it
 // SEVERE records and uncaught errors are reported as Flutter errors, so
 // they show where runtime errors show (the MCP's `get_runtime_errors`).
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:logging/logging.dart';
 
 export 'package:logging/logging.dart' show Level, Logger;
@@ -83,6 +93,39 @@ void startLogging({required Map<String, Object?> Function() state, required void
     control(parameters);
     return state();
   });
+  developer.registerExtension('ext.listenjar.screenshot', (method, parameters) async {
+    try {
+      return developer.ServiceExtensionResponse.result(jsonEncode(await _screenshot(parameters)));
+    } catch (e, stack) {
+      return developer.ServiceExtensionResponse.error(developer.ServiceExtensionResponse.extensionError, '$e\n$stack');
+    }
+  });
+}
+
+/// The first window's picture, as `ext.listenjar.screenshot` writes it.
+Future<Map<String, Object?>> _screenshot(Map<String, String> parameters) async {
+  final path = parameters['path'] ?? '${Directory.systemTemp.path}/listenjar-screenshot.png';
+  // A window behind others gets no frames, so its animations stand still:
+  // draw it for a moment, letting them settle.
+  final settle = Stopwatch()..start();
+  while (settle.elapsedMilliseconds < 600) {
+    SchedulerBinding.instance.scheduleForcedFrame();
+    await SchedulerBinding.instance.endOfFrame.timeout(const Duration(seconds: 1), onTimeout: () {});
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+  }
+  final view = RendererBinding.instance.renderViews.first;
+  final layer = view.debugLayer! as OffsetLayer;
+  // The root layer already scales logical pixels to the screen's.
+  final ratio = view.flutterView.devicePixelRatio;
+  final scale = double.tryParse(parameters['scale'] ?? '') ?? ratio;
+  final image = await layer.toImage(Offset.zero & view.size * ratio, pixelRatio: scale / ratio);
+  try {
+    final png = await image.toByteData(format: ui.ImageByteFormat.png);
+    await File(path).writeAsBytes(png!.buffer.asUint8List());
+    return {'path': path, 'width': image.width, 'height': image.height};
+  } finally {
+    image.dispose();
+  }
 }
 
 void _extension(String name, Map<String, Object?> Function(Map<String, String> parameters) answer) {
