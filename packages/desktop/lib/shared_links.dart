@@ -147,11 +147,25 @@ Future<void> openLink(BuildContext context, Uri link) async {
     navigation.openSearch(query: link.toString());
     return;
   }
+  // A share often opens the app, or comes in as it starts, before the API
+  // has said who is signed in: on a paid plan that would read as free, and
+  // the video would skip the question of where it goes.
+  if (s.account.restoring) {
+    _log.fine('Waiting for the account before opening $link');
+    await s.account.restored();
+    if (!context.mounted) return;
+  }
   if (youtube.kind != SourceKind.video) {
     await followYouTube(context, youtube, 'this ${kindLabel(youtube.kind)}');
     return;
   }
   if (isPaid(s.account.user)) {
+    // Their podcasts in ListenJar Cloud list from its feeds, which load just
+    // after the account: wait, or they'd be missing from the choices.
+    if (s.feeds.loading) {
+      await s.feeds.load();
+      if (!context.mounted) return;
+    }
     final choice = await _askWhere(context);
     if (choice == null || !context.mounted) return;
     await switch (choice) {

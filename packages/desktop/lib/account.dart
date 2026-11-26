@@ -76,6 +76,22 @@ final class Account extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Once [restore] knows who is signed in, and their plan; at once after.
+  Future<void> restored() async {
+    if (!restoring) return;
+    final done = Completer<void>();
+    void check() {
+      if (!restoring && !done.isCompleted) done.complete();
+    }
+
+    addListener(check);
+    try {
+      await done.future;
+    } finally {
+      removeListener(check);
+    }
+  }
+
   /// While the API hasn't answered since the start, asks again, less often
   /// each time.
   Timer? _retry;

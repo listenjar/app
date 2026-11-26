@@ -33,10 +33,14 @@ class AppDelegate: FlutterAppDelegate {
   // too, even from the Dock. A $(LISTENJAR_URL_SCHEME)://open?url=… link,
   // which the Share menu sends (ShareExtension/), goes on to
   // lib/shared_links.dart.
+  //
+  // The link comes from the browser or the Share menu, which is in front and
+  // never yields to us, so NSApp.activate()'s cooperative activation leaves
+  // the window behind it: the listener sent it here, so take the front.
   override func application(_ application: NSApplication, open urls: [URL]) {
     super.application(application, open: urls)
     urls.filter { $0.host == "open" }.forEach { SharedLinks.shared?.open($0.absoluteString) }
-    showWindow()
+    showWindow(takeFront: true)
   }
 
   /// Settings… in the app menu (MainMenu.xib), which reaches the app
@@ -47,13 +51,19 @@ class AppDelegate: FlutterAppDelegate {
     AppMenu.shared?.openSettings()
   }
 
-  private func showWindow() {
+  private func showWindow(takeFront: Bool = false) {
+    let wasHidden = NSApp.activationPolicy() != .regular
     NSApp.setActivationPolicy(.regular)
     if let window = mainFlutterWindow {
       window.deminiaturize(nil)
       window.makeKeyAndOrderFront(nil)
     }
-    NSApp.activate()
+    let activate = { takeFront ? NSApp.activate(ignoringOtherApps: true) : NSApp.activate() }
+    activate()
+    // Back from the menu bar only (lib/tray.dart), the Dock icon's return
+    // lands on the next turn of the run loop, and activating before it
+    // leaves the window unfocused: activate again then.
+    if wasHidden { DispatchQueue.main.async(execute: activate) }
   }
 }
 
