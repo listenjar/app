@@ -1,7 +1,7 @@
 name: desktop
 description: "The ListenJar app for desktop and Android"
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.1.40+41
 resolution: workspace
 
 environment:
