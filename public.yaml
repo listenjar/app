@@ -238,6 +238,25 @@ paths:
           description: The token is missing, revoked or expired.
         "404":
           description: The listener has no feed with that id.
+  /me/feeds/{feedId}/synced:
+    post:
+      operationId: markFeedSynced
+      summary: Say the app just finished checking a feed's source on YouTube
+      description: >-
+        Call it after each pass over a YouTube feed that ended up to date:
+        every new video added, nothing left failing. Sets the feed's
+        `syncedAt`, which the dashboard on listenjar.com shows.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      responses:
+        "204":
+          description: Noted.
+        "400":
+          description: The feed is a podcast of the listener's own, with no YouTube source.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no feed with that id.
   /me/feeds/{feedId}/image/upload:
     post:
       operationId: createImageUpload
@@ -907,6 +926,13 @@ components:
           description: >-
             The feed's artwork: its source's, as YouTube serves it, or what the
             listener uploaded for a podcast of their own (`completeImage`).
+        syncedAt:
+          type: string
+          format: date-time
+          description: >-
+            When the ListenJar app last finished checking the feed's YouTube
+            source for new videos (`markFeedSynced`). Only on the listener's
+            own YouTube feeds, once the app has checked.
         episodeCount:
           type: integer
           minimum: 0

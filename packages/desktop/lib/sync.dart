@@ -401,6 +401,12 @@ final class SyncEngine {
         ..stage = null
         ..fraction = null
         ..checkedAt = DateTime.now();
+      // listenjar.com's dashboard shows when the app last checked YouTube.
+      // Only a pass that left the feed up to date counts; a failed report
+      // fails nothing, and the next pass sends it again.
+      if (source != null && status.phase == FeedPhase.upToDate) {
+        unawaited(_api.markFeedSynced(feedId: feed.id).asCancellable(token).then((_) {}, onError: (_) {}));
+      }
     } on CancelledException {
       return;
     } on RateLimited {
