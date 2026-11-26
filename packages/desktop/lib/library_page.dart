@@ -21,9 +21,11 @@ import 'links.dart' show kindLabel;
 import 'menu.dart';
 import 'settings_page.dart';
 import 'shell.dart';
+import 'show_page.dart';
 import 'sync.dart' show FeedPhase;
 import 'theme.dart' as brand;
 import 'ui.dart';
+import 'zoom.dart';
 
 final class LibraryPage extends StatelessWidget {
   const LibraryPage({super.key});
@@ -145,7 +147,13 @@ final class LibraryPage extends StatelessWidget {
         _ => (' ', false),
       },
       fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
-      onTap: () => Navigation.of(context).openShow(show.id),
+      onTap: (from) => _open(
+        context,
+        from,
+        artwork: show.artworkUrl,
+        title: show.title,
+        page: ShowPage(podcastId: show.id),
+      ),
     );
   }
 
@@ -163,9 +171,20 @@ final class LibraryPage extends StatelessWidget {
       semantics: '${feed.title}, ${status.$1}',
       subtitle: status,
       fraction: sync?.phase == FeedPhase.syncing ? sync?.fraction : null,
-      onTap: () => Navigation.of(context).openFeed(feed.id),
+      onTap: (from) => _open(
+        context,
+        from,
+        artwork: feed.imageUrl,
+        title: feed.title,
+        page: ShowPage.feed(feedId: feed.id),
+      ),
     );
   }
+
+  /// The show's page grows out of its cover (zoom.dart), onto Library's
+  /// stack.
+  void _open(BuildContext context, GlobalKey<ZoomSourceState> from, {required String? artwork, required String title, required Widget page}) =>
+    unawaited(zoomOpen(context, from: from, artwork: artwork, title: title, page: page));
 }
 
 final class _ShowTile extends StatefulWidget {
@@ -197,7 +216,9 @@ final class _ShowTile extends StatefulWidget {
 
   /// How far the episode syncing now has got.
   final double? fraction;
-  final VoidCallback onTap;
+
+  /// Opens the show, out of its cover.
+  final void Function(GlobalKey<ZoomSourceState> from) onTap;
 
   @override
   State<_ShowTile> createState() => _ShowTileState();
@@ -205,6 +226,7 @@ final class _ShowTile extends StatefulWidget {
 
 final class _ShowTileState extends State<_ShowTile> {
   bool _hover = false;
+  final _cover = GlobalKey<ZoomSourceState>();
 
   @override
   Widget build(BuildContext context) {
@@ -217,13 +239,15 @@ final class _ShowTileState extends State<_ShowTile> {
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: GestureDetector(
-          onTap: widget.onTap,
+          onTap: () => widget.onTap(_cover),
           child: Semantics(
             button: true,
             label: widget.semantics,
             excludeSemantics: true,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              AnimatedContainer(
+              ZoomSource(
+                key: _cover,
+                child: AnimatedContainer(
                 duration: brand.quick,
                 curve: brand.easeOutExpo,
                 transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
@@ -270,6 +294,7 @@ final class _ShowTileState extends State<_ShowTile> {
                         child: LinearProgressIndicator(value: fraction, minHeight: 3, color: brand.accent, backgroundColor: const Color(0x66FFFFFF)),
                       ),
                   ]),
+                ),
                 ),
               ),
               const SizedBox(height: 10),

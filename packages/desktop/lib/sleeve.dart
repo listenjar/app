@@ -22,6 +22,7 @@ import 'menu.dart';
 import 'shell.dart' show Shown, wideWidth;
 import 'theme.dart' as brand;
 import 'ui.dart';
+import 'zoom.dart' show ZoomTarget;
 
 // The sleeve's light.
 
@@ -349,7 +350,8 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
   Widget _hero() {
     final size = MediaQuery.sizeOf(context);
     final height = math.min(size.width, size.height * 0.7);
-    return SizedBox(
+    return ZoomTarget(
+      child: SizedBox(
       height: height,
       child: ShaderMask(
         blendMode: BlendMode.dstIn,
@@ -360,6 +362,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
           stops: [0, 0.72, 1],
         ).createShader(rect),
         child: _Picture(url: widget.artwork, title: widget.title, letter: height * 0.42),
+      ),
       ),
     );
   }
@@ -376,7 +379,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
             borderRadius: BorderRadius.circular(18),
             boxShadow: const [BoxShadow(color: Color(0x80000000), offset: Offset(0, 24), blurRadius: 48, spreadRadius: -12)],
           ),
-          child: Artwork(url: widget.artwork, title: widget.title, size: art, radius: 18),
+          child: ZoomTarget(child: Artwork(url: widget.artwork, title: widget.title, size: art, radius: 18)),
         ),
         const SizedBox(width: 32),
         Expanded(child: info),
