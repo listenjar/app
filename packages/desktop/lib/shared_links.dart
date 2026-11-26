@@ -143,7 +143,7 @@ Uri? linkIn(String text) {
 /// Does what [link] asks, as the rules at the top of this file say. Gives
 /// up, asking nothing, once [replaced] says a newer link came.
 Future<void> openLink(BuildContext context, Uri link, {bool Function()? replaced}) async {
-  bool gone() => !context.mounted || (replaced?.call() ?? false);
+  bool isReplaced() => replaced?.call() ?? false;
   final s = Services.of(context);
   final navigation = Navigation.of(context);
   if (parseApplePodcastsLink(link.toString()) case final apple?) {
@@ -162,7 +162,7 @@ Future<void> openLink(BuildContext context, Uri link, {bool Function()? replaced
   if (s.account.restoring) {
     _log.fine('Waiting for the account before opening $link');
     await s.account.restored();
-    if (gone()) return;
+    if (!context.mounted || isReplaced()) return;
   }
   if (youtube.kind != SourceKind.video) {
     await followYouTube(context, youtube, 'this ${kindLabel(youtube.kind)}');
@@ -175,7 +175,7 @@ Future<void> openLink(BuildContext context, Uri link, {bool Function()? replaced
     final video = _lookUp(s, youtube);
     if (s.feeds.loading) {
       await s.feeds.load();
-      if (gone()) return;
+      if (!context.mounted || isReplaced()) return;
     }
     final choice = await _askWhere(context, youtube, video);
     if (choice == null || !context.mounted) return;

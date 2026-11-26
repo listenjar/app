@@ -170,7 +170,8 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
     }
     _opening = true;
     try {
-      while (mounted) {
+      while (true) {
+        if (!mounted) break;
         final link = widget.links.next();
         if (link == null) break;
         _before = _top(Navigator.of(context, rootNavigator: true));
