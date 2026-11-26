@@ -7,42 +7,51 @@
 //
 // Native code (packages/youtubei/native) is not hot reloadable; restart.
 //
-// Only one debug app runs at a time, from any checkout: this refuses to start
-// while another `desktop:dev` holds the lock in the temp directory, or while a
-// debug ListenJar.app is still running (from an IDE, or left behind by a
-// `desktop:dev` that was killed outright).
+// One debug app runs per device, from any checkout: this stands aside while
+// another `desktop:dev` holds that device's lock in the temp directory (another
+// session or checkout running the same device), or, on macOS, while a debug
+// ListenJar.app is still running (from an IDE, or left behind by a
+// `desktop:dev` that was killed outright). Standing aside exits 0, so
+// `moonx dev` keeps the backend and web running instead of stopping them all.
 import 'dart:async';
 import 'dart:io';
 
 Future<void> main(List<String> args) async {
   final root = File.fromUri(Platform.script).parent.parent;
   final app = Directory('${root.path}/packages/desktop');
+  final device = args.firstOrNull ?? 'macos';
 
   // Held until this process exits, however it exits: the OS drops the lock.
-  final lockFile = File('${Directory.systemTemp.path}/listenjar-desktop-dev.lock');
+  final lockFile = File('${Directory.systemTemp.path}/listenjar-desktop-dev-$device.lock');
   final lock = lockFile.openSync(mode: FileMode.append);
   try {
     lock.lockSync(FileLock.exclusive);
   } on FileSystemException {
     final holder = lockFile.readAsStringSync().trim();
-    stderr.writeln('desktop:dev is already running (pid $holder): use that one, or stop it first.');
-    exit(1);
+    stderr.writeln(
+      'desktop:dev is already running on $device (pid $holder): use that one, or stop it and run desktop:dev again.',
+    );
+    exit(0);
   }
   lock
     ..truncateSync(0)
     ..writeStringSync('$pid')
     ..flushSync();
 
-  final running = Process.runSync('pgrep', ['-f', '/Debug/ListenJar.app/Contents/MacOS/ListenJar']);
-  final apps = (running.stdout as String).trim().split('\n').where((line) => line.isNotEmpty);
-  if (apps.isNotEmpty) {
-    stderr.writeln('A debug ListenJar is already running (pid ${apps.join(', ')}): quit it first.');
-    exit(1);
+  if (device == 'macos') {
+    final running = Process.runSync('pgrep', ['-f', '/Debug/ListenJar.app/Contents/MacOS/ListenJar']);
+    final apps = (running.stdout as String).trim().split('\n').where((line) => line.isNotEmpty);
+    if (apps.isNotEmpty) {
+      stderr.writeln(
+        'A debug ListenJar is already running (pid ${apps.join(', ')}): quit it, then run desktop:dev again.',
+      );
+      exit(0);
+    }
   }
   final pidFile = File('${Directory.systemTemp.path}/listenjar-desktop-${pid}.pid');
   final flutter = await Process.start(
     'flutter',
-    ['run', '-d', args.firstOrNull ?? 'macos', '--pid-file', pidFile.path, '--print-dtd'],
+    ['run', '-d', device, '--pid-file', pidFile.path, '--print-dtd'],
     workingDirectory: app.path,
     mode: ProcessStartMode.inheritStdio,
   );
