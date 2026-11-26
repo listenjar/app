@@ -165,10 +165,14 @@ jobs:
           git clone --quiet --depth 1 --branch $version https://github.com/flutter/flutter.git C:\flutter
           if ($LASTEXITCODE -ne 0) { throw "No Flutter $version." }
           Add-Content $env:GITHUB_PATH 'C:\flutter\bin'
+      # No package cache: each release runs on its own tag, whose caches the
+      # next tag cannot restore, and saving it runs paccache, which can fail
+      # the job on its own (exit 4 on windows-11-arm).
       - uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
           release: false
+          cache: false
           install: ${{ matrix.compiler }}
       # The compiler's own programs and DLLs live in its environment's bin.
       - name: Put the MinGW-w64 compiler on PATH
