@@ -42,7 +42,9 @@ import 'ui.dart';
 
 final _log = Logger('links');
 
-/// Links waiting for the window to act on them, oldest first.
+/// The link waiting for the window to act on it: only the latest, as a
+/// newer share replaces one not opened yet (and the shell closes the
+/// question of one being opened).
 final class IncomingLinks extends ChangeNotifier {
   IncomingLinks(List<String> arguments) {
     for (final argument in arguments) {
@@ -58,7 +60,7 @@ final class IncomingLinks extends ChangeNotifier {
   }
 
   static const _channel = MethodChannel('listenjar/links');
-  final _waiting = <Uri>[];
+  Uri? _waiting;
 
   // SharedLinks.java pings from the activity, on the main thread, which is
   // also the UI thread: the ping comes here as a message (async), after the
@@ -101,15 +103,19 @@ final class IncomingLinks extends ChangeNotifier {
     ));
   }
 
-  Uri? next() => _waiting.isEmpty ? null : _waiting.removeAt(0);
+  Uri? next() {
+    final link = _waiting;
+    _waiting = null;
+    return link;
+  }
 
-  List<Uri> get waiting => List.unmodifiable(_waiting);
+  List<Uri> get waiting => [?_waiting];
 
   void _take(String text) {
     final link = linkIn(text);
     _log.fine('Received “$text”${link == null ? ': no link in it' : ''}');
     if (link != null) {
-      _waiting.add(link);
+      _waiting = link;
       notifyListeners();
     }
   }
@@ -133,8 +139,10 @@ Uri? linkIn(String text) {
   return uri.scheme == 'http' || uri.scheme == 'https' ? uri : null;
 }
 
-/// Does what [link] asks, as the rules at the top of this file say.
-Future<void> openLink(BuildContext context, Uri link) async {
+/// Does what [link] asks, as the rules at the top of this file say. Gives
+/// up, asking nothing, once [replaced] says a newer link came.
+Future<void> openLink(BuildContext context, Uri link, {bool Function()? replaced}) async {
+  bool gone() => !context.mounted || (replaced?.call() ?? false);
   final s = Services.of(context);
   final navigation = Navigation.of(context);
   if (parseApplePodcastsLink(link.toString()) case final apple?) {
@@ -153,7 +161,7 @@ Future<void> openLink(BuildContext context, Uri link) async {
   if (s.account.restoring) {
     _log.fine('Waiting for the account before opening $link');
     await s.account.restored();
-    if (!context.mounted) return;
+    if (gone()) return;
   }
   if (youtube.kind != SourceKind.video) {
     await followYouTube(context, youtube, 'this ${kindLabel(youtube.kind)}');
@@ -164,7 +172,7 @@ Future<void> openLink(BuildContext context, Uri link) async {
     // after the account: wait, or they'd be missing from the choices.
     if (s.feeds.loading) {
       await s.feeds.load();
-      if (!context.mounted) return;
+      if (gone()) return;
     }
     final choice = await _askWhere(context);
     if (choice == null || !context.mounted) return;

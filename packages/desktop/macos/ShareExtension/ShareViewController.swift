@@ -15,10 +15,13 @@ final class ShareViewController: NSViewController {
     super.viewDidLoad()
     let providers = (extensionContext?.inputItems as? [NSExtensionItem] ?? []).flatMap { $0.attachments ?? [] }
     Task { @MainActor in
-      if let shared = await Self.firstLink(in: providers), let url = Self.appLink(for: shared) {
-        NSWorkspace.shared.open(url)
+      let url = await Self.firstLink(in: providers).flatMap(Self.appLink(for:))
+      // Done first, then open: the browser takes focus back when its share
+      // sheet closes, so opening before that brought the window up for a
+      // moment and dropped it behind the browser again.
+      extensionContext?.completeRequest(returningItems: nil) { _ in
+        if let url { NSWorkspace.shared.open(url) }
       }
-      extensionContext?.completeRequest(returningItems: nil)
     }
   }
 

@@ -154,19 +154,51 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
 
   bool _opening = false;
 
-  /// Opens shared links one at a time: each may ask a question.
+  /// The root navigator's top route when the link being opened came, and
+  /// whether a newer link has replaced it.
+  Route<Object?>? _before;
+  var _replaced = false;
+
+  /// Opens shared links one at a time, each of which may ask a question;
+  /// only the latest is asked about. A link that comes while another is
+  /// open closes what that one put up ("Add this video" and the rest) and
+  /// is asked about instead.
   Future<void> _linksArrived() async {
-    if (_opening) return;
+    if (_opening) {
+      _replaceOpening();
+      return;
+    }
     _opening = true;
     try {
       while (mounted) {
         final link = widget.links.next();
         if (link == null) break;
-        await openLink(context, link);
+        _before = _top(Navigator.of(context, rootNavigator: true));
+        _replaced = false;
+        await openLink(context, link, replaced: () => _replaced);
       }
     } finally {
       _opening = false;
+      _before = null;
     }
+  }
+
+  void _replaceOpening() {
+    if (!mounted || widget.links.waiting.isEmpty) return;
+    _replaced = true;
+    final before = _before;
+    if (before == null) return;
+    Navigator.of(context, rootNavigator: true).popUntil((r) => r == before || r.isFirst);
+  }
+
+  /// [navigator]'s top route; popUntil stops at once without popping it.
+  static Route<Object?>? _top(NavigatorState navigator) {
+    Route<Object?>? top;
+    navigator.popUntil((route) {
+      top = route;
+      return true;
+    });
+    return top;
   }
 
   @override
