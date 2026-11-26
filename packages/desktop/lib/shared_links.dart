@@ -39,6 +39,7 @@ import 'shared_links_ios.g.dart' as ios;
 import 'sync.dart' show PlanLimit;
 import 'theme.dart' as brand;
 import 'ui.dart';
+import 'youtube.dart' show SearchResult, SourceRef, SourceRefKind;
 
 final _log = Logger('links');
 
@@ -170,15 +171,20 @@ Future<void> openLink(BuildContext context, Uri link, {bool Function()? replaced
   if (isPaid(s.account.user)) {
     // Their podcasts in ListenJar Cloud list from its feeds, which load just
     // after the account: wait, or they'd be missing from the choices.
+    // What it is, for the question to name: looked up meanwhile.
+    final video = _lookUp(s, youtube);
     if (s.feeds.loading) {
       await s.feeds.load();
       if (gone()) return;
     }
-    final choice = await _askWhere(context);
+    final choice = await _askWhere(context, youtube, video);
     if (choice == null || !context.mounted) return;
+    // Known by now, most likely: saves adding it looking it up again.
+    final title = await video.timeout(Duration.zero, onTimeout: () => null);
+    if (!context.mounted) return;
     await switch (choice) {
-      _Own(:final own) => addVideoToOwnPodcast(context, youtube.url, own),
-      _New() => addVideoToOwnPodcast(context, youtube.url, null),
+      _Own(:final own) => addVideoToOwnPodcast(context, youtube.url, own, title: title?.title),
+      _New() => addVideoToOwnPodcast(context, youtube.url, null, title: title?.title),
     };
     return;
   }
@@ -464,8 +470,22 @@ final class _New extends _Where {
 }
 
 
+/// [link]'s title, thumbnail, channel and length; null when YouTube won't
+/// say, which the question gets by with.
+Future<SearchResult?> _lookUp(Services s, YouTubeLink link) async {
+  final token = TimeoutCancellationToken(const Duration(seconds: 30));
+  try {
+    return await (await s.youtube.session(token)).lookup(SourceRef(SourceRefKind.video, link.id, link.url), token);
+  } catch (e) {
+    _log.info('Couldn’t look up ${link.url} for the question', e);
+    return null;
+  }
+}
+
 /// On a paid plan: into one of the listener's own podcasts, or a new one.
-Future<_Where?> _askWhere(BuildContext context) {
+/// Under its title, the [video] it's about, its link until [found] says
+/// what it is.
+Future<_Where?> _askWhere(BuildContext context, YouTubeLink video, Future<SearchResult?> found) {
   final text = Theme.of(context).textTheme;
   final own = ownPodcasts(context);
   Widget option(IconData icon, String title, String? body, _Where where) => InkWell(
@@ -492,10 +512,15 @@ Future<_Where?> _askWhere(BuildContext context) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
       title: Text('Add this video', style: text.titleLarge),
       contentPadding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
+      // As wide when the video's title comes as before, so nothing jumps.
+      content: SizedBox(
+        width: 420,
         child: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: _VideoHeader(link: video, found: found),
+            ),
             for (final o in own) option(Icons.playlist_add_rounded, 'Add to “${o.title}”', null, _Own(o)),
             option(Icons.add_rounded, 'Add to a new podcast…', null, const _New()),
           ]),
@@ -506,4 +531,71 @@ Future<_Where?> _askWhere(BuildContext context) {
       ],
     ),
   );
+}
+
+/// The video a question is about: its thumbnail, title, and channel and
+/// length, once [found] has them; its link until then, or if YouTube won't
+/// say.
+final class _VideoHeader extends StatelessWidget {
+  const _VideoHeader({required this.link, required this.found});
+  final YouTubeLink link;
+  final Future<SearchResult?> found;
+
+  static const _width = 112.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    const placeholder = ColoredBox(color: brand.paperDeep);
+    return FutureBuilder<SearchResult?>(
+      future: found,
+      builder: (context, snapshot) {
+        final video = snapshot.data;
+        final waiting = snapshot.connectionState != ConnectionState.done;
+        final details = [...?video?.details.take(1), ?video?.badge].join(' · ');
+        return Semantics(
+          label: video == null ? link.url : '${video.title}${details.isEmpty ? '' : ', $details'}',
+          excludeSemantics: true,
+          child: Row(children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox(
+                width: _width,
+                height: _width * 9 / 16,
+                child: switch (video?.thumbnailUrl) {
+                  null => placeholder,
+                  final url => Image.network(
+                    url,
+                    fit: BoxFit.cover,
+                    cacheWidth: (_width * dpr).round(),
+                    errorBuilder: (_, _, _) => placeholder,
+                    frameBuilder: (_, child, frame, sync) => sync || frame != null ? child : placeholder,
+                  ),
+                },
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(
+                  video?.title ?? (waiting ? 'Looking it up…' : link.url),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.titleMedium!.copyWith(fontSize: 15, color: video == null ? brand.fgSoft : null),
+                ),
+                if (details.isNotEmpty || video == null)
+                  Text(
+                    video == null ? (waiting ? link.url : 'YouTube didn’t say what it is') : details,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodySmall!.copyWith(color: brand.fgSoft),
+                  ),
+              ]),
+            ),
+          ]),
+        );
+      },
+    );
+  }
 }
