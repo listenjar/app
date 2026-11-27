@@ -16,6 +16,19 @@
 // A free listener's single video is all the backend takes from them; a plan
 // that's full stops the feed until there's room (PlanLimit).
 //
+// A source's audio is fetched and stored once, for every listener and feed
+// that has it, and nothing is locked: devices race, and each step is
+// compare-and-set on the server or in the bucket. The first call of anyone's
+// to add a source asks for its audio, and the server tells each device when
+// to start fetching it (Episode.fetchAfter): at once for the device that
+// asked, a while later for every other, the listener's own and everyone
+// else's. Until then this device leaves it be ([FeedSync.elsewhere]) and
+// makes no YouTube call for it. The upload only creates (If-None-Match), so
+// the first audio to land stays, and a device whose PUT gets 412 completes
+// the episode all the same, which publishes what landed. A device still
+// fetching a video stops once the feed list (watchMyFeeds) shows its upload
+// live.
+//
 // Transient failures retry up to five times with backoff. When YouTube
 // rate-limits the session, the rest waits for the next pass. Every feed is
 // checked on each scheduled pass (about hourly, schedule.dart), and right
@@ -70,6 +83,15 @@ final class PlanLimit implements Exception {
 
 enum FeedPhase { waiting, scanning, syncing, upToDate, failed }
 
+/// One video on its way up from this device: what is happening to it and
+/// how far along it is.
+final class VideoSync {
+  VideoSync(this.title);
+  final String title;
+  String stage = 'Looking up';
+  double? fraction;
+}
+
 /// What the engine is doing with one feed, for the window.
 final class FeedSync {
   FeedPhase phase = FeedPhase.waiting;
@@ -86,10 +108,23 @@ final class FeedSync {
   /// Videos a [PlanLimit] stopped: they sync once the plan allows.
   int waiting = 0;
 
-  /// The video in flight, what is happening to it and how far along it is.
-  String? current;
-  String? stage;
-  double? fraction;
+  /// The videos this device is bringing up now, by watch URL, in the order
+  /// they started. Each keeps its own stage and progress, so two at once
+  /// never take turns in one line.
+  final videos = <String, VideoSync>{};
+
+  /// Videos another device asked for first and is bringing up, by watch
+  /// URL: this one leaves each to it until the time here (the episode's
+  /// fetchAfter), then races for it too.
+  final elsewhere = <String, DateTime>{};
+
+  /// The video in flight that started first: the one a single line follows
+  /// until it's done.
+  VideoSync? get lead => videos.values.firstOrNull;
+  String? get current => lead?.title;
+  String? get stage => lead?.stage;
+  double? get fraction => lead?.fraction;
+
   Object? error;
   DateTime? checkedAt;
 }
@@ -125,7 +160,18 @@ final class SyncEngine {
   List<Feed> _feeds = const [];
   final _status = <String, FeedSync>{};
   bool _running = false;
-  bool _again = false;
+
+  /// What the next pass syncs: every feed, and some by id.
+  bool _all = false;
+  final _some = <String>{};
+
+  /// Each video in flight's own cancellation, by feed and watch URL: it
+  /// stops when another device's upload of the video goes live first.
+  final _flights = <(String, String), CancellationToken>{};
+
+  /// Looks again once the first video left to another device is this
+  /// device's to race for.
+  Timer? _wake;
 
   /// Waiting for the pass running now, or the one after it, to end.
   final _passed = <Completer<void>>[];
@@ -133,13 +179,45 @@ final class SyncEngine {
   FeedSync? statusOf(String feedId) => _status[feedId];
 
   /// The listener's feeds, first or changed: syncs any new one now. The
-  /// engine keeps no clock; the schedule (schedule.dart) asks for passes.
+  /// schedule (schedule.dart) asks for the regular passes; the engine's own
+  /// clock only looks again at videos left to another device ([_wake]).
+  ///
+  /// The list changes whenever any device adds an episode or lands an
+  /// upload. A podcast of the listener's own is looked at again then: it
+  /// takes no YouTube call, so another device's additions show here at once.
+  /// Videos in flight whose feed published more are checked, and dropped
+  /// when another device's upload of them is live.
   void updateFeeds(List<Feed> feeds) {
-    final known = _feeds.map((f) => f.id).toSet();
+    final before = {for (final f in _feeds) f.id: f};
     _feeds = feeds;
     _status.removeWhere((id, _) => !feeds.any((f) => f.id == id));
-    if (feeds.any((f) => !known.contains(f.id))) syncNow();
+    if (feeds.any((f) => !before.containsKey(f.id))) syncNow();
+    for (final feed in feeds) {
+      final was = before[feed.id];
+      if (was == null || identical(was, feed)) continue;
+      if (was.episodeCount != feed.episodeCount) unawaited(_landedElsewhere(feed));
+      if (feed.source == null) _syncFeeds([feed.id]);
+    }
     _changed();
+  }
+
+  /// Stops bringing up the videos of [feed] another device's upload put
+  /// live meanwhile, and stops waiting on them.
+  Future<void> _landedElsewhere(Feed feed) async {
+    final status = _status[feed.id];
+    final flying = _flights.keys.any((k) => k.$1 == feed.id);
+    if (!flying && (status?.elsewhere.isEmpty ?? true)) return;
+    try {
+      final inventory = await _api.listEpisodes(feedId: feed.id).asCancellable(_life);
+      for (final episode in inventory) {
+        if (episode.uploadedAt == null) continue;
+        _flights[(feed.id, episode.sourceUrl)]?.cancel();
+        status?.elsewhere.remove(episode.sourceUrl);
+      }
+      _changed();
+    } catch (_) {
+      // The next pass finds it live.
+    }
   }
 
   /// Runs a pass now, unless one is running already, and completes when
@@ -154,11 +232,18 @@ final class SyncEngine {
 
   /// Runs a pass over every feed, or another right after the current one.
   void syncNow() {
-    if (_life.isCancelled) return;
-    if (_running) {
-      _again = true;
-      return;
-    }
+    _all = true;
+    _kick();
+  }
+
+  /// Syncs the feeds [ids] now, or right after the current pass.
+  void _syncFeeds(Iterable<String> ids) {
+    _some.addAll(ids);
+    _kick();
+  }
+
+  void _kick() {
+    if (_life.isCancelled || _running) return;
     unawaited(_pass());
   }
 
@@ -200,30 +285,25 @@ final class SyncEngine {
     final merged = _life.merge(token);
     final (media, reason) = await (await _youtube.session(merged)).media(link.id, channel: false, token: merged);
     if (media == null) throw StateError(reason ?? 'YouTube didn’t play it.');
-    final Episode episode;
-    try {
-      episode = await _api
-        .createEpisode(
-          feedId: feed.id,
-          body: NewEpisode(
-            sourceUrl: link.url,
-            title: _clip(media.title, 500),
-            description: _clip(media.description, 10000),
-            publishedAt: media.publishedAt.toIso8601String(),
-            durationSeconds: media.durationSeconds,
-          ),
-        )
-        .asCancellable(merged);
-    } on ApiStatusException catch (e) {
-      throw PlanLimit.of(e) ?? e;
-    }
+    final episode = await _addEpisode(
+      feed,
+      NewEpisode(
+        sourceUrl: link.url,
+        title: _clip(media.title, 500),
+        description: _clip(media.description, 10000),
+        publishedAt: media.publishedAt.toIso8601String(),
+        durationSeconds: media.durationSeconds,
+      ),
+      merged,
+    );
     if (episode.uploadedAt != null) onPublished?.call(feed.id);
-    syncNow();
+    _syncFeeds([feed.id]);
     return episode;
   }
 
   Future<void> close() async {
     _life.cancel();
+    _wake?.cancel();
     for (final passed in _passed) {
       passed.complete();
     }
@@ -250,11 +330,15 @@ final class SyncEngine {
 
   Future<void> _pass() async {
     _running = true;
+    _wake?.cancel();
     try {
-      do {
-        _again = false;
+      while ((_all || _some.isNotEmpty) && !_life.isCancelled) {
+        final only = _all ? null : {..._some};
+        _all = false;
+        _some.clear();
         for (final feed in [..._feeds]) {
           if (_life.isCancelled) return;
+          if (only != null && !only.contains(feed.id)) continue;
           if (!_feeds.any((f) => f.id == feed.id)) continue;
           try {
             await _syncFeed(feed);
@@ -273,14 +357,37 @@ final class SyncEngine {
             break;
           }
         }
-      } while (_again && !_life.isCancelled);
+      }
     } finally {
       _running = false;
+      _wakeForElsewhere();
       for (final passed in _passed) {
         passed.complete();
       }
       _passed.clear();
     }
+  }
+
+  /// Looks again at the feeds with videos left to another device once the
+  /// first of them is this device's to race for.
+  void _wakeForElsewhere() {
+    _wake?.cancel();
+    if (_life.isCancelled) return;
+    final waiting = {
+      for (final MapEntry(key: id, value: s) in _status.entries)
+        if (s.elsewhere.isNotEmpty) id: s.elsewhere.values.reduce((a, b) => a.isBefore(b) ? a : b),
+    };
+    if (waiting.isEmpty) return;
+    final first = waiting.values.reduce((a, b) => a.isBefore(b) ? a : b);
+    _wake = Timer(first.difference(DateTime.now()) + const Duration(seconds: 5), () => _syncFeeds(waiting.keys));
+  }
+
+  /// Until when [episode] is left to the device that asked for it first;
+  /// null when it's this device's to fetch now.
+  static DateTime? _leftUntil(Episode episode) {
+    if (episode.uploadedAt != null) return null;
+    final after = DateTime.tryParse(episode.fetchAfter ?? '');
+    return after != null && after.isAfter(DateTime.now()) ? after : null;
   }
 
   Future<void> _syncFeed(Feed feed) async {
@@ -299,6 +406,7 @@ final class SyncEngine {
       ..failed = 0
       ..waiting = 0
       ..queued = 0;
+    status.elsewhere.clear();
     _changed();
     try {
       final token = _life;
@@ -344,10 +452,20 @@ final class SyncEngine {
 
       final uploaded = {for (final e in inventory) if (e.uploadedAt != null) e.sourceUrl};
       status.episodes = uploaded.where(present.contains).length + (snapshot.canRemove ? 0 : uploaded.difference(present).length);
-      final additions = [
-        for (final video in snapshot.videos)
-          if (!uploaded.contains(youTubeVideoUrl(video.id)) && journal.skipped(_key(feed, youTubeVideoUrl(video.id)), _skipMemory) == null) video,
-      ];
+      final made = {for (final e in inventory) e.sourceUrl: e};
+      final additions = <Video>[];
+      for (final video in snapshot.videos) {
+        final url = youTubeVideoUrl(video.id);
+        if (uploaded.contains(url) || journal.skipped(_key(feed, url), _skipMemory) != null) continue;
+        // Another device asked first: no YouTube call here while it has it.
+        if (made[url] case final episode?) {
+          if (_leftUntil(episode) case final until?) {
+            status.elsewhere[url] = until;
+            continue;
+          }
+        }
+        additions.add(video);
+      }
       status
         ..phase = additions.isEmpty ? FeedPhase.upToDate : FeedPhase.syncing
         ..queued = additions.length;
@@ -397,10 +515,8 @@ final class SyncEngine {
       }
       status
         ..phase = status.failed > 0 ? FeedPhase.failed : FeedPhase.upToDate
-        ..current = null
-        ..stage = null
-        ..fraction = null
         ..checkedAt = DateTime.now();
+      status.videos.clear();
       // listenjar.com's dashboard shows when the app last checked YouTube.
       // Only a pass that left the feed up to date counts; a failed report
       // fails nothing, and the next pass sends it again.
@@ -428,88 +544,119 @@ final class SyncEngine {
     YouTube youtube,
     Journal journal,
     FeedSync status,
-    CancellationToken token,
+    CancellationToken pass,
   ) async {
-    final key = _key(feed, youTubeVideoUrl(video.id));
+    final url = youTubeVideoUrl(video.id);
+    final key = _key(feed, url);
+    final flight = CancellationToken();
+    _flights[(feed.id, url)] = flight;
+    final token = pass.merge(flight);
+    final progress = status.videos[url] = VideoSync(video.title);
     void show(String stage, [int done = 0, int total = 0]) {
-      status
-        ..current = video.title
+      progress
         ..stage = stage
         ..fraction = total > 0 ? done / total : null;
       _changed();
     }
 
-    await _retry(() async {
-      show('Looking up');
-      final (media, reason) = await youtube.media(video.id, channel: channel, token: token);
-      if (media == null) {
-        journal.skip(key, reason!);
-        status.skipped++;
-        return;
-      }
+    try {
+      await _retry(() async {
+        show('Looking up');
+        final (media, reason) = await youtube.media(video.id, channel: channel, token: token);
+        if (media == null) {
+          journal.skip(key, reason!);
+          status.skipped++;
+          return;
+        }
 
-      final Episode episode;
-      try {
-        episode = await _api
-          .createEpisode(
-            feedId: feed.id,
-            body: NewEpisode(
-              sourceUrl: youTubeVideoUrl(video.id),
-              title: _clip(media.title, 500),
-              description: _clip(media.description, 10000),
-              publishedAt: media.publishedAt.toIso8601String(),
-              durationSeconds: media.durationSeconds,
-              number: number,
-            ),
-          )
-          .asCancellable(token);
-      } on ApiStatusException catch (e) {
-        throw PlanLimit.of(e) ?? e;
-      }
+        final episode = await _addEpisode(
+          feed,
+          NewEpisode(
+            sourceUrl: url,
+            title: _clip(media.title, 500),
+            description: _clip(media.description, 10000),
+            publishedAt: media.publishedAt.toIso8601String(),
+            durationSeconds: media.durationSeconds,
+            number: number,
+          ),
+          token,
+        );
+        // Another device, anyone's, asked for it first: it's that one's
+        // for a while.
+        if (_leftUntil(episode) case final until?) {
+          status.elsewhere[url] = until;
+          return;
+        }
 
-      // Someone's feed has this video's audio already: live with nothing to download.
-      if (episode.uploadedAt == null) {
-        File file;
-        while (true) {
+        // Someone's feed has this video's audio already: live with nothing to download.
+        if (episode.uploadedAt == null) {
+          File file;
+          while (true) {
+            try {
+              file = await download(_mediaHttp, journal, key, media.audio, (d, t) => show('Downloading', d, t), token);
+              break;
+            } on MediaUnavailable {
+              if (!await youtube.fallback(media, token)) rethrow;
+            }
+          }
+
+          // A regular M4A rather than YouTube's fragments, which AVPlayer (and
+          // so Apple Podcasts) plays at twice the length (faststart.dart).
+          show('Preparing');
+          final rewritten = media.contentType == 'audio/mp4' ? await faststart(file, token) : null;
           try {
-            file = await download(_mediaHttp, journal, key, media.audio, (d, t) => show('Downloading', d, t), token);
-            break;
-          } on MediaUnavailable {
-            if (!await youtube.fallback(media, token)) rethrow;
+            show('Uploading');
+            await uploadThrough(
+              _mediaHttp,
+              await UploadFile.fromFile(rewritten ?? file, media.contentType),
+              presign: (request) async {
+                try {
+                  return await _api.createUpload(feedId: feed.id, episodeId: episode.id, body: request);
+                } on ApiStatusException catch (e) {
+                  // 409: another device's upload landed first, and the episode is live.
+                  if (e.statusCode == HttpStatus.conflict) return null;
+                  throw PlanLimit.of(e) ?? e;
+                }
+              },
+              complete: () async {
+                try {
+                  return await _api.completeEpisode(feedId: feed.id, episodeId: episode.id);
+                } on ApiStatusException catch (e) {
+                  throw PlanLimit.of(e) ?? e;
+                }
+              },
+              progress: (d, t) => show('Uploading', d, t),
+              token: token,
+            );
+          } finally {
+            await rewritten?.delete();
           }
         }
-
-        // A regular M4A rather than YouTube's fragments, which AVPlayer (and
-        // so Apple Podcasts) plays at twice the length (faststart.dart).
-        show('Preparing');
-        final rewritten = media.contentType == 'audio/mp4' ? await faststart(file, token) : null;
-        try {
-          show('Uploading');
-          await uploadThrough(
-            _mediaHttp,
-            await UploadFile.fromFile(rewritten ?? file, media.contentType),
-            presign: (request) async {
-              try {
-                return await _api.createUpload(feedId: feed.id, episodeId: episode.id, body: request);
-              } on ApiStatusException catch (e) {
-                // 409: another computer uploaded it first, and the episode is live.
-                if (e.statusCode == HttpStatus.conflict) return null;
-                throw PlanLimit.of(e) ?? e;
-              }
-            },
-            complete: () => _api.completeEpisode(feedId: feed.id, episodeId: episode.id),
-            progress: (d, t) => show('Uploading', d, t),
-            token: token,
-          );
-        } finally {
-          await rewritten?.delete();
-        }
-      }
+        await journal.forget(key);
+        status.added++;
+        status.episodes++;
+        onPublished?.call(feed.id);
+      }, token);
+    } on CancelledException {
+      if (pass.isCancelled || !flight.isCancelled) rethrow;
+      // Another device's upload went live first: this copy isn't needed.
       await journal.forget(key);
-      status.added++;
       status.episodes++;
       onPublished?.call(feed.id);
-    }, token);
+    } finally {
+      _flights.remove((feed.id, url));
+      status.videos.remove(url);
+      _changed();
+    }
+  }
+
+  /// Adds the episode [body] to [feed], or refreshes the one it has.
+  Future<Episode> _addEpisode(Feed feed, NewEpisode body, CancellationToken token) async {
+    try {
+      return await _api.createEpisode(feedId: feed.id, body: body).asCancellable(token);
+    } on ApiStatusException catch (e) {
+      throw PlanLimit.of(e) ?? e;
+    }
   }
 
   /// Runs [action] up to five times while it fails in a way worth retrying.

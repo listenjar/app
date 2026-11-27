@@ -74,7 +74,9 @@ final class FeedEpisodes extends ChangeNotifier {
     final feed = this.feed;
     if (feed == null) return;
     final sync = _feeds.statusOf(feed);
-    final signature = (feed.episodeCount, sync?.phase, sync?.added, sync?.queued, sync?.current);
+    // A new list (any device added or uploaded something), or this
+    // device's sync moved on; progress alone doesn't ask the API again.
+    final signature = (feed, sync?.phase, sync?.added, sync?.queued, sync?.elsewhere.length);
     if (signature == _loadedAt) return;
     _loadedAt = signature;
     unawaited(_load(feed));
@@ -166,6 +168,7 @@ final class FeedSyncLine extends StatelessWidget {
             color: switch (phase) {
               FeedPhase.failed when !failed => p.fgFaint,
               FeedPhase.failed => p.danger,
+              FeedPhase.upToDate when sync!.elsewhere.isNotEmpty => p.link,
               FeedPhase.upToDate => p.ok,
               FeedPhase.syncing || FeedPhase.scanning => p.link,
               FeedPhase.waiting => p.fgFaint,
@@ -283,12 +286,15 @@ final class OnTheWay extends StatelessWidget {
     );
   }
 
-  /// What the sync is doing with [episode], and whether that is under way.
+  /// What the sync is doing with [episode], and whether that is under way
+  /// here. Each video has its own, so two on their way at once each keep
+  /// theirs.
   (String, bool) _detail(Episode episode, FeedSync? sync) {
-    if (sync?.current == episode.title && sync?.stage != null) {
-      final percent = sync!.fraction == null ? '' : ' ${(sync.fraction! * 100).floor()}%';
-      return ('${sync.stage}$percent', true);
+    if (sync?.videos[episode.sourceUrl] case final video?) {
+      final percent = video.fraction == null ? '' : ' ${(video.fraction! * 100).floor()}%';
+      return ('${video.stage}$percent', true);
     }
+    if (sync?.elsewhere.containsKey(episode.sourceUrl) ?? false) return ('Uploading from another device', false);
     return (
       switch (sync?.error) {
         PlanLimit(storageFull: true) => 'Waiting for room in your plan',

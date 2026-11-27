@@ -5,6 +5,10 @@
 // sends the bytes straight to the bucket, and confirms, which is when the
 // API makes the file live. An episode's audio (sync.dart) and a podcast's
 // artwork (feeds.dart) both come through here.
+//
+// The PUT only creates (`If-None-Match: *`, among the headers the API signs):
+// when another device's upload of the same audio landed first, the bucket
+// answers 412 and keeps that one, and confirming publishes it.
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -37,7 +41,8 @@ final class UploadFile {
 /// createImageUpload), the bytes go there, and [complete] confirms them (its
 /// completeEpisode or completeImage) and is what this returns. [presign]
 /// answers null when there is nothing to upload any more (someone else
-/// uploaded it first), and then this does too.
+/// uploaded it first), and then this does too. When the bucket has the file
+/// already (412: another device's landed first), [complete] confirms that one.
 Future<T?> uploadThrough<T>(
   HttpClient http,
   UploadFile file, {
@@ -71,6 +76,11 @@ Future<void> _put(HttpClient http, UploadFile file, PresignedUpload put, Progres
         if (all.length < 4096) all.addAll(chunk.take(4096 - all.length));
         return all;
       });
+      // Another upload of it landed first and stays: confirming publishes it.
+      if (response.statusCode == HttpStatus.preconditionFailed) {
+        done.complete();
+        return;
+      }
       if (response.statusCode ~/ 100 != 2) {
         throw TransferStatusException('upload (${String.fromCharCodes(body)})', response.statusCode);
       }

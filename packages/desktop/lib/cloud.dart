@@ -131,6 +131,8 @@ List<Widget> listenIn(BuildContext context, Feed feed, List<PodcastApp> apps) {
       return ('Paused: takes a 10 GB or 100 GB plan', true);
     case FeedSync(phase: FeedPhase.failed, :final error) when unreachable(error):
       return ('Offline · syncs when you’re back online', false);
+    case FeedSync(phase: FeedPhase.upToDate, :final elsewhere, episodes: final count) when elsewhere.isNotEmpty:
+      return ([if (count > 0) episodes(count), '${elsewhere.length} uploading from another device'].join(' · '), false);
     case FeedSync(phase: FeedPhase.upToDate, episodes: 0) when feed.source == null:
       return ('No episodes yet', false);
   }
@@ -167,6 +169,7 @@ List<Widget> listenIn(BuildContext context, Feed feed, List<PodcastApp> apps) {
   FeedSync(phase: FeedPhase.scanning) => ('Checking YouTube…', false),
   FeedSync(phase: FeedPhase.syncing, :final stage?, :final fraction?) => ('$stage ${(fraction * 100).floor()}%', false),
   FeedSync(phase: FeedPhase.syncing, :final queued) => ('Syncing · $queued to go', false),
+  FeedSync(phase: FeedPhase.upToDate, :final elsewhere) when elsewhere.isNotEmpty => ('Uploading on another device', false),
   FeedSync(phase: FeedPhase.upToDate, episodes: 0) => ('No episodes yet', false),
   _ when !playable => ('Waiting to sync', false),
   _ => null,

@@ -71,6 +71,25 @@ info:
     the playlist does.
 
 
+    One fetch per source: a source's audio is fetched from YouTube and stored
+    once, for every listener and every feed that has it. Every signed-in
+    device syncs, and nothing is locked; they race, and compare-and-set
+    decides each step. The first call of anyone's to add a source asks for
+    its audio, and its device fetches it at once; every other device, the
+    listener's own and everyone else's, waits until the episode's
+    `fetchAfter`, then races for it too. The upload is create-only
+    (`If-None-Match: *`), so the first audio to land in the bucket stays and
+    a later `PUT` gets 412; whoever gets 412 calls `completeEpisode` all the
+    same, which publishes whatever landed first. A device still fetching
+    stops once `watchMyFeeds` shows the episode live.
+
+
+    Ids: a source is its canonical URL, and where a URL can't go its id is
+    the URL's base64url SHA-256. That id names its audio in the media bucket
+    and is the id of every feed's episode of it, so any device knows both
+    from the source alone.
+
+
     Uploads: every file the app stores, an episode's audio or a podcast's
     artwork, goes the same way. The app asks for an upload (`NewUpload`: the
     file's type and exact size), gets a `PresignedUpload` (a presigned S3
@@ -351,7 +370,9 @@ paths:
         channels and podcasts of the listener's own take any, while the
         listener pays. Adding a video another feed of the listener's already
         has, such as a video feed's to a podcast of their own, costs no
-        storage.
+        storage. 201 says this call made the episode: of calls racing to
+        add the same video to the feed, exactly one gets it. Whose device
+        fetches its audio is `Episode.fetchAfter`.
       parameters:
         - $ref: "#/components/parameters/feedId"
       requestBody:
@@ -434,8 +455,9 @@ paths:
         Returns a presigned `PUT` to the R2 media bucket, valid for
         `expiresAt`. Send the file's bytes with the returned headers, then
         call `completeEpisode`. A video's audio is uploaded once for every
-        feed: while it is not uploaded, asking again (from any feed) replaces
-        the size and type the upload must have.
+        feed, and the `PUT` only creates: when another device's audio landed
+        first it gets 412, and `completeEpisode` publishes that one. Asking
+        again before any lands (from any feed) is fine.
       parameters:
         - $ref: "#/components/parameters/feedId"
         - $ref: "#/components/parameters/episodeId"
@@ -459,7 +481,7 @@ paths:
         "404":
           description: The listener has no such episode.
         "409":
-          description: The video's audio is already uploaded; the episode is live.
+          description: The video's audio is already uploaded, or landed in the bucket and is now; the episode is live.
         "507":
           description: The audio would take the listener past their plan's storage.
   /me/feeds/{feedId}/episodes/{episodeId}/complete:
@@ -467,10 +489,11 @@ paths:
       operationId: completeEpisode
       summary: Confirm an upload and publish the episode
       description: >-
-        Checks that the media object exists with the `byteLength` that
-        `createUpload` was given, marks the video's audio uploaded and
-        republishes the RSS of every feed that has the video. Completing an
-        uploaded episode again returns it unchanged.
+        Publishes the audio that landed in the bucket first, in either
+        format, whoever uploaded it: marks the video's audio uploaded with
+        that object's type and size (once, compare-and-set, so concurrent
+        calls agree) and republishes the RSS of every feed that has the
+        video. Completing an uploaded episode again returns it unchanged.
       parameters:
         - $ref: "#/components/parameters/feedId"
         - $ref: "#/components/parameters/episodeId"
@@ -482,7 +505,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Episode"
         "400":
-          description: Nothing was asked to be uploaded, or the media object is missing or its size differs; upload again.
+          description: Nothing was asked to be uploaded, or no audio has landed in the bucket yet; upload again.
+        "507":
+          description: The audio that landed would take the listener past their plan's storage.
         "401":
           description: The token is missing, revoked or expired.
         "404":
@@ -992,6 +1017,11 @@ components:
       properties:
         id:
           type: string
+          description: >-
+            Its source's id, the base64url SHA-256 of `sourceUrl`, the same in
+            every feed. An episode added before ids were hashes has a UUID
+            until the server's daily cleanup gives it its hash; its RSS
+            `<guid>` stays that UUID.
         sourceUrl:
           type: string
           format: uri
@@ -1025,6 +1055,15 @@ components:
           type: string
           format: date-time
           description: When the video's audio was uploaded; absent until then.
+        fetchAfter:
+          type: string
+          format: date-time
+          description: >-
+            Until the audio is uploaded: when the device asking should start
+            fetching it from YouTube. Now or past for the device whose call
+            first asked for the source, anyone's; a while after that for every
+            other, which leaves it to that one first. Advice, not a lock: past
+            it, devices race, and the first audio to land is published.
         mediaUrl:
           type: string
           format: uri
@@ -1101,8 +1140,10 @@ components:
           additionalProperties:
             type: string
           description: >-
-            Headers to send with the body, exactly: its Content-Type, and the
-            Cache-Control it is served with.
+            Headers to send with the body, exactly: its Content-Type, the
+            Cache-Control it is served with, and `If-None-Match: *`, so the
+            `PUT` only creates the object and gets 412 when it is there
+            already.
         expiresAt:
           type: string
           format: date-time

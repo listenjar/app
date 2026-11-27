@@ -213,7 +213,7 @@ final class _ShowPageState extends State<ShowPage> {
             ],
           ],
         );
-        return show == null ? page : Shown(show: show.id, child: page);
+        return show == null && feedId == null ? page : Shown(show: show?.id, feed: feedId, child: page);
       },
     );
   }

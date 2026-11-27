@@ -473,19 +473,22 @@ const _railRadius = 18.0;
 /// What the page in front is, for the chrome floating over it: whether it's
 /// on ink, and which show it's of. Pages say so with [Shown].
 final class Showing extends ChangeNotifier {
-  final _pages = <State, ({bool onInk, int? show})>{};
+  final _pages = <State, ({bool onInk, int? show, String? feed})>{};
 
   bool get onInk => _pages.values.any((p) => p.onInk);
   int? get show => _pages.values.map((p) => p.show).nonNulls.firstOrNull;
 
-  void _set(State page, ({bool onInk, int? show})? what) {
-    final before = (onInk, show);
+  /// The ListenJar feed the page is of, by id.
+  String? get feed => _pages.values.map((p) => p.feed).nonNulls.firstOrNull;
+
+  void _set(State page, ({bool onInk, int? show, String? feed})? what) {
+    final before = (onInk, show, feed);
     if (what == null) {
       _pages.remove(page);
     } else {
       _pages[page] = what;
     }
-    if ((onInk, show) != before) notifyListeners();
+    if ((onInk, show, feed) != before) notifyListeners();
   }
 }
 
@@ -500,11 +503,15 @@ final class _ShowingScope extends InheritedWidget {
 /// Tells the window's chrome what [child] is while it's in front: its
 /// route on top, in the section showing.
 final class Shown extends StatefulWidget {
-  const Shown({super.key, this.onInk = false, this.show, required this.child});
+  const Shown({super.key, this.onInk = false, this.show, this.feed, required this.child});
   final bool onInk;
 
   /// The show the page is of.
   final int? show;
+
+  /// The ListenJar feed the page is of: a podcast of the listener's that
+  /// isn't a show here yet, its first episode still on its way up.
+  final String? feed;
   final Widget child;
 
   @override
@@ -518,7 +525,7 @@ final class _ShownState extends State<Shown> {
   Widget build(BuildContext context) {
     _showing = context.getInheritedWidgetOfExactType<_ShowingScope>()?.showing;
     final front = (ModalRoute.isCurrentOf(context) ?? true) && Visibility.of(context);
-    final what = front ? (onInk: widget.onInk, show: widget.show) : null;
+    final what = front ? (onInk: widget.onInk, show: widget.show, feed: widget.feed) : null;
     // After the frame: the sidebar may have built already.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _showing?._set(this, what);
@@ -606,13 +613,19 @@ final class _Sidebar extends StatelessWidget {
                 final queued = s.library.queue.length;
                 final downloading = s.library.unfinishedDownloads().length;
                 final shows = s.library.podcasts;
+                // As in the Library: a podcast of the listener's in
+                // ListenJar Cloud is a show here once its first episode is
+                // up, and until then it's its feed, so it never goes
+                // missing, made on another device or not.
+                final linked = {for (final p in shows) ?p.cloudFeedId};
+                final pending = [for (final f in s.feeds.feeds) if (!linked.contains(f.id)) f];
                 return ListView(padding: const EdgeInsets.fromLTRB(8, 0, 8, 8), children: [
                   for (final item in [Section.home, Section.library, Section.search, Section.queue, Section.downloads])
                     _RailItem(
                       tone: tone,
                       // A show in front takes the pill; its section keeps
                       // its accent.
-                      selected: item == section && !shows.any((p) => p.id == showing.show),
+                      selected: item == section && !shows.any((p) => p.id == showing.show) && !pending.any((f) => f.id == showing.feed),
                       icon: Icon(item.icon, size: 18, color: item == section ? tone.accent : tone.soft),
                       label: item.label,
                       count: switch (item) {
@@ -622,7 +635,7 @@ final class _Sidebar extends StatelessWidget {
                       },
                       onTap: () => onGo(item),
                     ),
-                  if (shows.isNotEmpty) ...[
+                  if (shows.isNotEmpty || pending.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(10, 20, 10, 6),
                       child: Text(
@@ -637,6 +650,14 @@ final class _Sidebar extends StatelessWidget {
                         icon: Artwork(url: show.artworkUrl, title: show.title, size: 22, radius: 5),
                         label: show.title,
                         onTap: () => onShow(show),
+                      ),
+                    for (final feed in pending)
+                      _RailItem(
+                        tone: tone,
+                        selected: feed.id == showing.feed,
+                        icon: Artwork(url: feed.imageUrl, title: feed.title, size: 22, radius: 5),
+                        label: feed.title,
+                        onTap: () => Navigation.of(context).openFeed(feed.id),
                       ),
                   ],
                 ]);
