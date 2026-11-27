@@ -116,7 +116,10 @@ Future<Map<String, Object?>> _screenshot(Map<String, String> parameters) async {
     await Future<void>.delayed(const Duration(milliseconds: 16));
   }
   final view = RendererBinding.instance.renderViews.first;
-  final layer = view.debugLayer! as OffsetLayer;
+  // The view's own root layer: `debugLayer` is the same one, but debug
+  // builds alone keep it, and profile builds answer here too.
+  // ignore: invalid_use_of_protected_member
+  final layer = view.layer! as OffsetLayer;
   // The root layer already scales logical pixels to the screen's.
   final ratio = view.flutterView.devicePixelRatio;
   final scale = double.tryParse(parameters['scale'] ?? '') ?? ratio;
