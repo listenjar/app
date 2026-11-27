@@ -31,7 +31,9 @@
 //                          feed `url`), video (a YouTube video `url`,
 //                          looked up and played as Search does), follow (a YouTube
 //                          playlist or channel `url`, on this device),
-//                          unfollow (`show`), move (a `show` on this
+//                          unfollow (`show`), visibility (a podcast
+//                          of their own, `feed`, made `to` public or
+//                          private), move (a `show` on this
 //                          device to the Cloud, or a Cloud `feed` here),
 //                          open (a `feed` or `show`
 //                          id, `settings`, `nowPlaying`, `plans`,

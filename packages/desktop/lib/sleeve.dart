@@ -661,7 +661,7 @@ final class _PlayPillState extends State<PlayPill> with SingleTickerProviderStat
                   onTap: () {
                     if (playing) return unawaited(player.pause());
                     doneTyping();
-                    unawaited(player.playEpisode(e));
+                    unawaited(player.playEpisode(e, oldestFirst: ShowOrder.of(context)));
                   },
                   child: SizedBox(
                     height: 48,

@@ -1465,11 +1465,28 @@ final class UpNextList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final library = Services.of(context).library;
+    final s = Services.of(context);
+    final library = s.library;
     return ListenableBuilder(
-      listenable: library,
+      listenable: Listenable.merge([library, s.player]),
       builder: (context, _) {
         final queue = library.queue;
+        // Started on its show's page, the episode plays on into the show's next.
+        if (s.player.following case final following? when queue.isEmpty) {
+          return Padding(
+            padding: padding,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Text(
+                  'Then, from ${following.podcastTitle}',
+                  style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: brand.fgSoft),
+                ),
+              ),
+              EpisodeRow(episode: following),
+            ]),
+          );
+        }
         if (queue.isEmpty) {
           return Padding(
             padding: padding.add(const EdgeInsets.all(12)),

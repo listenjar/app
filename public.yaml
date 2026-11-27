@@ -167,7 +167,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Feed"
         "404":
-          description: No feed with that id.
+          description: No feed with that id, or a podcast of a listener's own that is private.
   /me/feeds:
     get:
       operationId: listMyFeeds
@@ -272,6 +272,38 @@ paths:
           description: Noted.
         "400":
           description: The feed is a podcast of the listener's own, with no YouTube source.
+        "401":
+          description: The token is missing, revoked or expired.
+        "404":
+          description: The listener has no feed with that id.
+  /me/feeds/{feedId}/visibility:
+    put:
+      operationId: setFeedVisibility
+      summary: Make a podcast of the listener's own public or private
+      description: >-
+        A new podcast of the listener's own is private: only its RSS, at its
+        unguessable address, plays it. Public, it also has a page on
+        listenjar.com (`Feed.pageUrl`) that anyone with the link can open,
+        play and share, and search engines may list. Private again, the page
+        is gone. A YouTube feed's show is public regardless, keyed by its
+        source, so it has no visibility to set.
+      parameters:
+        - $ref: "#/components/parameters/feedId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisibilityChange"
+      responses:
+        "200":
+          description: The feed, as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Feed"
+        "400":
+          description: Not `private` or `public`, or the feed follows a YouTube source.
         "401":
           description: The token is missing, revoked or expired.
         "404":
@@ -975,9 +1007,30 @@ components:
             When the feed is removed, with its episodes and RSS: a day after a
             free listener added it, unless they start paying first. Absent
             while the listener pays.
+        visibility:
+          $ref: "#/components/schemas/FeedVisibility"
+          description: >-
+            Whether a podcast of the listener's own has a public page
+            (`setFeedVisibility`). Only on those: a YouTube feed's show is
+            always public.
+        pageUrl:
+          type: string
+          format: uri
+          description: >-
+            The podcast's public page on listenjar.com, to share: only while
+            a podcast of the listener's own is public.
     SourceKind:
       type: string
       enum: [video, playlist, channel]
+    FeedVisibility:
+      type: string
+      enum: [private, public]
+    VisibilityChange:
+      type: object
+      required: [visibility]
+      properties:
+        visibility:
+          $ref: "#/components/schemas/FeedVisibility"
     Source:
       type: object
       required: [kind, url]

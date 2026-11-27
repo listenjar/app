@@ -18,6 +18,8 @@ final class QueuePage extends StatelessWidget {
       builder: (context, _) {
         final current = s.player.current;
         final queue = s.library.queue;
+        // Started on its show's page, the episode plays on into the show's next.
+        final following = s.player.following;
         return PageBody(children: [
           pageTitle(context, 'Up Next', actions: [
             if (queue.isNotEmpty)
@@ -31,14 +33,8 @@ final class QueuePage extends StatelessWidget {
             sectionHeading(context, 'Now playing', top: 16),
             rowsPanel([EpisodeRow(episode: current, withShow: true)]),
           ],
-          sectionHeading(context, queue.isEmpty ? 'Then' : 'Then · ${queue.length}', top: current == null ? 16 : 32),
-          if (queue.isEmpty)
-            const EmptyState(
-              title: 'Nothing waiting',
-              body: 'Choose “Play next” or “Play last” on any episode, and it waits here, in order. '
-                'When an episode ends, the first one here plays.',
-            )
-          else
+          if (queue.isNotEmpty) ...[
+            sectionHeading(context, 'Then · ${queue.length}', top: current == null ? 16 : 32),
             DecoratedBox(
               decoration: BoxDecoration(
                 color: brand.white,
@@ -47,6 +43,22 @@ final class QueuePage extends StatelessWidget {
               ),
               child: const UpNextList(padding: EdgeInsets.all(6), shrinkWrap: true),
             ),
+          ],
+          if (following != null) ...[
+            sectionHeading(
+              context,
+              '${queue.isEmpty ? 'Then' : 'After those'}, from ${following.podcastTitle}',
+              top: current == null && queue.isEmpty ? 16 : 32,
+            ),
+            rowsPanel([EpisodeRow(episode: following)]),
+          ] else if (queue.isEmpty) ...[
+            sectionHeading(context, 'Then', top: current == null ? 16 : 32),
+            const EmptyState(
+              title: 'Nothing waiting',
+              body: 'Choose “Play next” or “Play last” on any episode, and it waits here, in order. '
+                'When an episode ends, the first one here plays.',
+            ),
+          ],
         ]);
       },
     );

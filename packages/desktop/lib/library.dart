@@ -14,6 +14,7 @@ import 'package:sqlite3/sqlite3.dart';
 
 import 'backend/api.dart' show SourceKind;
 import 'chapters.dart';
+import 'directory.dart' show AppleEpisodeArt;
 import 'links.dart';
 import 'migrations.dart';
 
@@ -62,6 +63,8 @@ final class Podcast {
     required this.unplayed,
     required this.latestAt,
     required this.serial,
+    required this.appleId,
+    required this.appleCheckedAt,
   });
 
   final int id;
@@ -93,6 +96,14 @@ final class Podcast {
   /// playlist's, in the playlist's order.
   final bool serial;
 
+  /// The show's id in Apple's podcast directory, whose copies of its
+  /// episodes' artwork the rows show ([PodcastEpisode.appleArtworkUrl]):
+  /// null until looked for, 0 when Apple lists no show at its feed.
+  final int? appleId;
+
+  /// When Apple was last asked about the show.
+  final DateTime? appleCheckedAt;
+
   /// A single YouTube video kept as a show of its own.
   bool get isYouTube => kind == PodcastKind.youtube;
 
@@ -122,6 +133,7 @@ final class PodcastEpisode {
     required this.audioType,
     required this.audioBytes,
     required this.artworkUrl,
+    required this.appleArtworkUrl,
     required this.link,
     required this.youtubeId,
     required this.season,
@@ -149,6 +161,10 @@ final class PodcastEpisode {
   final String? audioType;
   final int? audioBytes;
   final String? artworkUrl;
+
+  /// Apple's copy of the episode's artwork, which loads where the feed's
+  /// image host may not, at 600 px rather than the feed's original.
+  final String? appleArtworkUrl;
   final String? link;
   final String? youtubeId;
   final int? season;
@@ -183,10 +199,11 @@ final class PodcastEpisode {
   };
 
   /// Small square art: a video's thumbnail, as the episode rows show it,
-  /// else the episode's own picture, else the show's.
+  /// else Apple's copy of the episode's picture, else the feed's, else the
+  /// show's.
   String? get artwork => switch (videoId) {
     final id? => videoThumbnail(id),
-    null => artworkUrl ?? podcastArtworkUrl,
+    null => appleArtworkUrl ?? artworkUrl ?? podcastArtworkUrl,
   };
 
   /// Whether the cover is a video's 16:9 frame.
@@ -195,7 +212,9 @@ final class PodcastEpisode {
   /// The big cover: a video's sharpest frame, else [artwork].
   String? get cover => switch (videoId) {
     final id? => 'https://i.ytimg.com/vi/$id/maxresdefault.jpg',
-    null => artwork,
+    // Apple's image servers draw any size up to the original: the name's
+    // last part says which.
+    null => appleArtworkUrl?.replaceFirstMapped(RegExp(r'/\d+x\d+bb\.(\w+)$'), (m) => '/1200x1200bb.${m[1]}') ?? artwork,
   };
 
   /// What [cover] falls back to when a video has no 1280×720 frame:
@@ -435,6 +454,8 @@ final class Library extends ChangeNotifier {
     unplayed: r['unplayed'] as int? ?? 0,
     latestAt: _time(r['latest_at']),
     serial: r['serial'] == 1,
+    appleId: r['apple_id'] as int?,
+    appleCheckedAt: _time(r['apple_checked_at']),
   );
 
   /// A stored duration: whole seconds, negative for none.
@@ -447,7 +468,7 @@ final class Library extends ChangeNotifier {
 
   static const _episodeColumns = '''
     e.id, e.podcast_id, e.guid, e.title, e.published_at, e.duration_ms, e.audio_url, e.audio_type,
-    e.audio_bytes, e.artwork_url, e.link, e.youtube_id, e.season, e.number, e.position_ms, e.played,
+    e.audio_bytes, e.artwork_url, e.apple_artwork_url, e.link, e.youtube_id, e.season, e.number, e.position_ms, e.played,
     e.download_path, e.download_state, e.download_progress, e.download_error,
     p.title as podcast_title, p.author as podcast_author, p.artwork_url as podcast_artwork_url
   ''';
@@ -466,6 +487,7 @@ final class Library extends ChangeNotifier {
     audioType: r['audio_type'] as String?,
     audioBytes: r['audio_bytes'] as int?,
     artworkUrl: r['artwork_url'] as String?,
+    appleArtworkUrl: r['apple_artwork_url'] as String?,
     link: r['link'] as String?,
     youtubeId: r['youtube_id'] as String?,
     season: r['season'] as int?,
@@ -692,6 +714,40 @@ final class Library extends ChangeNotifier {
       handOver.close();
     }
     return added;
+  }
+
+  /// Whether any of [podcast]'s latest 200 episodes, as many as Apple's
+  /// directory lists, lacks Apple's copy of its artwork.
+  bool missesAppleArtwork(int podcast) => _db.select('''
+    select 1 from (select apple_artwork_url from episodes where podcast_id = ? order by published_at desc limit 200)
+    where apple_artwork_url is null limit 1
+  ''', [podcast]).isNotEmpty;
+
+  /// What Apple's directory answered for [podcast]: its id there (0 for
+  /// none) and its copies of the episodes' artwork, matched by guid, else by
+  /// audio URL.
+  void appleAnswered(int podcast, int appleId, List<AppleEpisodeArt> art) {
+    final byGuid = _db.prepare('update episodes set apple_artwork_url = ? where podcast_id = ? and guid = ?');
+    final byAudio = _db.prepare('update episodes set apple_artwork_url = ? where podcast_id = ? and audio_url = ?');
+    _db.execute('begin');
+    try {
+      for (final a in art) {
+        if (a.guid case final guid?) byGuid.execute([a.artworkUrl, podcast, guid]);
+        if ((a.guid == null || _db.updatedRows == 0) && a.audioUrl != null) byAudio.execute([a.artworkUrl, podcast, a.audioUrl]);
+      }
+      _db.execute(
+        'update podcasts set apple_id = ?, apple_checked_at = ? where id = ?',
+        [appleId, DateTime.now().millisecondsSinceEpoch, podcast],
+      );
+      _db.execute('commit');
+    } catch (_) {
+      _db.execute('rollback');
+      rethrow;
+    } finally {
+      byGuid.close();
+      byAudio.close();
+    }
+    _changed();
   }
 
   /// What a refresh found: the feed, unless it hadn't changed. Returns the

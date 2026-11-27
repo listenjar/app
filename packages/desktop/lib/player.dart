@@ -147,7 +147,8 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     SignInRequired() => 'YouTube wants to confirm you’re not a bot before it plays this. Try again later.',
     RateLimited() => 'YouTube is limiting this device for now. Try again in a few minutes.',
     MediaUnavailable() => 'YouTube refused to stream this video. Try again in a few minutes.',
-    SocketException() || HttpException() || TimeoutException() => 'Couldn’t reach the podcast’s server. Check your connection and try again.',
+    SocketException() || TlsException() || HttpException() || TimeoutException() => 'Couldn’t reach the podcast’s server. Check your connection and try again.',
+    final PlayerException e when _transient(e) => 'Couldn’t reach the podcast’s server. Check your connection and try again.',
     PlayerException(:final message) => 'Couldn’t play this episode${message == null || message.isEmpty ? '' : ': $message'}.',
     final e => 'Couldn’t play this episode: $e',
   };
@@ -198,14 +199,47 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   /// dropped, rather than finished.
   static const _cutShort = Duration(minutes: 1);
 
+  /// Where the loaded episode last played: [position] goes to zero when
+  /// its source fails.
+  Duration _at = Duration.zero;
+
+  /// Where the next load starts instead of the saved position: where the
+  /// episode was when its source failed.
+  Duration? _resumeAt;
+
+  /// Network failures since the episode last made progress.
+  int _failures = 0;
+
+  /// Tries at loading or playing through a network failure, waiting longer
+  /// before each: connections that a network resets now and then (the
+  /// TLS handshake, mostly) get through on the next try.
+  static const _attempts = 4;
+  static Duration _backoff(int failures) => Duration(seconds: 1 << (failures - 1));
+
+  /// A failure of the network on the way, which the next try may not meet.
+  static bool _transient(Object e) => switch (e) {
+    SocketException() || TlsException() || HttpException() => true,
+    // AVPlayer's NSURLError (timed out, host not found or unreachable,
+    // connection lost, offline, TLS failed); ExoPlayer's source (I/O)
+    // errors; libmpv's failure to open the URL.
+    PlayerException(:final code, :final message) =>
+      Platform.isMacOS || Platform.isIOS
+        ? const {-1001, -1003, -1004, -1005, -1006, -1009, -1200}.contains(code)
+        : Platform.isAndroid
+        ? code == 0
+        : (message ?? '').startsWith('Failed to open'),
+    _ => false,
+  };
+
   void _listen() {
     _subscriptions
       ..add(_audio.playbackEventStream.listen((_) {
-        // At its end media_kit reports the position as zero, so where
-        // playback got to is kept here while it plays.
-        if (_audio.processingState != ProcessingState.completed && _audio.position > _reached) _reached = _audio.position;
+        _reachedNow();
         _broadcast();
-      }, onError: _failed))
+      }, onError: _playbackFailed))
+      // Playback events come only on changes (AVPlayer sends none while it
+      // just plays), so the ticking position keeps [_reached] current.
+      ..add(_audio.positionStream.listen((_) => _reachedNow()))
       ..add(_audio.playingStream.listen(_playingChanged))
       ..add(_audio.processingStateStream.listen((state) {
         if (state == ProcessingState.completed) unawaited(_finished());
@@ -221,6 +255,58 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
         notifyListeners();
       }));
     _library.addListener(_libraryChanged);
+  }
+
+  /// At its end media_kit reports the position as zero, so where playback
+  /// got to is kept while it plays.
+  void _reachedNow() {
+    if (_audio.processingState == ProcessingState.completed) return;
+    final at = _audio.position;
+    if (at > Duration.zero) _at = at;
+    if (at > _reached) {
+      _reached = at;
+      _failures = 0;
+    }
+  }
+
+  /// The audio player's source failed while loaded: through a network
+  /// failure it loads again where it was, and plays on if it was playing.
+  void _playbackFailed(Object e) {
+    // A load in flight tries again, or reports, on its own.
+    if (_preparing != null) return;
+    if (_current == null || !_prepared || !_transient(e) || _failures + 1 >= _attempts) {
+      _failed(e);
+      return;
+    }
+    unawaited(_recover(e));
+  }
+
+  Future<void> _recover(Object e) async {
+    final episode = _current!;
+    final playing = _audio.playing;
+    _failures++;
+    _prepared = false;
+    _resumeAt = _at;
+    _loading = true;
+    _log.info('Playback of episode ${episode.id} failed at $_at; loading again', e);
+    notifyListeners();
+    _broadcast();
+    try {
+      await Future<void>.delayed(_backoff(_failures)).asCancellable(_life);
+    } on CancelledException {
+      return;
+    }
+    // The listener moved on, or played it again, meanwhile.
+    if (_current?.id != episode.id || _prepared || _preparing != null) {
+      if (_preparing == null && _loading) {
+        _loading = false;
+        notifyListeners();
+        _broadcast();
+      }
+      return;
+    }
+    if (!await _prepare()) return;
+    if (playing) unawaited(_audio.play());
   }
 
   /// Keeps the loaded episode's row fresh (downloaded, renamed, played).
@@ -259,17 +345,22 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   );
 
   /// Plays [episode] from where the listener stopped in it, or from the
-  /// start if they finished it.
-  Future<void> playEpisode(PodcastEpisode episode, {bool start = true}) async {
+  /// start if they finished it. Started on its show's page, listed
+  /// [oldestFirst] or not, it plays on into the show's next ([following]).
+  Future<void> playEpisode(PodcastEpisode episode, {bool start = true, bool? oldestFirst}) async {
     // Loaded or loading already: one load, one playback.
     if (_current?.id == episode.id && (_prepared || _preparing != null)) {
+      if (oldestFirst != null) _showOrder = oldestFirst;
       if (start) await play();
       return;
     }
     _savePosition();
     _cancelLoad();
+    _showOrder = oldestFirst;
     _current = episode;
     _prepared = false;
+    _resumeAt = null;
+    _failures = 0;
     _error = null;
     _chapters = const [];
     _library.nowPlaying = episode.id;
@@ -277,6 +368,36 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     mediaItem.add(_item(episode));
     notifyListeners();
     if (start) await play();
+  }
+
+  /// The order of the show page the episode was started on (oldest first or
+  /// not); null when it was started anywhere else, and then only Up Next
+  /// plays after it. Kept until the app closes.
+  bool? _showOrder;
+
+  /// What plays when the episode ends with Up Next empty: the next
+  /// unplayed episode of its show, in the order its page listed them.
+  PodcastEpisode? get following {
+    final current = _current;
+    final oldestFirst = _showOrder;
+    if (current == null || oldestFirst == null) return null;
+    final list = _library.episodes(current.podcastId, oldestFirst: oldestFirst);
+    final at = list.indexWhere((e) => e.id == current.id);
+    if (at < 0) return null;
+    return list.skip(at + 1).where((e) => !e.played).firstOrNull;
+  }
+
+  /// Plays the first in Up Next, else [following]; false with neither.
+  Future<bool> _playOn() async {
+    if (_library.takeNext() case final next?) {
+      await playEpisode(next);
+      return true;
+    }
+    if (following case final next?) {
+      await playEpisode(next, oldestFirst: _showOrder);
+      return true;
+    }
+    return false;
   }
 
   /// Puts [_current] in the audio player, or waits for the load already
@@ -308,27 +429,43 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     _error = null;
     notifyListeners();
     _broadcast();
+    // Loading again after the source failed: where it was, as it was.
+    final resume = _resumeAt;
+    _resumeAt = null;
     try {
-      final (source, chapters) = await traced(_log, 'source for “${episode.title}”', () => _source(episode, token));
-      // Checked right before the audio player takes the source, so only the
-      // newest load ever reaches it.
-      token.throwIfCancelled();
-      final from = episode.played || (episode.duration != null && episode.duration! - episode.position < _nearEnd)
-        ? Duration.zero
-        : episode.position;
-      _reached = from;
-      // Heard again, a played episode is in progress again.
-      if (episode.played) _library.setPlayed([episode.id], false);
-      await _audio.setAudioSource(source, initialPosition: from);
-      token.throwIfCancelled();
-      await _audio.setSpeed(_library.settings.speed);
-      _prepared = true;
-      unawaited(_findChapters(episode, chapters));
-      return true;
-    } catch (e) {
-      // A replaced load ends quietly: the audio player interrupts its source
-      // when the next one's arrives.
-      if (!token.isCancelled) _failed(e);
+      for (var attempt = 1;; attempt++) {
+        try {
+          final (source, chapters) = await traced(_log, 'source for “${episode.title}”', () => _source(episode, token));
+          // Checked right before the audio player takes the source, so only the
+          // newest load ever reaches it.
+          token.throwIfCancelled();
+          final from = resume ??
+            (episode.played || (episode.duration != null && episode.duration! - episode.position < _nearEnd)
+              ? Duration.zero
+              : episode.position);
+          if (resume == null) _reached = from;
+          _at = from;
+          // Heard again, a played episode is in progress again.
+          if (episode.played) _library.setPlayed([episode.id], false);
+          await _audio.setAudioSource(source, initialPosition: from);
+          token.throwIfCancelled();
+          await _audio.setSpeed(_library.settings.speed);
+          _prepared = true;
+          unawaited(_findChapters(episode, chapters));
+          return true;
+        } catch (e) {
+          // A replaced load ends quietly: the audio player interrupts its
+          // source when the next one's arrives.
+          if (token.isCancelled) return false;
+          if (attempt >= _attempts || !_transient(e)) {
+            _failed(e);
+            return false;
+          }
+          _log.info('Loading episode ${episode.id} failed (try $attempt); trying again', e);
+          await Future<void>.delayed(_backoff(attempt)).asCancellable(token);
+        }
+      }
+    } on CancelledException {
       return false;
     } finally {
       if (identical(_load, load)) {
@@ -376,11 +513,17 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   /// else its download's own; else, for a YouTube video (a ListenJar Cloud
   /// episode, a download without them), YouTube's, kept on this device once
   /// found, and for a podcast episode, its stream's own, read with range
-  /// requests.
+  /// requests. Without any of those, the ones its show notes list; for a
+  /// podcast episode those show at once, until its audio's own are read.
   Future<void> _findChapters(PodcastEpisode episode, List<Chapter>? found) async {
     // Loaded again (it finished, and plays again): already found.
     if (found == null && _chapters.isNotEmpty) return;
     var chapters = found ?? const <Chapter>[];
+    final written = found == null ? notesChapters(_library.description(episode.id)) : const <Chapter>[];
+    if (written.isNotEmpty && episode.videoId == null && _current?.id == episode.id) {
+      _chapters = written;
+      notifyListeners();
+    }
     try {
       if (found == null && episode.downloaded) {
         final file = _library.downloadFile(episode)!;
@@ -399,6 +542,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       // Without chapters it plays the same.
       _log.fine('No chapters for episode ${episode.id}', e);
     }
+    if (chapters.isEmpty) chapters = written;
     if (_current?.id != episode.id || chapters.isEmpty) return;
     _chapters = chapters;
     notifyListeners();
@@ -440,8 +584,9 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     _library.savePosition(current.id, position, notify: notify);
   }
 
-  /// The episode ended: it's played, its download may go, and Up Next
-  /// plays on unless the sleep timer was waiting for the end.
+  /// The episode ended: it's played, its download may go, and Up Next (or
+  /// its show's next) plays on unless the sleep timer was waiting for the
+  /// end.
   Future<void> _finished() async {
     final done = _current;
     if (done == null) return;
@@ -463,10 +608,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       await _audio.seek(Duration.zero);
       return;
     }
-    final next = _library.takeNext();
-    if (next != null) {
-      await playEpisode(next);
-    } else {
+    if (!await _playOn()) {
       await _audio.pause();
       await _audio.seek(Duration.zero);
     }
@@ -516,12 +658,11 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     return seek(Duration.zero);
   }
 
-  /// Leaves the episode for the first one in Up Next.
+  /// Leaves the episode for the first one in Up Next, else its show's next.
   Future<void> playNext() async {
     final current = _current;
     if (current != null && duration != null && duration! - position < _nearEnd) _library.setPlayed([current.id], true);
-    final next = _library.takeNext();
-    if (next != null) await playEpisode(next);
+    await _playOn();
   }
 
   @override
@@ -531,6 +672,8 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     await _audio.stop();
     _current = null;
     _prepared = false;
+    _resumeAt = null;
+    _showOrder = null;
     _library.nowPlaying = null;
     mediaItem.add(null);
     setSleep(null);
@@ -552,12 +695,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
     final current = _current;
     if (current == null) return;
     _library.setPlayed([current.id], true);
-    final next = _library.takeNext();
-    if (next != null) {
-      await playEpisode(next);
-    } else {
-      await stop();
-    }
+    if (!await _playOn()) await stop();
   }
 
   // The sleep timer.

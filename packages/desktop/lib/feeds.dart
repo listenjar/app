@@ -322,6 +322,18 @@ final class Feeds extends ChangeNotifier {
     return updated;
   }
 
+  /// Makes [feed], a podcast of the listener's own, public (a page on
+  /// listenjar.com, at its `pageUrl`) or private again; throws when it
+  /// couldn't, and it stays as it was.
+  Future<Feed> setVisibility(Feed feed, FeedVisibility visibility) async {
+    final updated = await _account.api
+      .setFeedVisibility(feedId: feed.id, body: VisibilityChange(visibility: visibility))
+      .asCancellable(_timeout());
+    feeds = [for (final f in feeds) f.id == updated.id ? updated : f];
+    notifyListeners();
+    return updated;
+  }
+
   /// Removes the feed and everything uploaded to it; throws when it
   /// couldn't, and the feed stays.
   Future<void> remove(Feed feed) async {

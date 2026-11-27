@@ -253,6 +253,20 @@ final class _YouTubeMarkPainter extends CustomPainter {
 
 // Buttons.
 
+/// Around a show's page: the order it lists the episodes in, oldest first
+/// or not. An episode started there plays on into the show's next, in
+/// that order (Player.following).
+final class ShowOrder extends InheritedWidget {
+  const ShowOrder({super.key, required this.oldestFirst, required super.child});
+  final bool oldestFirst;
+
+  /// Null outside a show's page. Read when a play button is pressed.
+  static bool? of(BuildContext context) => context.getInheritedWidgetOfExactType<ShowOrder>()?.oldestFirst;
+
+  @override
+  bool updateShouldNotify(ShowOrder old) => false;
+}
+
 /// The round play button beside an episode: ink on paper (DESIGN.md), a
 /// pause while it plays, a spinner while it loads.
 final class PlayButton extends StatelessWidget {
@@ -289,7 +303,7 @@ final class PlayButton extends StatelessWidget {
               onPressed: () {
                 if (playing) return unawaited(player.pause());
                 doneTyping();
-                unawaited(player.playEpisode(episode));
+                unawaited(player.playEpisode(episode, oldestFirst: ShowOrder.of(context)));
               },
               icon: loading
                 ? SizedBox.square(
@@ -491,8 +505,9 @@ final class EpisodeRow extends StatefulWidget {
   /// Lists across shows put the show's cover and name on each row.
   final bool withShow;
 
-  /// A show of videos puts each one's 16:9 thumbnail on its row, as
-  /// YouTube lists them.
+  /// A show's own page puts each episode's picture on its row: a video's
+  /// 16:9 thumbnail, as YouTube lists them, else the episode's square art,
+  /// or the show's when it has none.
   final bool thumbnail;
   final Widget? trailing;
 
@@ -532,8 +547,11 @@ final class _EpisodeRowState extends State<EpisodeRow> {
               if (widget.withShow) ...[
                 Artwork(url: e.artwork, title: e.podcastTitle, size: narrow ? 48 : 56),
                 const SizedBox(width: 14),
-              ] else if (widget.thumbnail) ...[
+              ] else if (widget.thumbnail && e.widescreen) ...[
                 Artwork(url: e.artwork, title: e.title, size: narrow ? 80 : 96, height: (narrow ? 80 : 96) * 9 / 16, radius: 8),
+                const SizedBox(width: 14),
+              ] else if (widget.thumbnail) ...[
+                Artwork(url: e.artwork, title: e.title, size: narrow ? 48 : 56, radius: 8),
                 const SizedBox(width: 14),
               ],
               Expanded(

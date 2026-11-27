@@ -15,7 +15,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'account.dart';
 import 'cloud_shows.dart';
-import 'backend/api.dart' show Plan;
+import 'backend/api.dart' show FeedVisibility, Plan;
 import 'directory.dart';
 import 'downloads.dart';
 import 'feeds.dart';
@@ -123,6 +123,8 @@ Map<String, Object?> appState(AppServices? s, IncomingLinks? links) {
       'chapters': [for (final c in player.chapters) '${c.start} ${c.title}'],
     },
     'upNext': [for (final e in library.queue) e.title],
+    // What plays after the episode when Up Next is empty.
+    'then': player.following?.title,
     'librarySync': switch (librarySync) {
       final sync? => {'on': sync.on, 'syncedAt': sync.syncedAt?.toIso8601String(), 'error': sync.error?.toString()},
       null => null,
@@ -214,6 +216,12 @@ void control(AppServices? s, Map<String, String> parameters) {
     case 'unfollow':
       final show = s.library.podcast(int.tryParse(parameters['show'] ?? '') ?? -1) ?? (throw ArgumentError('no show ${parameters['show']}'));
       unawaited(s.podcasts.unfollow(show));
+    case 'visibility':
+      // A podcast of the listener's own in the Cloud (`feed`, an id) made
+      // `public` (a page on listenjar.com) or `private`.
+      final feed = s.feeds.feeds.where((f) => f.id == parameters['feed']).firstOrNull
+        ?? (throw ArgumentError('no feed ${parameters['feed']}'));
+      unawaited(s.feeds.setVisibility(feed, FeedVisibility.fromJson(parameters['to'] ?? 'public')));
     case 'open':
       // A ListenJar `feed` (an id), a `show` (an id), `settings`,
       // `nowPlaying`, `plans` (the sheet, titled by its value if any),

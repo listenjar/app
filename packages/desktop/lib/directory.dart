@@ -8,10 +8,14 @@ import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
 
-import 'links.dart' show ApplePodcastsLink;
+import 'links.dart' show ApplePodcastsLink, canonicalSourceUrl;
 import 'rss.dart' show userAgent;
 
 const _timeout = Duration(seconds: 20);
+
+/// Apple's copy of an episode's artwork, with what tells which episode it
+/// is: its guid, else its audio's URL.
+typedef AppleEpisodeArt = ({String? guid, String? audioUrl, String artworkUrl});
 
 /// A show the directory knows.
 final class DirectoryPodcast {
@@ -95,6 +99,39 @@ final class PodcastDirectory {
     if (feed == null) return null;
     final episode = results.where((r) => '${r['trackId']}' == link.episodeId).firstOrNull;
     return (feedUrl: feed, episodeGuid: episode?['episodeGuid'] as String?);
+  }
+
+  /// Apple's id for the show whose feed is at [feedUrl], found by searching
+  /// for its [title] in the device's storefront, then the US one. Null when
+  /// Apple lists no show at that feed.
+  Future<int?> appleId(String title, String feedUrl, CancellationToken token) async {
+    final want = canonicalSourceUrl(feedUrl);
+    for (final country in {_country, 'us'}) {
+      final json = await _get(
+        Uri.https('itunes.apple.com', '/search', {'media': 'podcast', 'entity': 'podcast', 'limit': '50', 'country': country, 'term': title}),
+        token,
+      );
+      for (final r in (json['results'] as List?) ?? const []) {
+        if (r case {'feedUrl': final String feed, 'collectionId': final int id} when canonicalSourceUrl(feed) == want) return id;
+      }
+    }
+    return null;
+  }
+
+  /// Apple's copies of the artwork of the latest 200 episodes of the show
+  /// Apple knows as [appleId]: each episode's own picture where it has one,
+  /// else the show's, served from Apple's image servers at 600 px.
+  Future<List<AppleEpisodeArt>> episodeArtwork(int appleId, CancellationToken token) async {
+    final json = await _get(
+      Uri.https('itunes.apple.com', '/lookup', {'id': '$appleId', 'entity': 'podcastEpisode', 'limit': '200', 'country': _country}),
+      token,
+    );
+    return [
+      for (final r in (json['results'] as List?) ?? const [])
+        if (r case {'wrapperType': 'podcastEpisode'})
+          if (r['artworkUrl600'] ?? r['artworkUrl160'] case final String art when art.isNotEmpty)
+            (guid: r['episodeGuid'] as String?, audioUrl: r['episodeUrl'] as String?, artworkUrl: art),
+    ];
   }
 
   Future<Map<String, Object?>> _get(Uri url, CancellationToken token) async {

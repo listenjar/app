@@ -16,7 +16,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'artwork.dart' show UnreadablePicture, artworkExtensions;
-import 'backend/api.dart' show Feed, Plan, SourceKind;
+import 'backend/api.dart' show Feed, FeedVisibility, Plan, SourceKind;
 import 'cloud.dart' show StorageFullNotice, failure, listenIn, podcastApps, removeCloudFeed;
 import 'hosted_feed.dart';
 import 'library.dart';
@@ -64,6 +64,9 @@ final class _ShowPageState extends State<ShowPage> {
 
   /// The podcast apps this device can open the feed in, for "Listen in".
   List<PodcastApp> _apps = const [];
+
+  /// While a podcast of the listener's own is going public or private.
+  bool _changingVisibility = false;
 
   @override
   void initState() {
@@ -117,20 +120,21 @@ final class _ShowPageState extends State<ShowPage> {
           ? const <PodcastEpisode>[]
           : s.library.episodes(show.id, filter: _filter, oldestFirst: _firstFirst(show), query: _query.text);
         final query = _query.text.trim();
-        final videos = feed != null || show!.fromYouTube || episodes.any((e) => e.videoId != null);
         const p = brand.Palette.ink;
         final page = SleevePage(
           artwork: feed?.imageUrl ?? show?.artworkUrl,
           title: show?.title ?? feed!.title,
           info: _info(context, show, feed, own),
           actions: [
-            if (show?.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
+            // A podcast of the listener's own shares its public page, and
+            // nothing while it's private: its RSS address is theirs alone.
+            if ((own ? feed?.pageUrl : show?.link) case final link? when Uri.tryParse(link)?.hasScheme ?? false)
               Builder(
                 builder: (context) => GlassIcon(
                   icon: Icons.adaptive.share,
-                  tooltip: 'Share',
+                  tooltip: own ? 'Share its page' : 'Share',
                   size: 21,
-                  onPressed: () => unawaited(shareLink(context, link, title: show!.title)),
+                  onPressed: () => unawaited(shareLink(context, link, title: show?.title ?? feed!.title)),
                 ),
               ),
             glassMore(_menu(context, show, feed, own)),
@@ -184,7 +188,7 @@ final class _ShowPageState extends State<ShowPage> {
                 for (final e in episodes.take(_shown))
                   EpisodeRow(
                     episode: e,
-                    thumbnail: videos,
+                    thumbnail: true,
                     trailing: !own ? null : IconButton(
                       tooltip: 'Remove episode',
                       visualDensity: VisualDensity.compact,
@@ -213,7 +217,8 @@ final class _ShowPageState extends State<ShowPage> {
             ],
           ],
         );
-        return show == null && feedId == null ? page : Shown(show: show?.id, feed: feedId, child: page);
+        final ordered = show == null ? page : ShowOrder(oldestFirst: _firstFirst(show), child: page);
+        return show == null && feedId == null ? ordered : Shown(show: show?.id, feed: feedId, child: ordered);
       },
     );
   }
@@ -329,6 +334,10 @@ final class _ShowPageState extends State<ShowPage> {
         const SizedBox(height: 16),
         FeedSyncLine(feed: feed),
       ],
+      if (own && feed != null) ...[
+        const SizedBox(height: 10),
+        _visibilityLine(context, feed),
+      ],
       if (note != null) ...[
         const SizedBox(height: 16),
         ConstrainedBox(
@@ -385,6 +394,25 @@ final class _ShowPageState extends State<ShowPage> {
         }),
         const MenuDivider(),
       ],
+      if (own && feed != null) ...[
+        const MenuHeader('Page on listenjar.com'),
+        MenuEntry(
+          'Public',
+          checked: feed.visibility == FeedVisibility.public,
+          onPressed: _changingVisibility ? null : () => unawaited(_setVisibility(
+            context,
+            feed,
+            feed.visibility == FeedVisibility.public ? FeedVisibility.private : FeedVisibility.public,
+          )),
+        ),
+        if (feed.pageUrl case final url?) ...[
+          MenuEntry('Copy page link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, url, 'Page link copied.'))),
+          MenuEntry('Open page', icon: Icons.open_in_new_rounded, onPressed: () {
+            unawaited(launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication));
+          }),
+        ],
+        const MenuDivider(),
+      ],
       if (show != null) ...[
         MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
         MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
@@ -420,6 +448,54 @@ final class _ShowPageState extends State<ShowPage> {
         ),
       ],
     ];
+  }
+
+  /// Whether a podcast of the listener's own has a page on listenjar.com,
+  /// and the one step from here: make it public, or copy its link.
+  Widget _visibilityLine(BuildContext context, Feed feed) {
+    final text = Theme.of(context).textTheme;
+    final public = feed.visibility == FeedVisibility.public;
+    final url = feed.pageUrl;
+    return Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, runSpacing: 4, children: [
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(public ? Icons.public_rounded : Icons.lock_outline_rounded, size: 15, color: public ? brand.accentLight : brand.snowSoft),
+        const SizedBox(width: 8),
+        Text(
+          public ? 'Public: anyone with the link can listen on listenjar.com' : 'Private: no page on listenjar.com',
+          style: text.bodySmall!.copyWith(color: brand.snowSoft),
+        ),
+      ]),
+      TextButton(
+        style: brand.button(brand.Tone.quietOnInk, brand.ButtonSize.sm),
+        onPressed: _changingVisibility
+          ? null
+          : switch (url) {
+              final url? when public => () => unawaited(copyText(context, url, 'Page link copied.')),
+              _ => () => unawaited(_setVisibility(context, feed, FeedVisibility.public)),
+            },
+        child: Text(public ? 'Copy link' : 'Make public'),
+      ),
+    ]);
+  }
+
+  /// Makes [feed] public, copying its page's link, or private again.
+  Future<void> _setVisibility(BuildContext context, Feed feed, FeedVisibility visibility) async {
+    final feeds = Services.of(context).feeds;
+    setState(() => _changingVisibility = true);
+    try {
+      final updated = await feeds.setVisibility(feed, visibility);
+      if (!context.mounted) return;
+      if (updated.pageUrl case final url? when visibility == FeedVisibility.public) {
+        await Clipboard.setData(ClipboardData(text: url));
+        if (context.mounted) tell(context, 'Public. Its page link is copied.');
+      } else {
+        tell(context, 'Private. Its page on listenjar.com is gone.');
+      }
+    } catch (e) {
+      if (context.mounted) tell(context, failure('Couldn’t change who can see it', e, other: 'Try again.'));
+    } finally {
+      if (mounted) setState(() => _changingVisibility = false);
+    }
   }
 
   Widget _toolbar(BuildContext context, Podcast show, List<PodcastEpisode> episodes) {

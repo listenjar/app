@@ -15,6 +15,7 @@ import 'package:xml/xml.dart';
 
 import 'backend/api.dart' show Feed, SourceKind;
 import 'artwork.dart';
+import 'directory.dart';
 import 'downloads.dart';
 import 'library.dart';
 import 'links.dart';
@@ -98,6 +99,7 @@ final class Podcasts extends ChangeNotifier {
   final _http = HttpClient()
     ..connectionTimeout = const Duration(seconds: 30)
     ..userAgent = userAgent;
+  final _directory = PodcastDirectory();
   final _life = CancellationToken();
 
   /// Shows being refreshed now.
@@ -168,7 +170,9 @@ final class Podcasts extends ChangeNotifier {
         return library.podcast(moved.id)!;
       }
     }
-    return library.subscribe(at, feed, etag: fetch.etag, lastModified: fetch.lastModified, follow: follow);
+    final show = library.subscribe(at, feed, etag: fetch.etag, lastModified: fetch.lastModified, follow: follow);
+    unawaited(_appleArtwork(show.id));
+    return show;
   }
 
   Future<Podcast> follow(Uri url, CancellationToken token) => open(url, token, follow: true);
@@ -232,6 +236,7 @@ final class Podcasts extends ChangeNotifier {
       final fetch = await fetchFeed(_http, Uri.parse(podcast.feedUrl), token, etag: etag, lastModified: modified);
       _reached(podcast.id, true);
       final added = library.refreshed(podcast.id, fetch);
+      unawaited(_appleArtwork(podcast.id));
       if (added.isNotEmpty) await _downloads.downloadNew(added);
       // A playlist or channel ListenJar hosts still lists here first: its
       // new videos stream from YouTube until their uploads reach the feed.
@@ -254,6 +259,46 @@ final class Podcasts extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  // Apple's copies of episode artwork.
+
+  /// Apple's directory asked one show at a time, a few seconds apart: it
+  /// answers about 20 requests a minute.
+  Future<void> _apple = Future.value();
+
+  /// Points [podcast]'s episodes at Apple's copies of their artwork
+  /// ([PodcastEpisode.appleArtworkUrl]), as Apple Podcasts shows them: a
+  /// feed's own image host may not answer where the listener is, and links
+  /// 3000 px originals. The show's Apple id is looked for once, again a
+  /// week after Apple didn't list it; its episodes are asked for while any
+  /// of the latest lacks Apple's picture, at most hourly. Failures wait for
+  /// the next refresh.
+  Future<void> _appleArtwork(int podcast) => _apple = _apple.then((_) async {
+    final show = library.podcast(podcast);
+    if (show == null || show.kind != PodcastKind.rss || show.cloudFeedId != null || _life.isCancelled) return;
+    final since = switch (show.appleCheckedAt) {
+      final at? => DateTime.now().difference(at),
+      null => null,
+    };
+    final asking = switch (show.appleId) {
+      null => true,
+      0 => since == null || since > const Duration(days: 7),
+      _ => (since == null || since > const Duration(hours: 1)) && library.missesAppleArtwork(podcast),
+    };
+    if (!asking) return;
+    try {
+      final token = _life.merge(TimeoutCancellationToken(const Duration(minutes: 1)));
+      final id = switch (show.appleId) {
+        final id? when id > 0 => id,
+        _ => await _directory.appleId(show.title, show.feedUrl, token),
+      };
+      final art = id == null ? const <AppleEpisodeArt>[] : await _directory.episodeArtwork(id, token);
+      if (library.podcast(podcast) != null) library.appleAnswered(podcast, id ?? 0, art);
+    } catch (e) {
+      _log.fine('Apple’s artwork for ${show.feedUrl} failed', e);
+    }
+    await Future<void>.delayed(const Duration(seconds: 3));
+  });
 
   // YouTube videos.
 
@@ -639,6 +684,7 @@ final class Podcasts extends ChangeNotifier {
     _retry?.cancel();
     _life.cancel();
     _http.close(force: true);
+    _directory.close();
     super.dispose();
   }
 }
