@@ -128,7 +128,7 @@ List<Widget> listenIn(BuildContext context, Feed feed, List<PodcastApp> apps) {
     case FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true), :final waiting):
       return (waiting > 0 ? 'Storage full · $waiting waiting to upload' : 'Storage full', true);
     case FeedSync(phase: FeedPhase.failed, error: PlanLimit()):
-      return ('Paused: takes a 10 GB or 100 GB plan', true);
+      return ('Paused: takes a Cloud plan', true);
     case FeedSync(phase: FeedPhase.failed, :final error) when unreachable(error):
       return ('Offline · syncs when you’re back online', false);
     case FeedSync(phase: FeedPhase.upToDate, :final elsewhere, episodes: final count) when elsewhere.isNotEmpty:
@@ -163,7 +163,7 @@ List<Widget> listenIn(BuildContext context, Feed feed, List<PodcastApp> apps) {
 /// nothing to say, so the tile says who makes the show.
 (String, bool)? feedTileStatus(Feed feed, FeedSync? sync, {required bool playable}) => switch (sync) {
   FeedSync(phase: FeedPhase.failed, error: PlanLimit(storageFull: true)) => ('Storage full', true),
-  FeedSync(phase: FeedPhase.failed, error: PlanLimit()) => ('Paused: takes a 10 GB or 100 GB plan', true),
+  FeedSync(phase: FeedPhase.failed, error: PlanLimit()) => ('Paused: takes a Cloud plan', true),
   FeedSync(phase: FeedPhase.failed, :final error) when unreachable(error) => ('Offline', false),
   FeedSync(phase: FeedPhase.failed) => ('Couldn’t sync', true),
   FeedSync(phase: FeedPhase.scanning) => ('Checking YouTube…', false),
@@ -230,7 +230,7 @@ final class AccountPanel extends StatefulWidget {
 }
 
 final class _AccountPanelState extends State<AccountPanel> {
-  void _plans([String title = 'Keep what you add']) => unawaited(showPlans(context, title: title));
+  void _plans([String title = 'Whole channels, with a plan']) => unawaited(showPlans(context, title: title));
 
   @override
   Widget build(BuildContext context) {
@@ -267,7 +267,7 @@ final class _AccountPanelState extends State<AccountPanel> {
       Text(planName(user), style: text.titleMedium!.copyWith(fontSize: 15)),
       const SizedBox(height: 6),
       if (user.plan == Plan.free)
-        Text('Single videos, each removed about a day after you add it', style: soft)
+        Text('Podcasts and single YouTube videos, on this device', style: soft)
       else
         Row(children: [
           if (limit != null) ...[StorageMeter(used: used, limit: limit), const SizedBox(width: 10)],

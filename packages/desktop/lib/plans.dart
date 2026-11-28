@@ -5,9 +5,10 @@
 // room when the storage is full, and naming a podcast of their own. The
 // backend decides what a plan allows (public.yaml); this only shows it.
 //
-// Every plan unlocks the paid features on this device: following YouTube
-// playlists and channels, and podcasts of the listener's own. Local stops
-// there; 10 GB and 100 GB add Listenjar Cloud, which hosts them for any
+// Free is the whole podcast player, single YouTube videos included, on this
+// device. Every plan adds YouTube on this device: following playlists and
+// channels, and podcasts of the listener's own. Local YouTube stops there;
+// Cloud 10 GB and Cloud 100 GB add Listenjar Cloud, which hosts them for any
 // podcast app.
 import 'dart:async';
 
@@ -30,18 +31,18 @@ import 'ui.dart' show Services;
 /// What every plan adds to Free, as the pricing page puts it.
 const _planPerks = [
   'YouTube playlists and channels, kept in sync',
-  'Podcasts of your own: any videos, one feed',
+  'Podcasts of your own: any videos, one show',
 ];
 
 /// Whether the listener's plan unlocks the paid features on this device:
-/// any plan, Local included.
+/// any plan, Local YouTube included.
 bool isPaid(User? user) => user?.plan == Plan.paid;
 
-/// Whether the listener's plan has Listenjar Cloud: 10 GB or 100 GB. Local
-/// pays without it.
+/// Whether the listener's plan has Listenjar Cloud: Cloud 10 GB or 100 GB.
+/// Local YouTube pays without it.
 bool hasCloud(User? user) => user?.plan == Plan.paid && user?.storageLimitBytes != null;
 
-/// The catalog plan the listener pays for, by its storage (none for Local).
+/// The catalog plan the listener pays for, by its storage.
 pricing.Plan? catalogPlan(User user) => switch (user.plan) {
   Plan.free => null,
   Plan.paid => pricing.plans.where((p) => p.storageBytes == (user.storageLimitBytes ?? 0)).firstOrNull,
@@ -50,10 +51,11 @@ pricing.Plan? catalogPlan(User user) => switch (user.plan) {
 /// A bigger Cloud plan than the listener's, if there is one.
 pricing.Plan? biggerPlan(User user) => pricing.plans.where((p) => p.cloud && p.storageBytes > (user.storageLimitBytes ?? 0)).firstOrNull;
 
-/// "10 GB" out of "Listenjar 10 GB", "Local" out of "Listenjar Local".
+/// The plan's name: "Cloud 10 GB", "Local YouTube" (an older catalog's
+/// "Listenjar " prefix dropped).
 String _size(pricing.Plan plan) => plan.name.replaceFirst(RegExp(r'^Listenjar\s+'), '');
 
-/// "10 GB plan", or "Free plan".
+/// "Cloud 10 GB plan", or "Free plan".
 String planName(User user) => switch (user.plan) {
   Plan.free => 'Free plan',
   Plan.paid => switch (catalogPlan(user)) {
@@ -126,30 +128,6 @@ Future<void> manageBilling(BuildContext context) async {
   }
 }
 
-/// When the daily cleanup removes a free listener's feed, in a few words.
-String? removedIn(Feed feed, DateTime now) {
-  final at = DateTime.tryParse(feed.expiresAt ?? '');
-  if (at == null) return null;
-  final left = at.difference(now);
-  if (left <= Duration.zero) return 'removed soon';
-  if (left < const Duration(hours: 1)) return 'removed within the hour';
-  if (left < const Duration(hours: 36)) {
-    final hours = (left.inMinutes / 60).round();
-    return 'removed in $hours ${hours == 1 ? 'hour' : 'hours'}';
-  }
-  return 'removed in ${(left.inHours / 24).round()} days';
-}
-
-/// The full date, for a tooltip.
-String removedAt(Feed feed) {
-  final at = DateTime.tryParse(feed.expiresAt ?? '')?.toLocal();
-  if (at == null) return '';
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  final time = '${at.hour}:${at.minute.toString().padLeft(2, '0')}';
-  return 'Free podcasts are removed about a day after you add them. This one goes '
-    '${months[at.month - 1]} ${at.day} at $time.';
-}
-
 /// A quiet button on paper or mist: white, deep paper under the pointer.
 ButtonStyle whiteButton() => brand.button(brand.Tone.quiet, brand.ButtonSize.sm).copyWith(
   backgroundColor: WidgetStateProperty.fromMap({
@@ -187,71 +165,6 @@ final class StorageMeter extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Above the feeds: the plan, and on it what the listener can do next.
-/// Free shows what it keeps and the way to a plan; a plan shows its
-/// storage and makes podcasts of the listener's own.
-final class PlanBar extends StatelessWidget {
-  const PlanBar({super.key, required this.user, required this.onPlans, required this.onNewPodcast});
-  final User user;
-  final VoidCallback onPlans;
-  final VoidCallback onNewPodcast;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final soft = text.bodySmall!.copyWith(color: brand.fgSoft, height: 1.3);
-    final title = text.titleMedium!.copyWith(fontSize: 15);
-    final (detail, action) = switch (user) {
-      User(plan: Plan.free) => (
-        Text('Single videos, each removed about a day after you add it', style: soft),
-        // Quiet: the accent belongs to the moment a plan is needed.
-        TextButton(style: whiteButton(), onPressed: onPlans, child: const Text('Keep them with a plan')),
-      ),
-      User(:final storageLimitBytes, :final storageUsedBytes) => (
-        Row(children: [
-          if (storageLimitBytes != null) ...[
-            StorageMeter(used: storageUsedBytes ?? 0, limit: storageLimitBytes),
-            const SizedBox(width: 10),
-          ],
-          Flexible(
-            child: Text(
-              storageLimitBytes == null
-                ? 'Playlists, channels and podcasts of your own'
-                : '${formatBytes(storageUsedBytes ?? 0)} of ${formatBytes(storageLimitBytes)} used',
-              style: soft.copyWith(
-                color: (storageUsedBytes ?? 0) >= (storageLimitBytes ?? 1 << 62) ? brand.danger : brand.fgSoft,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ]),
-        TextButton.icon(
-          style: whiteButton(),
-          onPressed: onNewPodcast,
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('New podcast'),
-        ),
-      ),
-    };
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 0, 16),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(planName(user), style: title),
-            const SizedBox(height: 5),
-            detail,
-          ]),
-        ),
-        const SizedBox(width: 16),
-        action,
-      ]),
     );
   }
 }
@@ -316,16 +229,16 @@ Widget _sheet({required BuildContext context, required Widget child, double widt
 /// The sheet of plans: pick one and how often to pay, then pay on Stripe
 /// Checkout in the browser, signing in here first if need be. [title] says
 /// why it opened; [cloud] when it's for something only Listenjar Cloud does,
-/// which leaves Local out. Someone who pays already (on Local) changes plans
+/// which leaves Local YouTube out. Someone who pays already (on Local YouTube) changes plans
 /// in the billing portal instead.
-Future<void> showPlans(BuildContext context, {String title = 'Keep what you add', bool cloud = false}) => showDialog<void>(
+Future<void> showPlans(BuildContext context, {String title = 'Whole channels, with a plan', bool cloud = false}) => showDialog<void>(
   context: context,
   builder: (_) => _PlansSheet(title: title, cloud: cloud, account: Services.of(context).account),
 );
 
 /// What Listenjar Cloud adds to every plan's perks, as the pricing page puts it.
 const _cloudPerks = [
-  'Listenjar Cloud: they play in any podcast app',
+  'Feeds for any podcast app that follows by URL',
   'Your whole library, classic podcasts too, on every device',
   'Storage counts YouTube audio only, never classic podcasts',
 ];
@@ -357,7 +270,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
   Account get _account => widget.account;
   bool get _paid => isPaid(_account.user);
 
-  // Local is yearly only: picked on Monthly, it checks out yearly.
+  // Local YouTube is yearly only: picked on Monthly, it checks out yearly.
   pricing.PlanPrice get _price => _plan.price(_interval) ?? _plan.price(pricing.PlanInterval.yearly)!;
 
   @override
@@ -611,7 +524,7 @@ final class _PlanTileState extends State<_PlanTile> {
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
     final plan = widget.plan;
-    // Local sells only yearly.
+    // Local YouTube sells only yearly.
     final price = plan.price(widget.interval) ?? plan.price(pricing.PlanInterval.yearly)!;
     final tabular = const [FontFeature.tabularFigures()];
     final per = switch (price.interval) {
@@ -624,7 +537,7 @@ final class _PlanTileState extends State<_PlanTile> {
       pricing.PlanInterval.yearly => '/ year',
     };
     final what = switch (_hours(plan)) {
-      _ when !plan.cloud => 'On your device, no Cloud',
+      _ when !plan.cloud => 'On your device, nothing uploaded',
       final hours? => '$hours in the Cloud',
       null => 'In the Cloud',
     };

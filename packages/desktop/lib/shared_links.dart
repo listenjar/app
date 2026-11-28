@@ -12,8 +12,8 @@
 // picks. A YouTube video becomes a podcast of a single episode in the
 // library, free; on a paid plan the listener may add it to a podcast of
 // their own instead, on this device or in the Cloud. Any other link goes to search, which knows
-// podcast feeds. Local pays for everything on this device; what goes to the
-// Cloud takes 10 GB or 100 GB (mayUseCloud). An Apple Podcasts link opens
+// podcast feeds. Local YouTube pays for everything on this device; what goes
+// to the Cloud takes Cloud 10 GB or 100 GB (mayUseCloud). An Apple Podcasts link opens
 // its show, and the episode it names, through Apple's directory. Links in
 // show notes open here too (openWebLink): a YouTube video to play, without
 // a question, and the rest as above, or in the browser.
@@ -284,8 +284,8 @@ Future<void> followYouTube(BuildContext context, YouTubeLink link, String what) 
   });
 }
 
-/// Whether the listener's plan has Listenjar Cloud (10 GB, 100 GB). On
-/// Local it doesn't: offers the plans that have it, under [title]. Signed
+/// Whether the listener's plan has Listenjar Cloud (Cloud 10 GB, 100 GB). On
+/// Local YouTube it doesn't: offers the plans that have it, under [title]. Signed
 /// out or free, callers have asked [mayFollowInCloud] and the like first.
 Future<bool> mayUseCloud(BuildContext context, String title) async {
   final user = Services.of(context).account.user;
@@ -305,8 +305,8 @@ Future<bool> mayFollowInCloud(BuildContext context, String what) async {
       context,
       title: 'Follow $what',
       body: 'Single videos play here for free. Following a playlist or a channel takes a plan: '
-        'with Listenjar Local, its new videos stream here from YouTube; with 10 GB or 100 GB, '
-        'they become a podcast in Listenjar Cloud for any podcast app. Sign in to pick a plan.',
+        'with Local YouTube, its new videos stream here from YouTube; with Cloud, '
+        'they also become a feed for any podcast app. Sign in to pick a plan.',
     );
     return false;
   }
@@ -326,7 +326,7 @@ Future<bool> mayMakePodcast(BuildContext context) async {
       context,
       title: 'Make a podcast of your own',
       body: 'Gather any YouTube videos into a podcast with your own name and artwork: '
-        'on this device with Listenjar Local, or in Listenjar Cloud for any podcast app with 10 GB or 100 GB. '
+        'on this device with Local YouTube, or as a feed for any podcast app with Cloud. '
         'That takes an account and a plan.',
     );
     return false;

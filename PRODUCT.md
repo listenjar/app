@@ -19,13 +19,14 @@ refresh, download for offline, Up Next, playback speed, a sleep timer, and the s
 controls and headphone buttons. All of it is free and needs no account. A single YouTube video
 plays here as an episode of its own, also free.
 
-A paid plan adds YouTube playlists and channels, followed like any show, and podcasts of the
-listener's own: YouTube videos they gather under their own name and artwork. Every one starts on
-the device, in the app's library: its videos list at once and stream from YouTube. The plans
-differ in what happens next:
+Free stays 100% on the device: nothing is uploaded, so nothing a listener adds ever expires.
+Paying makes the player YouTube-charged. A paid plan adds YouTube playlists and channels,
+followed like any show, and podcasts of the listener's own: YouTube videos they gather under
+their own name and artwork. Every one starts on the device, in the app's library: its videos
+list at once and stream from YouTube. The plans differ in what happens next:
 
-- Listenjar Local: that's all. The library stays on this device.
-- Listenjar Cloud (10 GB or 100 GB): the same device sync also uploads each video's audio to
+- Local YouTube: that's all. The library stays on this device.
+- Cloud (Cloud 10 GB or Cloud 100 GB): the same device sync also uploads each video's audio to
   Listenjar, and the show becomes a classic podcast: an RSS feed Listenjar hosts, for any podcast
   app. From there the library syncs between the listener's devices the classic way, RSS shows,
   places and Up Next, with nothing in it about YouTube. The plan's storage pays for the audio.
@@ -39,8 +40,9 @@ complete; a Cloud listener sets their feeds up once and forgets them.
 
 ## Positioning
 
-A podcast player and podcast hosting in one: the player is free, the Cloud is what people pay
-for. Downloads from YouTube happen on the listener's own device, not on a server. The app is
+A podcast player first, a YouTube player when you pay: the player is free, and YouTube channels
+(Local YouTube) and feeds for any podcast app (Cloud) are what people pay for. Downloads from
+YouTube happen on the listener's own device, not on a server. The app is
 open source and sends no telemetry, tracing or crash reports.
 
 ## Operating Context

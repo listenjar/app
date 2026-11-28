@@ -209,8 +209,8 @@ final class _SignInFormState extends State<SignInForm> {
     final (title, lede) = switch (_mode) {
       _Mode.signIn => widget.why ?? (
         'Sign in to Listenjar Cloud',
-        'Follow YouTube playlists and channels, or gather any videos into a podcast of your own. '
-          'Listenjar keeps them as podcast feeds, so new episodes reach your Library and any podcast app you use.',
+        'With Local YouTube, follow YouTube playlists and channels and gather any videos into podcasts of your own. '
+          'With Cloud, each becomes a podcast feed for any podcast app you use.',
       ),
       _Mode.signUp => (
         'Create your account',

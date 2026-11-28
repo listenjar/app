@@ -35,9 +35,10 @@ info:
 
     Feeds: the listener's feeds are under `/me/feeds`. The app adds a YouTube
     video, playlist or channel with `addFeed` after reading its title from
-    YouTube itself. Free listeners add videos only, each its own podcast,
-    removed a day after it was added (`Feed.expiresAt`). Paying listeners
-    (`User.plan`, 10 GB or 100 GB) keep what they add, and also add playlists
+    YouTube itself. Feeds take Listenjar Cloud (`User.plan` paid with a
+    `storageLimitBytes`: Cloud 10 GB or Cloud 100 GB): Free and Local YouTube
+    keep everything on the listener's device, and a listener who leaves the
+    Cloud keeps their feeds for a day. Cloud listeners add videos, playlists
     and channels, which follow their YouTube source, and podcasts of their own
     (`addFeed` without a source), whose episodes are whatever videos they add,
     including the video of one of their YouTube video feeds. Their plan caps
@@ -99,8 +100,8 @@ info:
 
     Storage: the server counts who holds each source's audio, per listener and
     source, one for each episode of theirs that has it. Adding an episode counts
-    it; removing an episode or a feed (`deleteEpisode`, `deleteFeed`, or a free
-    feed expiring) uncounts it. A listener's storage is every source they hold,
+    it; removing an episode or a feed (`deleteEpisode`, `deleteFeed`, or the
+    feeds of a listener who left the Cloud going) uncounts it. A listener's storage is every source they hold,
     once; audio nobody holds any more is deleted from the media bucket.
     Only YouTube audio the app uploads counts: classic podcasts play from
     their own publishers' servers and never use the plan's storage, nor does
@@ -211,7 +212,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: Only listeners with Listenjar Cloud (10 GB, 100 GB) add playlists, channels and podcasts of their own; not Free or Local.
+          description: Only listeners with Listenjar Cloud (Cloud 10 GB, Cloud 100 GB) add feeds; not Free or Local YouTube.
   /me/feeds/events:
     get:
       operationId: watchMyFeeds
@@ -335,7 +336,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: Podcasts of the listener's own take artwork while the listener has Listenjar Cloud (10 GB, 100 GB).
+          description: Podcasts of the listener's own take artwork while the listener has Listenjar Cloud (Cloud 10 GB, Cloud 100 GB).
         "404":
           description: The listener has no feed with that id.
   /me/feeds/{feedId}/image/complete:
@@ -424,7 +425,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: The feed is a playlist, channel or podcast of the listener's own, and the listener no longer has Listenjar Cloud (10 GB, 100 GB).
+          description: The listener no longer has Listenjar Cloud (Cloud 10 GB, Cloud 100 GB).
         "404":
           description: The listener has no feed with that id.
         "507":
@@ -797,7 +798,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: The listener's plan has no Listenjar Cloud (Free, Local).
+          description: The listener's plan has no Listenjar Cloud (Free, Local YouTube).
     post:
       operationId: pushLibrary
       summary: Record changes the listener made on this device
@@ -819,7 +820,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: The listener's plan has no Listenjar Cloud (Free, Local).
+          description: The listener's plan has no Listenjar Cloud (Free, Local YouTube).
   /me/library/events:
     get:
       operationId: watchLibrary
@@ -839,7 +840,7 @@ paths:
         "401":
           description: The token is missing, revoked or expired.
         "402":
-          description: The listener's plan has no Listenjar Cloud (Free, Local).
+          description: The listener's plan has no Listenjar Cloud (Free, Local YouTube).
   /me:
     get:
       operationId: getMe
@@ -968,13 +969,6 @@ components:
           description: >-
             The feed's public RSS, for the listener's podcast app. Only on the listener's own feeds, and
             only once an episode is uploaded: until then there is no RSS to subscribe to.
-        expiresAt:
-          type: string
-          format: date-time
-          description: >-
-            When the feed is removed, with its episodes and RSS: a day after a
-            free listener added it, unless they start paying first. Absent
-            while the listener pays.
         visibility:
           $ref: "#/components/schemas/FeedVisibility"
           description: >-
@@ -1280,13 +1274,12 @@ components:
       type: string
       enum: [free, paid]
       description: >-
-        `paid` while a Local, 10 GB or 100 GB subscription bought by this
-        account (or with its email) is live: the app's paid features, such as
-        following YouTube playlists and channels and podcasts of the
-        listener's own on their device. `User.storageLimitBytes` says whether
-        it also has Listenjar Cloud; Local doesn't. Without the Cloud (Free,
-        Local), listeners add videos to it only, each its own podcast for a
-        day.
+        `paid` while a Local YouTube, Cloud 10 GB or Cloud 100 GB
+        subscription bought by this account (or with its email) is live: the
+        app's YouTube features, following YouTube playlists and channels and
+        podcasts of the listener's own on their device. `User.storageLimitBytes`
+        says whether it also has Listenjar Cloud; Local YouTube doesn't.
+        Without the Cloud (Free, Local YouTube), the listener has no feeds.
     User:
       type: object
       required: [id, email, name, plan]
@@ -1309,10 +1302,10 @@ components:
           type: integer
           minimum: 1
           description: >-
-            What the listener's plan stores in Listenjar Cloud, in bytes (10
-            or 100 GB): the YouTube audio the app uploads, since classic
+            What the listener's plan stores in Listenjar Cloud, in bytes (Cloud 10
+            GB or Cloud 100 GB): the YouTube audio the app uploads, since classic
             podcasts play from their publishers and don't count. Absent
-            without the Cloud: on the free plan and on Local, whose plan is
+            without the Cloud: on Free and on Local YouTube, whose plan is
             still `paid`.
         storageUsedBytes:
           type: integer

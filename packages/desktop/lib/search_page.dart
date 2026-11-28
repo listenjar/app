@@ -682,7 +682,7 @@ final class _SearchPageState extends State<SearchPage> {
           constraints: const BoxConstraints(maxWidth: 560),
           child: Text(
             'Search YouTube or paste a link. Any single video plays here as an episode, free, straight from YouTube to this device. '
-            'Following a playlist or a channel turns it into a podcast that Listenjar Cloud keeps up to date, for this app and any other.',
+            'Following a playlist or a channel makes it a show here with Local YouTube, and a feed for any podcast app with Cloud.',
             style: text.bodyMedium!.copyWith(color: brand.fgSoft),
           ),
         ),

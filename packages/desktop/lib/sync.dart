@@ -13,8 +13,8 @@
 //    upload it (uploads.dart: createUpload, a PUT straight
 //    to R2, completeEpisode), delete the file.
 //
-// A free listener's single video is all the backend takes from them; a plan
-// that's full stops the feed until there's room (PlanLimit).
+// Feeds take a Cloud plan; a plan that's full, or gone, stops the feed until
+// there's room (PlanLimit).
 //
 // A source's audio is fetched and stored once, for every listener and feed
 // that has it, and nothing is locked: devices race, and each step is
@@ -60,7 +60,7 @@ final class PlanLimit implements Exception {
   final String message;
 
   /// 507: the plan's storage is full. Otherwise 402: the plan has no
-  /// Listenjar Cloud (Free, Local), which this takes.
+  /// Listenjar Cloud (Free, Local YouTube), which this takes.
   final bool storageFull;
 
   static const pricing = 'listenjar.com/pricing';
@@ -68,7 +68,7 @@ final class PlanLimit implements Exception {
   /// 402 and 507 from the API, as the listener reads them.
   static PlanLimit? of(Object e) => switch (e) {
     ApiStatusException(statusCode: 402) => const PlanLimit(
-      'Playlists, channels and podcasts of your own in Listenjar Cloud need a 10 GB or 100 GB plan: $pricing',
+      'Feeds in Listenjar Cloud need a Cloud plan: $pricing',
     ),
     ApiStatusException(statusCode: 507) => const PlanLimit(
       'Your plan’s storage is full. Remove episodes or pick a bigger plan: $pricing',
