@@ -253,8 +253,8 @@ final class MiniPlayer extends StatelessWidget {
           const SizedBox(width: 6),
           _inkIcon(_skipIcon(settings.skipForward, forward: true), 'Forward ${settings.skipForward.inSeconds} seconds', player.fastForward),
           const SizedBox(width: 18),
-          _SpeedButton(player: player, compact: true),
-          _SleepButton(player: player, compact: true),
+          _SpeedButton(player: player),
+          _SleepButton(player: player),
           _inkIcon(Icons.keyboard_arrow_up_rounded, 'Now Playing', () async => open()),
         ])
       : Row(children: [
@@ -665,10 +665,11 @@ final class NowPlaying extends StatelessWidget {
   /// where it selects text.
   static Widget _mouseGrip(Widget child) => _grip(child, devices: const {PointerDeviceKind.mouse});
 
-  // The top bar is the page's handle, for any pointer.
-  Widget _topBar(BuildContext context, PodcastEpisode e) => _grip(
+  // The top bar is the page's handle, for any pointer, and holds what's done
+  // to the episode rather than to its sound: keep it, share it, Up Next, more.
+  Widget _topBar(BuildContext context, Services s, PodcastEpisode e) => _grip(
     Padding(
-    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+    padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
     child: Row(children: [
       IconButton(
         tooltip: 'Close (Esc)',
@@ -677,8 +678,8 @@ final class NowPlaying extends StatelessWidget {
         icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
       ),
       const Spacer(),
-      Text('Now Playing', style: Theme.of(context).textTheme.labelLarge!.copyWith(color: brand.snowSoft, fontSize: 13)),
-      const Spacer(),
+      if (e.youtubeId != null) _AddVideoButton(episode: e),
+      _UpNextButton(library: s.library),
       if (episodeUrl(e) case final url?)
         Builder(
           builder: (context) => IconButton(
@@ -693,12 +694,12 @@ final class NowPlaying extends StatelessWidget {
     ),
   );
 
-  Widget _identity(BuildContext context, PodcastEpisode e, {required TextAlign align}) {
+  /// The title and the show, flush left like the rows they came from.
+  Widget _identity(BuildContext context, PodcastEpisode e) {
     final text = Theme.of(context).textTheme;
-    final cross = align == TextAlign.center ? CrossAxisAlignment.center : CrossAxisAlignment.start;
-    return Column(crossAxisAlignment: cross, children: [
-      Text(e.title, textAlign: align, maxLines: 3, overflow: TextOverflow.ellipsis, style: text.titleLarge!.copyWith(color: brand.snow, fontSize: 22, height: 1.2)),
-      const SizedBox(height: 8),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(e.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: text.titleLarge!.copyWith(color: brand.snow, fontSize: 20, height: 1.2)),
+      const SizedBox(height: 4),
       InkWell(
         borderRadius: BorderRadius.circular(6),
         onTap: () {
@@ -706,33 +707,30 @@ final class NowPlaying extends StatelessWidget {
           Navigator.of(context).maybePop();
           navigation.openShow(e.podcastId);
         },
-        child: Text(e.from, textAlign: align, style: text.bodyMedium!.copyWith(color: brand.accentLight, fontWeight: FontWeight.w600)),
+        child: Text(e.from, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodyMedium!.copyWith(color: brand.accentLight, fontWeight: FontWeight.w600)),
       ),
     ]);
   }
 
+  /// The scrubber, then one row for the sound: speed, back, play, forward,
+  /// sleep, the way the lock screen lays them out.
   Widget _controls(BuildContext context, Services s) {
     final player = s.player;
     final settings = s.library.settings;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       _Scrubber(player: player),
-      const SizedBox(height: 12),
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: Align(alignment: Alignment.centerLeft, child: _SpeedButton(player: player, inline: true))),
         _inkIcon(_skipIcon(settings.skipBack, forward: false), 'Back ${settings.skipBack.inSeconds} seconds', player.rewind, size: 34),
-        const SizedBox(width: 22),
-        _InkPlay(player: player, size: 72),
-        const SizedBox(width: 22),
+        const SizedBox(width: 14),
+        _InkPlay(player: player, size: 68),
+        const SizedBox(width: 14),
         _inkIcon(_skipIcon(settings.skipForward, forward: true), 'Forward ${settings.skipForward.inSeconds} seconds', player.fastForward, size: 34),
-      ]),
-      const SizedBox(height: 20),
-      Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: [
-        _SpeedButton(player: player),
-        _SleepButton(player: player),
-        _UpNextButton(library: s.library),
-        if (player.current case final e? when e.youtubeId != null) _AddVideoButton(episode: e),
+        Expanded(child: Align(alignment: Alignment.centerRight, child: _SleepButton(player: player, inline: true))),
       ]),
       if (player.problem case final problem?) ...[
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Text(problem, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: brand.dangerOnInk)),
       ],
     ]);
@@ -744,29 +742,39 @@ final class NowPlaying extends StatelessWidget {
 
   Widget _notes(BuildContext context, Services s, PodcastEpisode e) => ShowNotes(html: s.library.description(e.id), episode: e, onInk: true);
 
+  /// Roughly what the title, the scrubber and the controls take under the
+  /// cover, so a short window shrinks the cover before pushing them off.
+  static const _underCover = 250.0;
+
   Widget _narrow(BuildContext context, Services s, PodcastEpisode e, BoxConstraints box) {
-    final cover = (box.maxWidth - 64).clamp(160.0, 420.0).toDouble();
+    // The cover as wide as the page, but no taller than what the player
+    // leaves of the window, so the controls stay in the first screenful.
+    final tallest = (box.maxHeight - 56 - _underCover).clamp(120.0, 420.0);
+    final aspect = e.widescreen ? 16 / 9 : 1.0;
+    final cover = (box.maxWidth - 48).clamp(160.0, tallest * aspect).toDouble();
     return Column(children: [
-      _topBar(context, e),
+      _topBar(context, s, e),
       Expanded(
-        child: ListView(physics: _physics(context), padding: const EdgeInsets.fromLTRB(28, 12, 28, 40), children: [
-          _mouseGrip(Column(children: [
-            DecoratedBox(
-              decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
-              child: _cover(e, cover),
+        child: ListView(physics: _physics(context), padding: const EdgeInsets.fromLTRB(24, 8, 24, 40), children: [
+          _mouseGrip(Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Center(
+              child: DecoratedBox(
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
+                child: _cover(e, cover),
+              ),
             ),
-            const SizedBox(height: 28),
-            _identity(context, e, align: TextAlign.center),
-            const SizedBox(height: 22),
+            const SizedBox(height: 24),
+            _identity(context, e),
+            const SizedBox(height: 12),
             _controls(context, s),
           ])),
           if (s.player.chapters case final chapters when chapters.isNotEmpty) ...[
-            const SizedBox(height: 36),
+            const SizedBox(height: 28),
             Text('Chapters', style: Theme.of(context).textTheme.titleLarge!.copyWith(color: brand.snow)),
             const SizedBox(height: 8),
             _ChapterList(player: s.player, chapters: chapters),
           ],
-          const SizedBox(height: 36),
+          const SizedBox(height: 32),
           Text('Show notes', style: Theme.of(context).textTheme.titleLarge!.copyWith(color: brand.snow)),
           const SizedBox(height: 12),
           _notes(context, s, e),
@@ -777,7 +785,7 @@ final class NowPlaying extends StatelessWidget {
 
   Widget _wide(BuildContext context, Services s, PodcastEpisode e, BoxConstraints box) {
     return Column(children: [
-      _topBar(context, e),
+      _topBar(context, s, e),
       Expanded(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(56, 8, 56, 32),
@@ -790,19 +798,21 @@ final class NowPlaying extends StatelessWidget {
                   child: LayoutBuilder(builder: (context, column) {
                     // The cover takes what the title and every control
                     // leave, so all of them fit without scrolling.
-                    final cover = (column.maxHeight - 390).clamp(140.0, 400.0).toDouble();
+                    final cover = (column.maxHeight - _underCover - 24).clamp(140.0, 480.0).toDouble();
                     return SingleChildScrollView(
                       physics: _physics(context),
                       child: _mouseGrip(ConstrainedBox(
                         constraints: BoxConstraints(minHeight: column.maxHeight),
-                        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                          DecoratedBox(
-                            decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
-                            child: _cover(e, e.widescreen ? (cover * 16 / 9).clamp(0, column.maxWidth).toDouble() : cover),
+                        child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                          Center(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), boxShadow: const [brand.shadowFloat]),
+                              child: _cover(e, e.widescreen ? (cover * 16 / 9).clamp(0, column.maxWidth).toDouble() : cover.clamp(0, column.maxWidth).toDouble()),
+                            ),
                           ),
-                          const SizedBox(height: 28),
-                          _identity(context, e, align: TextAlign.center),
-                          const SizedBox(height: 20),
+                          const SizedBox(height: 24),
+                          _identity(context, e),
+                          const SizedBox(height: 12),
                           _controls(context, s),
                         ]),
                       )),
@@ -863,6 +873,9 @@ final class _ScrubberState extends State<_Scrubber> {
               thumbColor: brand.white,
               overlayColor: brand.accentLight.withValues(alpha: 0.16),
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+              // The track as wide as the cover, and only as tall as a finger
+              // needs: the default pads it by a whole overlay on every side.
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 13),
               trackShape: chapters.isEmpty
                 ? const RoundedRectSliderTrackShape()
                 : _ChapterTrack([for (final c in chapters.skip(1)) c.start.inMilliseconds / ms]),
@@ -878,18 +891,15 @@ final class _ScrubberState extends State<_Scrubber> {
               semanticFormatterCallback: (v) => clock(Duration(milliseconds: v.round())),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Row(children: [
-              Text(clock(shown), style: time),
-              Expanded(
-                child: chapters.isEmpty
-                  ? const SizedBox.shrink()
-                  : _ChapterNav(player: widget.player, chapters: chapters, at: shown),
-              ),
-              Text(total == Duration.zero ? '--:--' : '-${clock(total - shown)}', style: time),
-            ]),
-          ),
+          Row(children: [
+            Text(clock(shown), style: time),
+            Expanded(
+              child: chapters.isEmpty
+                ? const SizedBox.shrink()
+                : _ChapterNav(player: widget.player, chapters: chapters, at: shown),
+            ),
+            Text(total == Duration.zero ? '--:--' : '-${clock(total - shown)}', style: time),
+          ]),
         ]);
       },
     );
@@ -1194,40 +1204,76 @@ final class _SidePanelState extends State<_SidePanel> {
   }
 }
 
-/// A pill on ink: the speed chip's shape (DESIGN.md "Chips and tags").
-Widget _pill(BuildContext context, {required IconData icon, required String label, required bool active, required VoidCallback onTap, bool compact = false}) {
+/// The mini player's speed and sleep buttons: an icon and a label, no ground.
+Widget _pill(BuildContext context, {required IconData icon, required String label, required bool active, required VoidCallback onTap}) => TextButton(
+  onPressed: onTap,
+  style: TextButton.styleFrom(
+    foregroundColor: active ? brand.accentLight : brand.snow,
+    minimumSize: const Size(0, 36),
+    padding: const EdgeInsets.symmetric(horizontal: 10),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 13, fontFeatures: const [FontFeature.tabularFigures()]),
+  ),
+  child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 18), const SizedBox(width: 6), Text(label)]),
+);
+
+/// A control at either end of Now Playing's transport row: as tall as the
+/// skips beside it, [child] above an optional [caption], and periwinkle while
+/// [active].
+Widget _sideControl(BuildContext context, {required Widget child, String? caption, required bool active, required VoidCallback onTap}) {
+  final color = active ? brand.accentLight : brand.snow;
   final text = Theme.of(context).textTheme;
-  if (compact) {
-    return TextButton(
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: active ? brand.accentLight : brand.snow,
-        minimumSize: const Size(0, 36),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        textStyle: text.labelLarge!.copyWith(fontSize: 13, fontFeatures: const [FontFeature.tabularFigures()]),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 18), const SizedBox(width: 6), Text(label)]),
-    );
-  }
   return TextButton(
     onPressed: onTap,
     style: TextButton.styleFrom(
-      backgroundColor: active ? brand.accent : brand.inkTile,
-      foregroundColor: active ? brand.white : brand.snow,
-      minimumSize: const Size(0, 38),
-      padding: const EdgeInsets.symmetric(horizontal: 14),
-      shape: StadiumBorder(side: BorderSide(color: active ? brand.accent : brand.inkLine)),
-      textStyle: text.labelLarge!.copyWith(fontSize: 13.5, fontFeatures: const [FontFeature.tabularFigures()]),
+      foregroundColor: color,
+      minimumSize: const Size(52, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      textStyle: text.labelLarge!.copyWith(fontSize: 17, fontWeight: FontWeight.w600, fontFeatures: const [FontFeature.tabularFigures()]),
     ),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 18), const SizedBox(width: 7), Text(label)]),
+    child: caption == null
+      ? child
+      : Column(mainAxisSize: MainAxisSize.min, children: [
+          child,
+          Text(caption, style: text.labelSmall!.copyWith(color: color, fontSize: 11, height: 1.2, fontFeatures: const [FontFeature.tabularFigures()])),
+        ]),
+  );
+}
+
+/// A button in Now Playing's top bar: an icon, with a [count] after it when
+/// there is one, or a spinner while [busy].
+Widget _barButton(BuildContext context, {required IconData icon, required String tip, String? count, bool busy = false, required VoidCallback onTap}) {
+  final glyph = busy
+    ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: brand.snow))
+    : Icon(icon, size: 24);
+  return Tooltip(
+    message: tip,
+    child: Semantics(
+      label: tip,
+      button: true,
+      excludeSemantics: true,
+      child: TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          foregroundColor: brand.snow,
+          minimumSize: const Size(44, 44),
+          padding: EdgeInsets.symmetric(horizontal: count == null ? 0 : 10),
+          shape: count == null ? const CircleBorder() : const StadiumBorder(),
+          textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 14, fontFeatures: const [FontFeature.tabularFigures()]),
+        ),
+        child: count == null ? glyph : Row(mainAxisSize: MainAxisSize.min, children: [glyph, const SizedBox(width: 4), Text(count)]),
+      ),
+    ),
   );
 }
 
 final class _SpeedButton extends StatelessWidget {
-  const _SpeedButton({required this.player, this.compact = false});
+  const _SpeedButton({required this.player, this.inline = false});
   final Player player;
-  final bool compact;
+
+  /// In Now Playing's transport row: the speed alone, no icon.
+  final bool inline;
 
   @override
   Widget build(BuildContext context) {
@@ -1245,12 +1291,13 @@ final class _SpeedButton extends StatelessWidget {
       ],
       builder: (context, menu) => Tooltip(
         message: 'Playback speed',
-        child: _pill(
+        child: inline
+          ? _sideControl(context, child: Text(speedLabel(speed)), active: (speed - 1).abs() > 0.01, onTap: menu.toggle)
+          : _pill(
           context,
           icon: Icons.speed_rounded,
           label: speedLabel(speed),
           active: (speed - 1).abs() > 0.01,
-          compact: compact,
           onTap: menu.toggle,
         ),
       ),
@@ -1259,9 +1306,11 @@ final class _SpeedButton extends StatelessWidget {
 }
 
 final class _SleepButton extends StatefulWidget {
-  const _SleepButton({required this.player, this.compact = false});
+  const _SleepButton({required this.player, this.inline = false});
   final Player player;
-  final bool compact;
+
+  /// In Now Playing's transport row: the moon, and under it what's left.
+  final bool inline;
 
   @override
   State<_SleepButton> createState() => _SleepButtonState();
@@ -1275,7 +1324,7 @@ final class _SleepButtonState extends State<_SleepButton> {
     final label = switch (sleep) {
       SleepAt(:final at) => clock(at.difference(DateTime.now()) + const Duration(milliseconds: 999)),
       SleepAtEnd() => 'End of episode',
-      null => widget.compact ? '' : 'Sleep timer',
+      null => '',
     };
     return Dropdown(
       tone: MenuTone.ink,
@@ -1300,12 +1349,23 @@ final class _SleepButtonState extends State<_SleepButton> {
       ],
       builder: (context, menu) => Tooltip(
         message: 'Sleep timer',
-        child: _pill(
+        child: widget.inline
+          ? _sideControl(
+              context,
+              child: Icon(sleep == null ? Icons.bedtime_outlined : Icons.bedtime_rounded, size: sleep == null ? 26 : 20),
+              caption: switch (sleep) {
+                SleepAt() => label,
+                SleepAtEnd() => 'End',
+                null => null,
+              },
+              active: sleep != null,
+              onTap: menu.toggle,
+            )
+          : _pill(
           context,
           icon: sleep == null ? Icons.bedtime_outlined : Icons.bedtime_rounded,
           label: label,
           active: sleep != null,
-          compact: widget.compact,
           onTap: menu.toggle,
         ),
       ),
@@ -1320,11 +1380,11 @@ final class _UpNextButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = library.queue.length;
-    return _pill(
+    return _barButton(
       context,
       icon: Icons.queue_music_rounded,
-      label: count == 0 ? 'Up Next' : 'Up Next · $count',
-      active: false,
+      tip: count == 0 ? 'Up Next' : 'Up Next · $count',
+      count: count == 0 ? null : '$count',
       onTap: () => showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
@@ -1438,18 +1498,15 @@ final class _AddVideoButtonState extends State<_AddVideoButton> {
               onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null))),
             ),
         ],
-        builder: (context, menu) => Tooltip(
-          message: 'Keep this video',
-          child: _pill(
-            context,
-            icon: kept ? Icons.library_add_check_outlined : Icons.library_add_outlined,
-            label: _busy ? 'Adding…' : 'Add video',
-            active: false,
-            onTap: () {
-              if (_busy) return;
-              menu.isOpen ? menu.close() : menu.open();
-            },
-          ),
+        builder: (context, menu) => _barButton(
+          context,
+          icon: kept ? Icons.library_add_check_outlined : Icons.library_add_outlined,
+          tip: _busy ? 'Adding…' : 'Keep this video',
+          busy: _busy,
+          onTap: () {
+            if (_busy) return;
+            menu.isOpen ? menu.close() : menu.open();
+          },
         ),
         );
       },
