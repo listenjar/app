@@ -1,6 +1,7 @@
 // Sends a release's iOS build to TestFlight: uploads the .ipa that
 // tool/package-ios.sh exported, waits for App Store Connect to process it,
-// sets its What to Test to the release's notes (`tool/release.ts notes`), adds
+// sets its What to Test to the release's notes (`tool/release.ts notes`), or to
+// everything since the last minor version on a new one (X.Y.0), adds
 // it to the external "Public" group, whose public link takes up to 10,000
 // testers, and submits it to Beta App Review, after which that group can
 // install it. Each step it finds already done it skips, so a rerun picks up
@@ -65,13 +66,39 @@ async function once404sClear<T>(step: () => Promise<T>): Promise<T> {
 
 const ipa = process.argv[2] ?? (() => { throw new Error("Usage: node tool/testflight.ts <ipa>") })()
 const node = (...args: string[]) => JSON.parse(execFileSync("node", ["tool/release.ts", ...args], { encoding: "utf8" }))
+const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim()
 const { version, build } = node("identity")
-const changes: string[] = node("notes")
 
-// TestFlight shows the version and build above What to Test.
-const whatsNew = `${changes.length ? `What's new:\n${changes.map(change => `• ${change}`).join("\n")}` : "Fixes behind the scenes, nothing new to try."}
+// Every push to master is a release, several a day, so TestFlight would email
+// and push every tester (customers, and you) for each. Only a new minor or
+// major version tells them: X.Y.0, started by raising the base in
+// pubspec.yaml (tool/release.dart). Every other build still reaches TestFlight
+// and its automatic updates, silently.
+const minor = /^\d+\.\d+\.0$/.test(version)
 
-Found a bug or something confusing? Take a screenshot and send it as TestFlight feedback.`.slice(0, 4000)
+/** The Release-note lines of the commits since the newest older X.Y.0 tag. */
+function sinceLastMinor(): string[] | undefined {
+  const older = (tag: string) => {
+    const [a, b] = [tag.slice(1), version].map(v => v.split(".").map(Number))
+    return a[0]! < b[0]! || (a[0] === b[0] && a[1]! < b[1]!)
+  }
+  const previous = git("tag", "--list", "v*", "--sort=-v:refname").split("\n")
+    .find(tag => /^v\d+\.\d+\.0$/.test(tag) && older(tag))
+  if (!previous) return undefined
+  return git("log", "--reverse", "--no-merges", "--format=%(trailers:key=Release-note,valueonly,unfold)", `${previous}..HEAD`)
+    .split("\n").map(line => line.trim()).filter(Boolean)
+    .filter((line, i, lines) => lines.indexOf(line) === i)
+}
+const changes: string[] = (minor && sinceLastMinor()) || node("notes")
+
+// TestFlight shows the version and build above What to Test, which takes 4,000
+// characters: a minor version's long list keeps its newest lines.
+const footer = "\n\nFound a bug or something confusing? Take a screenshot and send it as TestFlight feedback."
+const whatsNewOf = (lines: string[]) =>
+  `${lines.length ? `What's new:\n${lines.map(change => `• ${change}`).join("\n")}` : "Fixes behind the scenes, nothing new to try."}${footer}`
+let kept = changes
+while (kept.length > 1 && whatsNewOf(kept).length > 4000) kept = kept.slice(1)
+const whatsNew = whatsNewOf(kept).slice(0, 4000)
 
 const [app] = await list(`/v1/apps?filter[bundleId]=${bundleId}&fields[apps]=bundleId`)
 if (!app) throw new Error(`No App Store Connect app for ${bundleId}`)
@@ -111,16 +138,13 @@ if (localization) {
     relationships: { build: { data: { type: "builds", id: buildId } } } } })
 }
 
-// Every push to master is a release, so TestFlight would email and push every
-// tester several times a day. Only a release with notes for listeners tells
-// them; the rest still reach TestFlight and its automatic updates, silently.
-const autoNotifyEnabled = changes.length > 0
+const autoNotifyEnabled = minor
 await once404sClear(async () => {
   const details = (await api("GET", `/v1/builds/${buildId}/buildBetaDetail`))!.data as Resource
   await api("PATCH", `/v1/buildBetaDetails/${details.id}`,
     { data: { type: "buildBetaDetails", id: details.id, attributes: { autoNotifyEnabled } } })
 })
-console.log(autoNotifyEnabled ? "Testers get told about this build" : "No release notes: testers aren't told about this build")
+console.log(autoNotifyEnabled ? `${version} starts a minor version: testers get told about it` : `${version} is a patch: testers aren't told about it`)
 
 const external = (await list(`/v1/apps/${app.id}/betaGroups`))
   .find(each => each.attributes.name === group && each.attributes.isInternalGroup === false)
