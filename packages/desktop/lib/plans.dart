@@ -363,7 +363,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
     );
     return _sheet(
       context: context,
-      width: _plans.length > 2 ? 620 : 520,
+      width: _plans.length > 2 ? 680 : 520,
       // A short window scrolls the sheet rather than clipping the plans.
       child: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -389,17 +389,20 @@ final class _PlansSheetState extends State<_PlansSheet> {
           const SizedBox(height: 18),
           _IntervalSwitch(value: _interval, onChanged: (v) => setState(() => _interval = v)),
           const SizedBox(height: 14),
-          // Side by side while each plan has room for its price on a line;
+          // Side by side while each plan has room for its name and price on
+          // a line, all as tall as the tallest so the prices line up;
           // narrower, one plan to a row.
           LayoutBuilder(builder: (context, box) {
             const gap = 12.0;
-            if (box.maxWidth >= 170 * _plans.length + gap * (_plans.length - 1)) {
-              return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                for (final (i, plan) in _plans.indexed) ...[
-                  if (i > 0) const SizedBox(width: gap),
-                  Expanded(child: tile(plan, row: false)),
-                ],
-              ]);
+            if (box.maxWidth >= 180 * _plans.length + gap * (_plans.length - 1)) {
+              return IntrinsicHeight(
+                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  for (final (i, plan) in _plans.indexed) ...[
+                    if (i > 0) const SizedBox(width: gap),
+                    Expanded(child: tile(plan, row: false)),
+                  ],
+                ]),
+              );
             }
             return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               for (final (i, plan) in _plans.indexed) ...[
@@ -588,12 +591,14 @@ final class _PlanTileState extends State<_PlanTile> {
                 ])
               : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
-                    Expanded(child: Text(_size(plan), style: text.titleLarge)),
+                    Expanded(child: Text(_size(plan), style: text.titleMedium, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    const SizedBox(width: 6),
                     check,
                   ]),
                   const SizedBox(height: 2),
                   Text(what, style: soft),
                   const SizedBox(height: 14),
+                  const Spacer(),
                   Text.rich(
                     TextSpan(children: [
                       TextSpan(
