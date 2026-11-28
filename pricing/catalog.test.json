@@ -2,8 +2,8 @@
   "plans": [
     {
       "product_id": "prod_listenjar_local",
-      "name": "Listenjar Local",
-      "description": "Playlists, channels and podcasts of your own, kept on your device: nothing uploaded or synced.",
+      "name": "Local YouTube",
+      "description": "YouTube playlists and channels, and podcasts of your own, in the Listenjar app on your device: nothing uploaded.",
       "storage_bytes": 0,
       "prices": [
         {
@@ -16,8 +16,8 @@
     },
     {
       "product_id": "prod_VgJSdGSaTq1Zxz",
-      "name": "Listenjar 10 GB",
-      "description": "Playlists, channels and podcasts of your own, up to 10 GB of audio (about 170 hours).",
+      "name": "Cloud 10 GB",
+      "description": "Everything in Local YouTube, as feeds for any podcast app: up to 10 GB of audio (about 170 hours).",
       "storage_bytes": 10000000000,
       "prices": [
         {
@@ -36,8 +36,8 @@
     },
     {
       "product_id": "prod_VgJScKj2ChFoQQ",
-      "name": "Listenjar 100 GB",
-      "description": "Playlists, channels and podcasts of your own, up to 100 GB of audio (about 1,700 hours).",
+      "name": "Cloud 100 GB",
+      "description": "Everything in Local YouTube, as feeds for any podcast app: up to 100 GB of audio (about 1,700 hours).",
       "storage_bytes": 100000000000,
       "prices": [
         {
