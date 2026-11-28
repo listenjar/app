@@ -4,11 +4,13 @@
 // signs in and out through it, and Feeds (feeds.dart) follows it. No
 // widgets here.
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:logging/logging.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'backend/api.dart';
 import 'config.dart';
@@ -21,6 +23,33 @@ const callTimeout = Duration(seconds: 30);
 
 /// The ways to sign in, as listenjar.com's sign-in page has them.
 enum SignInMethod { google, passkey, password }
+
+// How this device signed in last, for the sign-in form's "Last used" mark,
+// as listenjar.com's `last_sign_in` cookie does it: a plain file beside the
+// app's data, since it names only the method, never who signed in. Signing
+// out keeps it on purpose.
+Future<File> _lastSignInFile() async => File('${(await getApplicationSupportDirectory()).path}/last-sign-in');
+
+Future<SignInMethod?> _loadLastSignIn() async {
+  try {
+    final file = await _lastSignInFile();
+    if (!await file.exists()) return null;
+    return SignInMethod.values.asNameMap()[(await file.readAsString()).trim()];
+  } catch (e) {
+    _log.info('Couldn’t read how this device signed in last', e);
+    return null;
+  }
+}
+
+Future<void> _keepLastSignIn(SignInMethod method) async {
+  try {
+    final file = await _lastSignInFile();
+    await file.parent.create(recursive: true);
+    await file.writeAsString(method.name, flush: true);
+  } catch (e) {
+    _log.info('Couldn’t keep how this device signed in', e);
+  }
+}
 
 final class Account extends ChangeNotifier {
   final _config = currentConfig();
@@ -39,6 +68,10 @@ final class Account extends ChangeNotifier {
   bool restoring = true;
   ({SignInMethod method, CancellationToken token})? signingIn;
 
+  /// How this device signed in last, signed in now or not; null before the
+  /// first time.
+  SignInMethod? lastSignIn;
+
   /// Cancelled with the account, and after [callTimeout].
   CancellationToken timeout() => _life.merge(TimeoutCancellationToken(callTimeout));
 
@@ -50,6 +83,7 @@ final class Account extends ChangeNotifier {
     restoring = true;
     notifyListeners();
     try {
+      lastSignIn = await _loadLastSignIn();
       _token = await loadToken();
       if (_token != null) {
         try {
@@ -185,6 +219,8 @@ final class Account extends ChangeNotifier {
       await keepUser(session.user);
       _token = session.token;
       user = session.user;
+      lastSignIn = method;
+      await _keepLastSignIn(method);
     } on CancelledException {
       // Cancelled, or the account closed.
     } on SignInRefused catch (e) {

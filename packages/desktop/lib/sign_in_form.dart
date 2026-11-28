@@ -6,6 +6,7 @@
 // Signing up passes Cloudflare Turnstile first, as on listenjar.com/signup
 // (turnstile.dart): its widget sits above Create account, or, without a
 // WebView, opens in the browser when Create account is pressed.
+// The way this device signed in last wears listenjar.com's "Last used" mark.
 import 'dart:async';
 
 import 'package:cancellation_token/cancellation_token.dart';
@@ -217,41 +218,50 @@ final class _SignInFormState extends State<SignInForm> {
     final text = Theme.of(context).textTheme;
     return ListenableBuilder(
       listenable: _account,
-      builder: (context, _) => ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: switch ((_account.signingIn, _sent)) {
-          _ when _browserCheck != null => _waitingForBrowser(
-            text,
-            _browserCheck!,
-            title: 'Confirm you’re a person',
-            body: 'Cloudflare checks your browser on the page that opened. The app emails your link when it’s done.',
-          ),
-          ((method: SignInMethod.google, :final token), _) => _waitingForBrowser(
-            text,
-            token,
-            title: 'Finish in your browser',
-            body: 'Pick your Google account on the page that opened. The app signs in when you do.',
-          ),
-          (null, final sent?) => _sentView(text, sent),
-          _ => _form(text),
-        },
-      ),
+      builder: (context, _) => switch ((_account.signingIn, _sent)) {
+        _ when _browserCheck != null => _waitingForBrowser(
+          text,
+          _browserCheck!,
+          title: 'Confirm you’re a person',
+          body: 'Cloudflare checks your browser on the page that opened. The app emails your link when it’s done.',
+        ),
+        ((method: SignInMethod.google, :final token), _) => _waitingForBrowser(
+          text,
+          token,
+          title: 'Finish in your browser',
+          body: 'Pick your Google account on the page that opened. The app signs in when you do.',
+        ),
+        (null, final sent?) => _sentView(text, sent),
+        _ => _form(text),
+      },
     );
   }
 
-  /// Google's page, or Turnstile's, is open in the browser.
-  Widget _waitingForBrowser(TextTheme text, CancellationToken token, {required String title, required String body}) =>
-    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  /// What the form is for, then the form, filling the panel as it does on a
+  /// phone.
+  Widget _layout(TextTheme text, String title, String lede, Widget controls) =>
+    Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Text(title, style: text.titleMedium),
       const SizedBox(height: 6),
-      Text(body, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
-      const SizedBox(height: 18),
-      TextButton(
+      Text(lede, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
+      const SizedBox(height: 20),
+      controls,
+    ]);
+
+  /// Google's page, or Turnstile's, is open in the browser.
+  Widget _waitingForBrowser(TextTheme text, CancellationToken token, {required String title, required String body}) => _layout(
+    text,
+    title,
+    body,
+    Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: TextButton(
         style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
         onPressed: token.cancel,
         child: const Text('Cancel'),
       ),
-    ]);
+    ),
+  );
 
   /// A sign-up or password link went out.
   Widget _sentView(TextTheme text, _Sent sent) {
@@ -263,30 +273,33 @@ final class _SignInFormState extends State<SignInForm> {
         'If ${sent.email} has an account, a link to set its password is on its way. '
           'Set it on listenjar.com, then sign in here with it. The link works for an hour.',
     };
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Check your email', style: text.titleMedium),
-      const SizedBox(height: 6),
-      Text(body, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
-      const SizedBox(height: 18),
-      brand.accentShadow(
-        enabled: true,
-        child: TextButton(
-          style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
-          onPressed: () {
-            if (sent.mode == _Mode.forgot) _password.clear();
-            _switch(_Mode.signIn);
-            _passwordFocus.requestFocus();
-          },
-          child: const Text('Back to sign in'),
+    return _layout(
+      text,
+      'Check your email',
+      body,
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: brand.accentShadow(
+          enabled: true,
+          child: TextButton(
+            style: brand.button(brand.Tone.accent, brand.ButtonSize.sm),
+            onPressed: () {
+              if (sent.mode == _Mode.forgot) _password.clear();
+              _switch(_Mode.signIn);
+              _passwordFocus.requestFocus();
+            },
+            child: const Text('Back to sign in'),
+          ),
         ),
       ),
-    ]);
+    );
   }
 
   Widget _form(TextTheme text) {
     final signingIn = _account.signingIn?.method;
     final passkeyBusy = signingIn == SignInMethod.passkey;
     final passwordBusy = signingIn == SignInMethod.password || _sending;
+    final last = _account.lastSignIn;
     final problem = _problem ?? switch (_account.authError) {
       null => null,
       final error => _explain(error),
@@ -294,8 +307,7 @@ final class _SignInFormState extends State<SignInForm> {
     final (title, lede) = switch (_mode) {
       _Mode.signIn => widget.why ?? (
         'Sign in to Listenjar Cloud',
-        'With Local YouTube, follow YouTube playlists and channels and gather any videos into podcasts of your own. '
-          'With Cloud, each becomes a podcast feed for any podcast app you use.',
+        'Follow whole YouTube channels and playlists, and listen to them in any podcast app.',
       ),
       _Mode.signUp => (
         'Create your account',
@@ -306,35 +318,36 @@ final class _SignInFormState extends State<SignInForm> {
         'We’ll email you a link that sets it, or sets a first one if you’ve signed in only with Google or a passkey.',
       ),
     };
-    return AutofillGroup(
+    return _layout(text, title, lede, AutofillGroup(
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(title, style: text.titleMedium),
-        const SizedBox(height: 6),
-        Text(lede, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
         if (problem != null) ...[
-          const SizedBox(height: 16),
           _Alert(problem),
+          const SizedBox(height: 16),
         ],
         if (_mode == _Mode.signIn) ...[
-          const SizedBox(height: 20),
-          TextButton.icon(
-            style: brand.button(brand.Tone.ink),
-            onPressed: _busy ? null : () => unawaited(_google()),
-            icon: const GoogleMark(),
-            label: const Text('Continue with Google'),
+          _LastUsed(
+            shown: last == SignInMethod.google,
+            child: TextButton.icon(
+              style: brand.button(brand.Tone.ink),
+              onPressed: _busy ? null : () => unawaited(_google()),
+              icon: const GoogleMark(),
+              label: const Text('Continue with Google'),
+            ),
           ),
           if (_passkeys) ...[
             const SizedBox(height: 10),
-            TextButton.icon(
-              style: brand.button(brand.Tone.quiet),
-              onPressed: _busy ? null : () => unawaited(_account.signInWithPasskey()),
-              icon: const KeyMark(),
-              label: Text(passkeyBusy ? 'Waiting for your passkey…' : 'Sign in with a passkey'),
+            _LastUsed(
+              shown: last == SignInMethod.passkey,
+              child: TextButton.icon(
+                style: brand.button(brand.Tone.quiet),
+                onPressed: _busy ? null : () => unawaited(_account.signInWithPasskey()),
+                icon: const KeyMark(),
+                label: Text(passkeyBusy ? 'Waiting for your passkey…' : 'Sign in with a passkey'),
+              ),
             ),
           ],
           const _OrDivider('or with your email'),
-        ] else
-          const SizedBox(height: 20),
+        ],
         _label(text, 'Email'),
         _field(
           text,
@@ -376,19 +389,22 @@ final class _SignInFormState extends State<SignInForm> {
           TurnstileView(check),
         ],
         const SizedBox(height: 20),
-        brand.accentShadow(
-          enabled: !_busy,
-          child: TextButton(
-            style: brand.button(brand.Tone.accent),
-            onPressed: _busy ? null : () => unawaited(_submit()),
-            child: Text(switch ((_mode, passwordBusy)) {
-              (_Mode.signIn, true) => 'Signing in…',
-              (_Mode.signIn, false) => 'Sign in',
-              (_Mode.signUp, true) => 'Sending the link…',
-              (_Mode.signUp, false) => 'Create account',
-              (_Mode.forgot, true) => 'Sending the link…',
-              (_Mode.forgot, false) => 'Email me a link',
-            }),
+        _LastUsed(
+          shown: _mode == _Mode.signIn && last == SignInMethod.password,
+          child: brand.accentShadow(
+            enabled: !_busy,
+            child: TextButton(
+              style: brand.button(brand.Tone.accent),
+              onPressed: _busy ? null : () => unawaited(_submit()),
+              child: Text(switch ((_mode, passwordBusy)) {
+                (_Mode.signIn, true) => 'Signing in…',
+                (_Mode.signIn, false) => 'Sign in',
+                (_Mode.signUp, true) => 'Sending the link…',
+                (_Mode.signUp, false) => 'Create account',
+                (_Mode.forgot, true) => 'Sending the link…',
+                (_Mode.forgot, false) => 'Email me a link',
+              }),
+            ),
           ),
         ),
         // Continue with Google and Create account both make accounts.
@@ -413,7 +429,7 @@ final class _SignInFormState extends State<SignInForm> {
           ),
         ]),
       ]),
-    );
+    ));
   }
 
   /// listenjar.com/login's words for each refusal.
@@ -492,6 +508,51 @@ final class _SignInFormState extends State<SignInForm> {
         disabledBorder: border(brand.line),
         focusedBorder: border(invalid ? brand.danger : brand.accent.withValues(alpha: 0.6), 1.5),
       ),
+    );
+  }
+}
+
+/// Marks the way this device signed in last on its button's top edge:
+/// listenjar.com's LastUsed. Merged into the button, so it is part of its
+/// name: "Continue with Google, Last used".
+final class _LastUsed extends StatelessWidget {
+  const _LastUsed({required this.shown, required this.child});
+  final bool shown;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!shown) return child;
+    return MergeSemantics(
+      child: Stack(clipBehavior: Clip.none, fit: StackFit.passthrough, children: [
+        child,
+        Positioned(
+          top: -10,
+          right: 12,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: brand.accent,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: brand.white, width: 3, strokeAlign: BorderSide.strokeAlignOutside),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                child: Text(
+                  'Last used',
+                  style: Theme.of(context).textTheme.labelSmall!.copyWith(
+                    fontSize: 11,
+                    height: 1,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.11,
+                    color: brand.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }
