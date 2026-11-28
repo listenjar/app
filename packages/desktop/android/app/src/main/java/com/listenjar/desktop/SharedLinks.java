@@ -6,7 +6,7 @@ import androidx.annotation.Keep;
 import java.util.ArrayList;
 
 /**
- * Links shared to ListenJar, for lib/shared_links.dart, which calls this
+ * Links shared to Listenjar, for lib/shared_links.dart, which calls this
  * through the JNIgen bindings in lib/shared_links.g.dart (tool/jnigen.dart
  * regenerates them): text from the share sheet, a YouTube link opened with
  * the app, or a {@code <scheme>://open?url=…} link. MainActivity hands over

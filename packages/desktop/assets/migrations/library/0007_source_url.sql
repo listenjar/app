@@ -1,8 +1,8 @@
 -- An episode of a show made of sources (a YouTube video, playlist or channel,
--- a podcast of the listener's own, or the ListenJar feed of one) is its
+-- a podcast of the listener's own, or the Listenjar feed of one) is its
 -- source, once: the canonical URL of what it was made from
 -- (canonical_source_url, links.dart). Of several made from one source, one
--- stays: the copy its ListenJar feed has, else the one downloaded, playing,
+-- stays: the copy its Listenjar feed has, else the one downloaded, playing,
 -- in Up Next or listened to, else the oldest. It takes where the listener
 -- last was, Up Next and Now Playing; the others' downloads go to the trash.
 alter table episodes add column source_url text;

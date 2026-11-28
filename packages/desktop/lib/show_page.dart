@@ -4,8 +4,8 @@
 // from the library, search or an episode; a show looked at from search is
 // in the library unfollowed until the listener follows it. A podcast of the
 // listener's own is filled from Search instead. Every show opens here,
-// whatever the plan: on one with ListenJar Cloud, a YouTube playlist,
-// channel or podcast of the listener's own is a classic podcast ListenJar
+// whatever the plan: on one with Listenjar Cloud, a YouTube playlist,
+// channel or podcast of the listener's own is a classic podcast Listenjar
 // hosts, and its page also says how its uploads go (hosted_feed.dart). One
 // with nothing uploaded yet isn't in the library, and opens by its feed.
 import 'dart:async';
@@ -34,7 +34,7 @@ import 'ui.dart';
 final class ShowPage extends StatefulWidget {
   const ShowPage({super.key, required int this.podcastId}) : feedId = null;
 
-  /// A ListenJar feed with nothing uploaded yet, so no show in the library:
+  /// A Listenjar feed with nothing uploaded yet, so no show in the library:
   /// its page, which becomes the show's once the first upload lands.
   const ShowPage.feed({super.key, required String this.feedId}) : podcastId = null;
 
@@ -59,7 +59,7 @@ final class _ShowPageState extends State<ShowPage> {
   static const _page = 100;
   int _shown = _page;
 
-  /// The show's ListenJar feed's episodes, while it has one.
+  /// The show's Listenjar feed's episodes, while it has one.
   FeedEpisodes? _hosted;
 
   /// The podcast apps this device can open the feed in, for "Listen in".
@@ -253,7 +253,7 @@ final class _ShowPageState extends State<ShowPage> {
 
   /// What sits under the hero (beside the artwork on a wide window): who
   /// makes it, its title, play and the show's actions, and what it's about.
-  /// [feed] is the show's ListenJar feed, when it has one; [show] is null
+  /// [feed] is the show's Listenjar feed, when it has one; [show] is null
   /// for a feed with nothing uploaded yet.
   Widget _info(BuildContext context, Podcast? show, Feed? feed, bool own) {
     final s = Services.of(context);
@@ -266,9 +266,9 @@ final class _ShowPageState extends State<ShowPage> {
       : s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: show.serial).firstOrNull ??
         s.library.episodes(show.id, oldestFirst: show.serial).firstOrNull;
     final refreshing = show != null && s.podcasts.refreshing.contains(show.id);
-    // Signed out, a ListenJar feed's show stays and plays, but the feed
+    // Signed out, a Listenjar feed's show stays and plays, but the feed
     // isn't there to manage.
-    final note = show?.cloudFeedId != null && feed == null ? 'One of your ListenJar feeds. Sign in, in Settings, to manage it.' : null;
+    final note = show?.cloudFeedId != null && feed == null ? 'One of your Listenjar feeds. Sign in, in Settings, to manage it.' : null;
     final author = own ? 'Podcast of your own' : show?.author ?? '';
     final video = switch (feed?.source) {
       final source? when source.kind == SourceKind.video && s.account.user?.plan == Plan.paid => source.url,
@@ -664,7 +664,7 @@ final class _ShowPageState extends State<ShowPage> {
   }
 
   /// Makes a picture the listener picks the artwork of [feed], a podcast of
-  /// their own ListenJar hosts: uploaded, and in the feed once it's up.
+  /// their own Listenjar hosts: uploaded, and in the feed once it's up.
   Future<void> _uploadArtwork(BuildContext context, Feed feed) async {
     final feeds = Services.of(context).feeds;
     final file = await openFile(acceptedTypeGroups: const [

@@ -6,7 +6,7 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-// One ListenJar window per build. The sign-in page in the browser opens
+// One Listenjar window per build. The sign-in page in the browser opens
 // <kUrlScheme>://sign-in (appScheme in lib/config.dart); the process the
 // desktop starts for it activates the running instance over D-Bus, which
 // presents its window, and exits. A <kUrlScheme>://open?url=… link, or a
@@ -96,7 +96,7 @@ static void my_application_activate(GApplication* application) {
   // gtk_header_bar_set_show_close_button(header_bar, TRUE);
   // gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
 
-  gtk_window_set_title(window, "ListenJar");
+  gtk_window_set_title(window, "Listenjar");
 
   // The icon CMake installed next to the executable, in data/.
   g_autofree gchar* executable = g_file_read_link("/proc/self/exe", nullptr);
@@ -204,7 +204,7 @@ static void register_url_scheme() {
   g_autofree gchar* entry = g_strdup_printf(
       "[Desktop Entry]\n"
       "Type=Application\n"
-      "Name=ListenJar\n"
+      "Name=Listenjar\n"
       "Exec=\"%s\" %%u\n"
       "NoDisplay=true\n"
       "MimeType=x-scheme-handler/%s;\n",
@@ -271,7 +271,7 @@ MyApplication* my_application_new() {
   g_set_prgname(kApplicationId);
   // What GTK and the desktop show as the app's name, which would otherwise
   // fall back to the application ID.
-  g_set_application_name("ListenJar");
+  g_set_application_name("Listenjar");
 
   // Unique: a second launch activates the first instance and exits.
   return MY_APPLICATION(g_object_new(my_application_get_type(),

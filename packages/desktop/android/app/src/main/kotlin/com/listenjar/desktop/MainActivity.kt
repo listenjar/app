@@ -7,7 +7,7 @@ import com.ryanheise.audioservice.AudioServiceActivity
 // AudioServiceActivity shares one Flutter engine with the playback service,
 // so the player keeps going when the activity goes away.
 //
-// Links shared to ListenJar wait in SharedLinks.java for
+// Links shared to Listenjar wait in SharedLinks.java for
 // lib/shared_links.dart, which takes them over JNI.
 class MainActivity : AudioServiceActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

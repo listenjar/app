@@ -1,4 +1,4 @@
-// Uploads: the one way the app stores a file with ListenJar, whatever the
+// Uploads: the one way the app stores a file with Listenjar, whatever the
 // file and whichever R2 bucket keeps it (public.yaml, "Uploads"). It asks
 // the API for an upload with the file's type and exact size (NewUpload),
 // gets a presigned PUT and the headers to send with it (PresignedUpload),

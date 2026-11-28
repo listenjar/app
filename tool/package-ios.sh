@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the release iOS app and exports it for App Store Connect as
-# build/release/ListenJar-X.Y.Z-ios.ipa (`moon run app:package-ios`), which
+# build/release/Listenjar-X.Y.Z-ios.ipa (`moon run app:package-ios`), which
 # tool/testflight.ts uploads to TestFlight.
 #
 #   LISTENJAR_IOS_PROFILE        an App Store provisioning profile for
@@ -22,7 +22,7 @@ if [[ -n "$profile" && -z "$share_profile" ]]; then
 fi
 version="$(node tool/release.ts identity | node -p 'JSON.parse(require("fs").readFileSync(0)).version')"
 out=build/release
-ipa="$out/ListenJar-$version-ios.ipa"
+ipa="$out/Listenjar-$version-ios.ipa"
 # Release.xcconfig includes it, for the Runner and ShareExtension targets.
 signing=packages/desktop/ios/Flutter/Signing.xcconfig
 work="$(mktemp -d)"

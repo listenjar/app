@@ -1,6 +1,6 @@
-// A show's ListenJar Cloud feed, on the show's own page (show_page.dart).
+// A show's Listenjar Cloud feed, on the show's own page (show_page.dart).
 // On a plan with the Cloud, YouTube playlists, channels and podcasts of the
-// listener's own also get an RSS feed ListenJar hosts: this device fetches
+// listener's own also get an RSS feed Listenjar hosts: this device fetches
 // each video and uploads its audio (sync.dart), and the player follows that
 // feed like any podcast (podcasts.dart), so an uploaded episode is an
 // episode of the show, its guid the feed's episode id. What's here is only
@@ -22,7 +22,7 @@ import 'sync.dart';
 import 'theme.dart' as brand;
 import 'ui.dart' show Artwork, Services, rowsPanel;
 
-/// The episodes ListenJar has for the feed [feedId], uploaded or on their
+/// The episodes Listenjar has for the feed [feedId], uploaded or on their
 /// way, loaded again whenever its sync moves on; progress alone doesn't
 /// ask the API again.
 final class FeedEpisodes extends ChangeNotifier {

@@ -10,7 +10,7 @@
 // One debug app runs per device, from any checkout: this stands aside while
 // another `app:dev` holds that device's lock in the temp directory (another
 // session or checkout running the same device), or, on macOS, while a debug
-// ListenJar.app is still running (from an IDE, or left behind by a
+// Listenjar.app is still running (from an IDE, or left behind by a
 // `app:dev` that was killed outright). Standing aside exits 0, so
 // `moonx dev` keeps the backend and web running instead of stopping them all.
 import 'dart:async';
@@ -39,11 +39,11 @@ Future<void> main(List<String> args) async {
     ..flushSync();
 
   if (device == 'macos') {
-    final running = Process.runSync('pgrep', ['-f', '/Debug/ListenJar.app/Contents/MacOS/ListenJar']);
+    final running = Process.runSync('pgrep', ['-f', '/Debug/Listenjar.app/Contents/MacOS/Listenjar']);
     final apps = (running.stdout as String).trim().split('\n').where((line) => line.isNotEmpty);
     if (apps.isNotEmpty) {
       stderr.writeln(
-        'A debug ListenJar is already running (pid ${apps.join(', ')}): quit it, then run app:dev again.',
+        'A debug Listenjar is already running (pid ${apps.join(', ')}): quit it, then run app:dev again.',
       );
       exit(0);
     }

@@ -1,8 +1,8 @@
-// The library and the signed-in listener's ListenJar feeds (feeds.dart), in
+// The library and the signed-in listener's Listenjar feeds (feeds.dart), in
 // step. Every show starts on this device: a YouTube playlist or channel
 // lists its videos here and streams them, a podcast of the listener's own
-// takes the videos they add (podcasts.dart). On a plan with ListenJar
-// Cloud, each also gets a ListenJar feed ([CloudShows._host]): this device
+// takes the videos they add (podcasts.dart). On a plan with Listenjar
+// Cloud, each also gets a Listenjar feed ([CloudShows._host]): this device
 // fetches its videos from YouTube and uploads their audio (sync.dart), and
 // once the feed has an RSS address the show becomes that RSS show in place
 // ([Podcasts.followCloud]), a classic podcast that syncs between the
@@ -82,12 +82,12 @@ final class CloudShows {
     _soon = Timer(_settle, () => unawaited(_host()));
   }
 
-  /// Whether the plan uploads: signed in, on ListenJar Cloud, with the
+  /// Whether the plan uploads: signed in, on Listenjar Cloud, with the
   /// feeds loaded so a show isn't given a second one.
   bool get _uploads => _account.user?.storageLimitBytes != null && _account.user?.plan == Plan.paid && _loaded;
 
   /// Gives each YouTube playlist, channel and podcast of the listener's own
-  /// followed here, but not hosted yet, its ListenJar feed, and each
+  /// followed here, but not hosted yet, its Listenjar feed, and each
   /// podcast of their own hosted already the videos added to it here that
   /// its feed lacks.
   Future<void> _host() async {
@@ -104,7 +104,7 @@ final class CloudShows {
           await (own == null ? _feedFor(show) : _addMissing(show, own));
           _failed.remove(show.id);
         } catch (e) {
-          _log.warning('Couldn’t bring show ${show.id} to ListenJar Cloud', e);
+          _log.warning('Couldn’t bring show ${show.id} to Listenjar Cloud', e);
           _failed[show.id] = DateTime.now();
         }
       }
@@ -117,7 +117,7 @@ final class CloudShows {
     }
   }
 
-  /// Makes [show]'s ListenJar feed, or finds the listener's feed of the
+  /// Makes [show]'s Listenjar feed, or finds the listener's feed of the
   /// same source, and links the two.
   Future<void> _feedFor(Podcast show) async {
     final token = CancellationToken();
@@ -126,13 +126,13 @@ final class CloudShows {
       final feed = _feeds.feeds.where((f) => f.source != null && canonicalSourceUrl(f.source!.url) == source).firstOrNull
         ?? await _feeds.add(show.feedUrl, token);
       _library.setCloudFeed(show.id, feed.id);
-      _log.info('Show ${show.id} is ListenJar feed ${feed.id}');
+      _log.info('Show ${show.id} is Listenjar feed ${feed.id}');
       return;
     }
     // A podcast of the listener's own: its name, its picture and its videos.
     final feed = await _feeds.create(show.title);
     _library.setCloudFeed(show.id, feed.id);
-    _log.info('Show ${show.id} is ListenJar feed ${feed.id}');
+    _log.info('Show ${show.id} is Listenjar feed ${feed.id}');
     if (show.artworkUrl case final url? when url.startsWith('file:')) {
       try {
         await _feeds.setArtwork(feed, await File.fromUri(Uri.parse(url)).readAsBytes());
@@ -167,12 +167,12 @@ final class CloudShows {
       final source = canonicalSourceUrl(link);
       if (!there.contains(source)) {
         try {
-          _log.info('Adding $source of show ${show.id} to ListenJar feed ${feed.id}');
+          _log.info('Adding $source of show ${show.id} to Listenjar feed ${feed.id}');
           await _feeds.addVideo(feed, link, token);
         } on PlanLimit {
           rethrow;
         } catch (e) {
-          _log.warning('Couldn’t add $source to ListenJar feed ${feed.id}', e);
+          _log.warning('Couldn’t add $source to Listenjar feed ${feed.id}', e);
           failed = e;
           continue;
         }

@@ -79,11 +79,11 @@ final class Navigation {
 abstract interface class NavigationTarget {
   void openShow(int podcastId);
   void openNowPlaying();
-  /// [into] is a ListenJar Cloud podcast of the listener's own that the
+  /// [into] is a Listenjar Cloud podcast of the listener's own that the
   /// videos found go into, with one click each.
   void openSearch({String? query, bool youtube = false, String? into});
 
-  /// A ListenJar feed of the listener's, in the Library.
+  /// A Listenjar feed of the listener's, in the Library.
   void openFeed(String feedId);
   void openSettings();
 

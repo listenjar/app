@@ -7,7 +7,7 @@
 // then dispatches release.yaml on the tag, which builds every platform into
 // build/release/: macOS and Windows with
 // tool/package-macos.sh and tool/package-windows.ps1, Linux and Android with
-// `build` here (ListenJar-<version>-linux-x64.tar.gz, -android-<abi>.apk), and
+// `build` here (Listenjar-<version>-linux-x64.tar.gz, -android-<abi>.apk), and
 // tool/release.ts signs the updates, writes the appcasts and publishes.
 //
 // Android: `build android` refuses an APK not signed with the release key
@@ -158,7 +158,7 @@ void _emit(String output, String tag, Version version) => File(output)
 
 Future<void> _build(String platform) async {
   final version = _semver(_current);
-  final name = 'ListenJar-$version-$platform';
+  final name = 'Listenjar-$version-$platform';
   final target = switch (platform) {
     // One APK per ABI, each with the build number as its versionCode
     // (android/gradle.properties).
@@ -173,8 +173,8 @@ Future<void> _build(String platform) async {
       final bundle = '${_app.path}/build/linux/x64/release/bundle';
       final staged = Directory('${_out.path}/.$name')..createSync();
       try {
-        await _stream('cp', ['-R', bundle, '${staged.path}/ListenJar']);
-        await _stream('tar', ['-C', staged.path, '-czf', '${_out.path}/$name-x64.tar.gz', 'ListenJar']);
+        await _stream('cp', ['-R', bundle, '${staged.path}/Listenjar']);
+        await _stream('tar', ['-C', staged.path, '-czf', '${_out.path}/$name-x64.tar.gz', 'Listenjar']);
       } finally {
         staged.deleteSync(recursive: true);
       }

@@ -112,7 +112,7 @@ function releaseNotes(release: Release): string[] {
 }
 
 const assetName = (release: Release, platform: Platform) =>
-  `ListenJar-${release.version}-${platform}${platforms[platform].suffix}`
+  `Listenjar-${release.version}-${platform}${platforms[platform].suffix}`
 
 function rawKey(value: string | undefined, length: number): Buffer {
   const bytes = Buffer.from(value ?? "", "base64")
@@ -150,8 +150,8 @@ function appcast(m: Manifest): string {
   const url = `https://github.com/${repository}/releases/download/${m.tag}/${m.asset}`
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-<channel><title>ListenJar ${xml(m.platform)}</title><link>https://listenjar.com</link><description>ListenJar updates</description><language>en</language>
-<item><title>ListenJar ${xml(m.version)}</title>
+<channel><title>Listenjar ${xml(m.platform)}</title><link>https://listenjar.com</link><description>Listenjar updates</description><language>en</language>
+<item><title>Listenjar ${xml(m.version)}</title>
 <sparkle:version>${m.build}</sparkle:version>
 <sparkle:shortVersionString>${xml(m.version)}</sparkle:shortVersionString>
 <sparkle:minimumSystemVersion>${updater(m.platform).minimumSystem}</sparkle:minimumSystemVersion>
@@ -286,11 +286,11 @@ async function publish(directory: string) {
   const remote = await api(`commits/${release.tag}`)
   if (remote.sha !== release.commit) throw new Error("The remote tag no longer points at the built commit")
   const changes = releaseNotes(release)
-  const notes = `ListenJar ${release.version}
+  const notes = `Listenjar ${release.version}
 
 ${changes.length ? changes.map(change => `- ${change}`).join("\n") : "Fixes behind the scenes."}
 
-macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK for each of arm64-v8a (nearly every phone), armeabi-v7a and x86_64. On macOS, Windows and Android ListenJar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it, and Android installs only an APK signed with the same key as the installed app.
+macOS: a Developer ID signed and notarized DMG for Apple silicon and Intel. Windows: per-user installers for x64 and Arm64. Linux: an x64 tar.gz. Android: an APK for each of arm64-v8a (nearly every phone), armeabi-v7a and x86_64. On macOS, Windows and Android Listenjar updates itself from here: Sparkle and WinSparkle check each update's Ed25519 signature before installing it, and Android installs only an APK signed with the same key as the installed app.
 
 The Windows installer has no Authenticode publisher certificate yet, so SmartScreen may warn about it.
 
@@ -302,7 +302,7 @@ Source: ${release.commit}.
   existing ??= await api("releases", "POST", {
     tag_name: release.tag,
     target_commitish: release.commit,
-    name: `ListenJar ${release.version}`,
+    name: `Listenjar ${release.version}`,
     body: notes,
     draft: true,
     prerelease: false,

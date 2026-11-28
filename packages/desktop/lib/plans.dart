@@ -7,7 +7,7 @@
 //
 // Every plan unlocks the paid features on this device: following YouTube
 // playlists and channels, and podcasts of the listener's own. Local stops
-// there; 10 GB and 100 GB add ListenJar Cloud, which hosts them for any
+// there; 10 GB and 100 GB add Listenjar Cloud, which hosts them for any
 // podcast app.
 import 'dart:async';
 
@@ -37,7 +37,7 @@ const _planPerks = [
 /// any plan, Local included.
 bool isPaid(User? user) => user?.plan == Plan.paid;
 
-/// Whether the listener's plan has ListenJar Cloud: 10 GB or 100 GB. Local
+/// Whether the listener's plan has Listenjar Cloud: 10 GB or 100 GB. Local
 /// pays without it.
 bool hasCloud(User? user) => user?.plan == Plan.paid && user?.storageLimitBytes != null;
 
@@ -50,8 +50,8 @@ pricing.Plan? catalogPlan(User user) => switch (user.plan) {
 /// A bigger Cloud plan than the listener's, if there is one.
 pricing.Plan? biggerPlan(User user) => pricing.plans.where((p) => p.cloud && p.storageBytes > (user.storageLimitBytes ?? 0)).firstOrNull;
 
-/// "10 GB" out of "ListenJar 10 GB", "Local" out of "ListenJar Local".
-String _size(pricing.Plan plan) => plan.name.replaceFirst(RegExp(r'^ListenJar\s+'), '');
+/// "10 GB" out of "Listenjar 10 GB", "Local" out of "Listenjar Local".
+String _size(pricing.Plan plan) => plan.name.replaceFirst(RegExp(r'^Listenjar\s+'), '');
 
 /// "10 GB plan", or "Free plan".
 String planName(User user) => switch (user.plan) {
@@ -315,7 +315,7 @@ Widget _sheet({required BuildContext context, required Widget child, double widt
 
 /// The sheet of plans: pick one and how often to pay, then pay on Stripe
 /// Checkout in the browser, signing in here first if need be. [title] says
-/// why it opened; [cloud] when it's for something only ListenJar Cloud does,
+/// why it opened; [cloud] when it's for something only Listenjar Cloud does,
 /// which leaves Local out. Someone who pays already (on Local) changes plans
 /// in the billing portal instead.
 Future<void> showPlans(BuildContext context, {String title = 'Keep what you add', bool cloud = false}) => showDialog<void>(
@@ -323,9 +323,9 @@ Future<void> showPlans(BuildContext context, {String title = 'Keep what you add'
   builder: (_) => _PlansSheet(title: title, cloud: cloud, account: Services.of(context).account),
 );
 
-/// What ListenJar Cloud adds to every plan's perks, as the pricing page puts it.
+/// What Listenjar Cloud adds to every plan's perks, as the pricing page puts it.
 const _cloudPerks = [
-  'ListenJar Cloud: they play in any podcast app',
+  'Listenjar Cloud: they play in any podcast app',
   'Your whole library, classic podcasts too, on every device',
   'Storage counts YouTube audio only, never classic podcasts',
 ];
@@ -537,7 +537,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
           describe: (error) => failure('Couldn’t sign in', error, other: 'Try again.'),
           why: (
             'Sign in to get ${_size(_plan)}',
-            'Your plan goes with your ListenJar account. Checkout opens in your browser once you’re in.',
+            'Your plan goes with your Listenjar account. Checkout opens in your browser once you’re in.',
           ),
         ),
       ]),
@@ -702,7 +702,7 @@ final class _PlanTileState extends State<_PlanTile> {
 
 /// Asks for a podcast of the listener's own's name; null if they cancel.
 /// Asks what to call a new podcast of the listener's own, offering [name].
-/// Whether ListenJar also hosts it is the plan's to say, not a question.
+/// Whether Listenjar also hosts it is the plan's to say, not a question.
 Future<String?> askNewPodcast(BuildContext context, {String? name}) =>
   showDialog<String>(context: context, builder: (context) => _NewPodcastSheet(name: name));
 

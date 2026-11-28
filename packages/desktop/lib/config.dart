@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 /// Everything the app needs to know about its environment: where the
-/// ListenJar API (public.yaml) is, and the website it signs in through.
+/// Listenjar API (public.yaml) is, and the website it signs in through.
 /// Besides these the app reaches only podcast hosts, Apple's podcast
 /// directory and YouTube (README.md): no telemetry, tracing or crash reports.
 typedef Config = ({Uri api, Uri web});

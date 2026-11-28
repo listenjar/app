@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Signs a built ListenJar.app ($1) with a Developer ID and the hardened
+# Signs a built Listenjar.app ($1) with a Developer ID and the hardened
 # runtime, inside out, then verifies it: tool/package-macos.sh before it
 # notarizes, tool/reinstall-macos.sh before it installs.
 #
@@ -13,7 +13,7 @@
 #                                   signs and runs, but offers no passkeys.
 set -euo pipefail
 
-app="${1:?Usage: tool/sign-macos.sh path/to/ListenJar.app}"
+app="${1:?Usage: tool/sign-macos.sh path/to/Listenjar.app}"
 identity="${LISTENJAR_SIGNING_IDENTITY:?Set LISTENJAR_SIGNING_IDENTITY, the Developer ID to sign with}"
 keychain="${LISTENJAR_SIGNING_KEYCHAIN:-}"
 profile="${LISTENJAR_PROVISIONING_PROFILE:-}"

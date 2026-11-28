@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the release macOS app as a release would, with Sparkle's update key,
 # signs it with this Mac's Developer ID (tool/sign-macos.sh) and replaces
-# /Applications/ListenJar.app with it, quitting and reopening the app
+# /Applications/Listenjar.app with it, quitting and reopening the app
 # (`moon run app:reinstall`). It isn't notarized: an app built here
 # carries no quarantine, so Gatekeeper never asks.
 #
@@ -21,8 +21,8 @@ if [[ -z "${LISTENJAR_PROVISIONING_PROFILE:-}" && -f "$secrets/developer-id.prov
   LISTENJAR_PROVISIONING_PROFILE="$secrets/developer-id.provisionprofile"
 fi
 export LISTENJAR_UPDATE_PUBLIC_KEY LISTENJAR_SIGNING_IDENTITY LISTENJAR_PROVISIONING_PROFILE
-app=packages/desktop/build/macos/Build/Products/Release/ListenJar.app
-installed=/Applications/ListenJar.app
+app=packages/desktop/build/macos/Build/Products/Release/Listenjar.app
+installed=/Applications/Listenjar.app
 bundle=com.listenjar.desktop
 
 if ! security find-identity -v -p codesigning | grep -qF "\"$LISTENJAR_SIGNING_IDENTITY\""; then
@@ -37,24 +37,25 @@ if [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$app/Contents/Info.p
 fi
 tool/sign-macos.sh "$app"
 
-# Quit the running app (the installed copy or any other), waiting up to 10 s.
-if pgrep -qf "ListenJar.app/Contents/MacOS/"; then
+# Quit the running app (the installed copy or any other, ListenJar.app from
+# before the rename too), waiting up to 10 s.
+if pgrep -iqf "Listenjar.app/Contents/MacOS/"; then
   osascript -e "tell application id \"$bundle\" to quit" || true
-  for _ in {1..20}; do pgrep -qf "ListenJar.app/Contents/MacOS/" || break; sleep 0.5; done
-  if pgrep -qf "ListenJar.app/Contents/MacOS/"; then
-    echo "ListenJar is still running: quit it and reinstall again." >&2
+  for _ in {1..20}; do pgrep -iqf "Listenjar.app/Contents/MacOS/" || break; sleep 0.5; done
+  if pgrep -iqf "Listenjar.app/Contents/MacOS/"; then
+    echo "Listenjar is still running: quit it and reinstall again." >&2
     exit 1
   fi
 fi
 
 # Copy to a temporary folder on the same volume, then move it in, so a failed
 # copy leaves the old app in place and /Applications only ever holds
-# ListenJar.app: launchers index any .app that shows up there, under its name.
+# Listenjar.app: launchers index any .app that shows up there, under its name.
 staging="$(mktemp -d)"
 trap 'rm -rf "$staging"' EXIT
-ditto "$app" "$staging/ListenJar.app"
+ditto "$app" "$staging/Listenjar.app"
 rm -rf "$installed"
-mv "$staging/ListenJar.app" "$installed"
+mv "$staging/Listenjar.app" "$installed"
 mdimport "$installed"
 codesign --verify --deep --strict "$installed"
 codesign --display --verbose=2 "$installed" 2>&1 | grep -E '^(Identifier|Authority=Developer ID Application|TeamIdentifier|Timestamp)'

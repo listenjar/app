@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the release macOS app with Sparkle's update key and packages it as
-# build/release/ListenJar-X.Y.Z-macos.dmg, the download and
+# build/release/Listenjar-X.Y.Z-macos.dmg, the download and
 # the update payload both (`moon run app:package-macos`).
 #
 #   LISTENJAR_UPDATE_PUBLIC_KEY  the Ed25519 public key updates are signed
@@ -22,9 +22,9 @@ key="${LISTENJAR_UPDATE_PUBLIC_KEY:?Set LISTENJAR_UPDATE_PUBLIC_KEY, the Ed25519
 identity="${LISTENJAR_SIGNING_IDENTITY:-}"
 keychain="${LISTENJAR_SIGNING_KEYCHAIN:-}"
 version="$(node tool/release.ts identity | node -p 'JSON.parse(require("fs").readFileSync(0)).version')"
-app=packages/desktop/build/macos/Build/Products/Release/ListenJar.app
+app=packages/desktop/build/macos/Build/Products/Release/Listenjar.app
 out=build/release
-dmg="$out/ListenJar-$version-macos.dmg"
+dmg="$out/Listenjar-$version-macos.dmg"
 
 (cd packages/desktop && flutter build macos --release)
 if [[ "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$app/Contents/Info.plist")" != "$key" ]]; then
@@ -57,8 +57,8 @@ trap 'rm -rf "$work"' EXIT
 
 if [[ -n "$identity" ]]; then
   tool/sign-macos.sh "$app"
-  ditto -c -k --keepParent "$app" "$work/ListenJar.zip"
-  notarize "$work/ListenJar.zip"
+  ditto -c -k --keepParent "$app" "$work/Listenjar.zip"
+  notarize "$work/Listenjar.zip"
   xcrun stapler staple "$app"
 fi
 codesign --verify --deep --strict "$app"
@@ -68,7 +68,7 @@ staging="$(mktemp -d)"
 cp -R "$app" "$staging/"
 ln -s /Applications "$staging/Applications"
 rm -f "$dmg"
-hdiutil create -quiet -volname ListenJar -srcfolder "$staging" -fs APFS -format ULFO "$dmg"
+hdiutil create -quiet -volname Listenjar -srcfolder "$staging" -fs APFS -format ULFO "$dmg"
 rm -rf "$staging"
 
 if [[ -n "$identity" ]]; then

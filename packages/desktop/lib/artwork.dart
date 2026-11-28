@@ -17,7 +17,7 @@ const _largest = 3000;
 final class UnreadablePicture implements Exception {
   const UnreadablePicture();
   @override
-  String toString() => 'That file isn’t a picture ListenJar can read. Pick a JPEG or PNG.';
+  String toString() => 'That file isn’t a picture Listenjar can read. Pick a JPEG or PNG.';
 }
 
 /// [picture] as podcast artwork: a square image/jpeg.

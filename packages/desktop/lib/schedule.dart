@@ -147,7 +147,7 @@ final class _WorkManagerSchedule implements SyncSchedule {
       // Launches don't push the next run back.
       existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       foregroundServiceConfig: ForegroundServiceConfig(
-        notificationTitle: 'ListenJar',
+        notificationTitle: 'Listenjar',
         notificationText: 'Syncing your podcasts',
         notificationChannelId: 'sync',
         notificationChannelName: 'Syncing',

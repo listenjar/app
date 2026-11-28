@@ -1,5 +1,5 @@
 // YouTube.js's Misc (src/parser/misc.ts): the values nodes are made of. Only
-// the properties ListenJar reads so far; add others by their upstream names.
+// the properties Listenjar reads so far; add others by their upstream names.
 // ignore_for_file: non_constant_identifier_names
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:meta/meta.dart';

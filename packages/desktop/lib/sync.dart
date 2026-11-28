@@ -1,6 +1,6 @@
 // The sync engine: keeps each of the listener's feeds in step with its
 // YouTube source. Ported from the Listenbox client's Go sync engine
-// (crates/sync-engine/sync.go), against the ListenJar API (public.yaml):
+// (crates/sync-engine/sync.go), against the Listenjar API (public.yaml):
 //
 // 1. Read what the feed has (listEpisodes) and what the source holds now
 //    (youtube.dart). A podcast of the listener's own has no source: its
@@ -60,7 +60,7 @@ final class PlanLimit implements Exception {
   final String message;
 
   /// 507: the plan's storage is full. Otherwise 402: the plan has no
-  /// ListenJar Cloud (Free, Local), which this takes.
+  /// Listenjar Cloud (Free, Local), which this takes.
   final bool storageFull;
 
   static const pricing = 'listenjar.com/pricing';
@@ -68,7 +68,7 @@ final class PlanLimit implements Exception {
   /// 402 and 507 from the API, as the listener reads them.
   static PlanLimit? of(Object e) => switch (e) {
     ApiStatusException(statusCode: 402) => const PlanLimit(
-      'Playlists, channels and podcasts of your own in ListenJar Cloud need a 10 GB or 100 GB plan: $pricing',
+      'Playlists, channels and podcasts of your own in Listenjar Cloud need a 10 GB or 100 GB plan: $pricing',
     ),
     ApiStatusException(statusCode: 507) => const PlanLimit(
       'Your plan’s storage is full. Remove episodes or pick a bigger plan: $pricing',

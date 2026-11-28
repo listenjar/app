@@ -46,7 +46,7 @@ Where the APIs differ, Dart forces it:
 - QuickJS has no `Intl`, so pass `timezone`.
 - `new YT.Playlist(actions, data)` is `await YT.Playlist.create(actions, data)`: building one runs
   JavaScript in the runtime's isolate.
-- Values are snapshots of the properties ListenJar reads so far; add others by their upstream
+- Values are snapshots of the properties Listenjar reads so far; add others by their upstream
   names in [lib/src](lib/src). A node of a class not mirrored is a plain `YTNode` with its
   `type`. Formats, players, playlists and API responses stay live in YouTube.js until the Dart
   object is collected.

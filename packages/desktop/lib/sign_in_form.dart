@@ -26,7 +26,7 @@ final class SignInForm extends StatefulWidget {
   final Account account;
 
   /// What signing in is for, as a heading and a line under it, in place of
-  /// ListenJar Cloud's: the plans sheet's "Sign in to get 10 GB".
+  /// Listenjar Cloud's: the plans sheet's "Sign in to get 10 GB".
   final (String, String)? why;
 
   /// Says what went wrong when it isn't one of the refusals this form
@@ -208,9 +208,9 @@ final class _SignInFormState extends State<SignInForm> {
     };
     final (title, lede) = switch (_mode) {
       _Mode.signIn => widget.why ?? (
-        'Sign in to ListenJar Cloud',
+        'Sign in to Listenjar Cloud',
         'Follow YouTube playlists and channels, or gather any videos into a podcast of your own. '
-          'ListenJar keeps them as podcast feeds, so new episodes reach your Library and any podcast app you use.',
+          'Listenjar keeps them as podcast feeds, so new episodes reach your Library and any podcast app you use.',
       ),
       _Mode.signUp => (
         'Create your account',
@@ -306,7 +306,7 @@ final class _SignInFormState extends State<SignInForm> {
         Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
           Text(
             switch (_mode) {
-              _Mode.signIn => 'New to ListenJar?',
+              _Mode.signIn => 'New to Listenjar?',
               _Mode.signUp => 'Have an account?',
               _Mode.forgot => 'Remembered it?',
             },
@@ -330,10 +330,10 @@ final class _SignInFormState extends State<SignInForm> {
     GoogleRefused() => 'Google didn’t confirm your account. Try again, or pick another account.',
     AccessDenied() => 'You chose Cancel on Google’s page, so you’re not signed in.',
     UnknownPasskey() =>
-      'That passkey isn’t connected to a ListenJar account; it may have been removed. '
+      'That passkey isn’t connected to a Listenjar account; it may have been removed. '
         'Sign in another way, then add a new one on listenjar.com.',
-    NoPasskey() => 'There’s no ListenJar passkey here. Sign in another way, then add one on listenjar.com.',
-    PasskeysUnavailable() => 'This copy of ListenJar can’t use passkeys. Sign in another way.',
+    NoPasskey() => 'There’s no Listenjar passkey here. Sign in another way, then add one on listenjar.com.',
+    PasskeysUnavailable() => 'This copy of Listenjar can’t use passkeys. Sign in another way.',
     _ => widget.describe(error),
   };
 

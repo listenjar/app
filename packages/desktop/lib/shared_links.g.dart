@@ -41,7 +41,7 @@ const _$jniVersionCheck = jni$_.JniVersionCheck(1, 2);
 
 /// from: `com.listenjar.desktop.SharedLinks`
 ///
-/// Links shared to ListenJar, for lib/shared_links.dart, which calls this
+/// Links shared to Listenjar, for lib/shared_links.dart, which calls this
 /// through the JNIgen bindings in lib/shared_links.g.dart (tool/jnigen.dart
 /// regenerates them): text from the share sheet, a YouTube link opened with
 /// the app, or a {@code <scheme>://open?url=\u2026} link. MainActivity hands over

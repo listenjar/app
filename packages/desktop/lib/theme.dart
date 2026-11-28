@@ -1,4 +1,4 @@
-// ListenJar's brand core, the one listenjar.com uses: DESIGN.md at the
+// Listenjar's brand core, the one listenjar.com uses: DESIGN.md at the
 // listenjar root records it and apps/web/src/styles/app.css ships it. The
 // app's own layer on it is apps/desktop/DESIGN.md: paper pages take the
 // website's paper side (the dashboard: warm paper ground, white panels with

@@ -1,5 +1,5 @@
 // Who is signed in: the token kept in the system credential store, the
-// user it belongs to, and the ListenJar API client that sends it
+// user it belongs to, and the Listenjar API client that sends it
 // (signin.dart has the ways to sign in). One per process; the window
 // signs in and out through it, and Feeds (feeds.dart) follows it. No
 // widgets here.
@@ -28,7 +28,7 @@ final class Account extends ChangeNotifier {
   final _life = CancellationToken();
   String? _token;
 
-  /// The ListenJar API, as whoever is signed in.
+  /// The Listenjar API, as whoever is signed in.
   late final PublicApiClient api = apiClient(_config.api, _http, () => _token);
 
   /// Null while signed out. [restoring] covers reading the kept token at

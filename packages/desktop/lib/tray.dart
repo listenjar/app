@@ -1,4 +1,4 @@
-// The tray icon (the macOS menu bar, Windows' notification area): ListenJar
+// The tray icon (the macOS menu bar, Windows' notification area): Listenjar
 // keeps syncing after its window closes. Closing the window only hides it,
 // and on macOS its Dock icon with it; the tray says how the sync is going,
 // brings the window back, syncs now, or quits. Quitting is the only way the
@@ -56,15 +56,15 @@ final class Tray {
     }
 
     late final Tray tray;
-    final status = item('ListenJar');
+    final status = item('Listenjar');
     final syncNow = item('Sync now', feeds.syncNow);
     menu
       ..addItem(status)
       ..addSeparator()
-      ..addItem(item('Open ListenJar', () => tray.show()))
+      ..addItem(item('Open Listenjar', () => tray.show()))
       ..addItem(syncNow)
       ..addSeparator()
-      ..addItem(item('Quit ListenJar', () => Application.instance.quit(0)));
+      ..addItem(item('Quit Listenjar', () => Application.instance.quit(0)));
 
     if (Platform.isMacOS) {
       // A template image: the menu bar tints it for light, dark and selected.
@@ -76,7 +76,7 @@ final class Tray {
       icon.icon = ImageAsset.fromAsset('assets/tray/tile.png');
     }
     icon
-      ..setTooltip('ListenJar')
+      ..setTooltip('Listenjar')
       ..setContextMenu(menu)
       // A menu-bar icon opens its menu on a click; a Windows one opens the
       // window, its menu on a right click.
@@ -118,7 +118,7 @@ final class Tray {
     final (status, canSync) = shown;
     _status.label = status;
     _syncNow.isEnabled = canSync;
-    _icon.setTooltip('ListenJar: $status');
+    _icon.setTooltip('Listenjar: $status');
   }
 
   /// Brings the window back, in front, with its Dock icon.

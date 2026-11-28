@@ -10,7 +10,7 @@
     <!-- Like AntennaPod: feeds and episodes load from the address as given,
          http included (res/xml/network_security_config.xml). -->
     <application
-        android:label="ListenJar"
+        android:label="Listenjar"
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:name="${applicationName}"
@@ -51,7 +51,7 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="text/plain"/>
             </intent-filter>
-            <!-- YouTube links the listener opens with ListenJar. -->
+            <!-- YouTube links the listener opens with Listenjar. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>

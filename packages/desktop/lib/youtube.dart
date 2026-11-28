@@ -1,11 +1,11 @@
-// What ListenJar asks of YouTube, through youtubei (YouTube.js in QuickJS):
+// What Listenjar asks of YouTube, through youtubei (YouTube.js in QuickJS):
 // search, what a video, playlist or channel holds, and a downloadable audio
 // stream for a video. [YouTubeService] keeps one runtime for the app's whole
 // life; the link field's search, adding and the sync engine all share it.
 // The sync side is ported from the Listenbox client's Go sync engine
 // (crates/sync-engine/innertube.go): the same playability rules, the same
 // client fallbacks, the same request budget, but audio only, since a
-// ListenJar feed is a podcast.
+// Listenjar feed is a podcast.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -508,7 +508,7 @@ final class YouTube {
   }
 
   /// The video's chapters, for one that streams from elsewhere (a
-  /// ListenJar Cloud episode) or played from its download; empty when it
+  /// Listenjar Cloud episode) or played from its download; empty when it
   /// has none, null when YouTube won't say (the video is unavailable).
   Future<List<Chapter>?> chapters(String id, CancellationToken token) async {
     final (info, reason) = await _playerInfo(id, InnerTubeClient.WEB, token, next: true);

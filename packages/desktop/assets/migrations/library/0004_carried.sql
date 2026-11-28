@@ -1,4 +1,4 @@
--- Where the listener was in a YouTube playlist or channel moved to ListenJar
+-- Where the listener was in a YouTube playlist or channel moved to Listenjar
 -- Cloud, by video, until its uploads arrived. Moving is gone; the table stays
 -- so later versions number on.
 create table if not exists carried (

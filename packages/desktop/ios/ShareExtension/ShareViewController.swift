@@ -1,6 +1,6 @@
 import UIKit
 
-/// ListenJar in the share sheet (Safari, YouTube, Podcasts, Notes, …). It
+/// Listenjar in the share sheet (Safari, YouTube, Podcasts, Notes, …). It
 /// shows nothing: it opens the app with `$(LISTENJAR_URL_SCHEME)://open?url=…`
 /// carrying the shared link or text, and AppDelegate.swift's LinkScenes hands
 /// that to lib/shared_links.dart, which finds the link in it. The macOS
@@ -51,7 +51,7 @@ final class ShareViewController: UIViewController {
   /// `<scheme>://open?url=<shared>`, with the scheme from Info.plist. Every
   /// character but the unreserved ones is escaped: Dart reads `+` as a space.
   private static func appLink(for shared: String) -> URL? {
-    guard let scheme = Bundle.main.object(forInfoDictionaryKey: "ListenJarURLScheme") as? String,
+    guard let scheme = Bundle.main.object(forInfoDictionaryKey: "ListenjarURLScheme") as? String,
       let value = shared.addingPercentEncoding(withAllowedCharacters: unreserved)
     else { return nil }
     return URL(string: "\(scheme)://open?url=\(value)")

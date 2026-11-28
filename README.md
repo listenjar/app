@@ -1,9 +1,9 @@
-# ListenJar
+# Listenjar
 
 A podcast player for Mac, Windows, Linux, Android, iPhone and iPad, from [listenjar.com](https://listenjar.com).
 Free, and you don't need an account.
 
-![A show's page in ListenJar on a Mac: Planet Money's artwork glowing green behind its episodes, the shows you follow in the sidebar, and the mini player at the bottom](resources/screenshot.webp)
+![A show's page in Listenjar on a Mac: Planet Money's artwork glowing green behind its episodes, the shows you follow in the sidebar, and the mini player at the bottom](resources/screenshot.webp)
 
 ## Get it
 
@@ -28,20 +28,20 @@ On Mac, Windows and Android the app updates itself; on iPhone and iPad, TestFlig
 - **Downloads.** Download episodes to listen offline. See which shows take the most space, cap
   downloads at a size you pick, and have finished episodes deleted on their own.
 - **YouTube videos as episodes.** Paste a YouTube video's link and it plays like any episode.
-- **Share to it.** Share a YouTube or podcast link to ListenJar from another app and it opens
+- **Share to it.** Share a YouTube or podcast link to Listenjar from another app and it opens
   there. On Android, turn on "Open supported links" in the app's settings for YouTube links to
-  open in ListenJar.
+  open in Listenjar.
 
-## ListenJar Cloud
+## Listenjar Cloud
 
 Sign in to turn YouTube playlists and channels, or any videos you gather, into podcasts of your
-own. ListenJar hosts them as podcast feeds, so new episodes reach the app and any other podcast
+own. Listenjar hosts them as podcast feeds, so new episodes reach the app and any other podcast
 app you use. The [paid plans](https://listenjar.com) pay for their storage.
 
 ## Privacy
 
 The app fetches each show's feed and episodes from the show's own host, searches Apple's podcast
-directory and YouTube, and talks to ListenJar only when you're signed in. Nothing else: no
+directory and YouTube, and talks to Listenjar only when you're signed in. Nothing else: no
 tracking, analytics or crash reports.
 
 ## For developers

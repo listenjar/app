@@ -1,4 +1,4 @@
-// The window: the player's sections. ListenJar Cloud has none of its own:
+// The window: the player's sections. Listenjar Cloud has none of its own:
 // its feeds are shows in the Library (cloud.dart). Wide windows (desktop, tablets) get a sidebar; phones a bottom bar. The
 // mini player sits under every section once something is loaded and opens
 // Now Playing (now_playing.dart). Each section keeps one stack of pages, so
@@ -242,7 +242,7 @@ final class _ShellState extends State<Shell> implements NavigationTarget {
   }
 
   /// The sidebar show's first page: a podcast of the listener's own on
-  /// ListenJar Cloud by its feed.
+  /// Listenjar Cloud by its feed.
   Widget _sidebarShowPage(int id) {
     final s = Services.of(context);
     final feed = s.library.podcast(id)?.cloudFeedId;
@@ -441,7 +441,7 @@ final class SearchRequest extends ChangeNotifier {
   String? query;
   bool youtube = false;
 
-  /// The id of a ListenJar Cloud podcast of the listener's own to add
+  /// The id of a Listenjar Cloud podcast of the listener's own to add
   /// videos to, when search was opened from it.
   String? into;
   /// How many times [ask] was called; [focus] leaves it be.
@@ -478,7 +478,7 @@ final class Showing extends ChangeNotifier {
   bool get onInk => _pages.values.any((p) => p.onInk);
   int? get show => _pages.values.map((p) => p.show).nonNulls.firstOrNull;
 
-  /// The ListenJar feed the page is of, by id.
+  /// The Listenjar feed the page is of, by id.
   String? get feed => _pages.values.map((p) => p.feed).nonNulls.firstOrNull;
 
   void _set(State page, ({bool onInk, int? show, String? feed})? what) {
@@ -509,7 +509,7 @@ final class Shown extends StatefulWidget {
   /// The show the page is of.
   final int? show;
 
-  /// The ListenJar feed the page is of: a podcast of the listener's that
+  /// The Listenjar feed the page is of: a podcast of the listener's that
   /// isn't a show here yet, its first episode still on its way up.
   final String? feed;
   final Widget child;
@@ -614,7 +614,7 @@ final class _Sidebar extends StatelessWidget {
                 final downloading = s.library.unfinishedDownloads().length;
                 final shows = s.library.podcasts;
                 // As in the Library: a podcast of the listener's in
-                // ListenJar Cloud is a show here once its first episode is
+                // Listenjar Cloud is a show here once its first episode is
                 // up, and until then it's its feed, so it never goes
                 // missing, made on another device or not.
                 final linked = {for (final p in shows) ?p.cloudFeedId};

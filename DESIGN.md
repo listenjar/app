@@ -1,6 +1,6 @@
 ---
-name: ListenJar app
-description: The app's layer on ListenJar's brand core; at rest each show's artwork leads like a record sleeve, and on scroll the chrome folds into glass.
+name: Listenjar app
+description: The app's layer on Listenjar's brand core; at rest each show's artwork leads like a record sleeve, and on scroll the chrome folds into glass.
 colors:
   # Mirrors of the brand core (root DESIGN.md); change them there first.
   ink: "#0a0b0f"
@@ -119,7 +119,7 @@ components:
     height: "52px"
 ---
 
-# Design System: ListenJar app
+# Design System: Listenjar app
 
 This is a layer, not a second system. The brand core in the [root DESIGN.md](../../DESIGN.md) holds for the app: its colours, the one periwinkle accent, the platform's own face set heavy and tight, the corners, the shadow, glass and motion vocabularies, the Two-Tone and Opaque Fade rules, and the menus. This file adds what only a listening app needs and wins where the two differ. Tokens above that mirror the core are marked; the core is their source.
 

@@ -1,5 +1,5 @@
 # Builds the release Windows app with WinSparkle's update key and packages
-# it as build\release\ListenJar-X.Y.Z-windows-<x64|arm64>-setup.exe
+# it as build\release\Listenjar-X.Y.Z-windows-<x64|arm64>-setup.exe
 # with Inno Setup 6 (tool/windows-installer.iss): the download and the update
 # both. Flutter builds for the machine it runs on, so build arm64 on Windows
 # on Arm. LISTENJAR_UPDATE_PUBLIC_KEY is the Ed25519 public key updates are
@@ -33,4 +33,4 @@ $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
 if (-not (Test-Path $compiler)) { throw 'Install Inno Setup 6.' }
 & $compiler /Q "/DArch=$arch" "/DAppVersion=$($release.version)" "/DPayload=$payload" tool/windows-installer.iss
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
-Write-Output "build/release/ListenJar-$($release.version)-windows-$arch-setup.exe"
+Write-Output "build/release/Listenjar-$($release.version)-windows-$arch-setup.exe"

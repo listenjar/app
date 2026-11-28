@@ -1,4 +1,4 @@
--- An episode a ListenJar feed took over from a video streaming here kept the
+-- An episode a Listenjar feed took over from a video streaming here kept the
 -- video's id beside the feed's audio, so it played from YouTube, which can
 -- refuse it, instead of the feed. With audio of its own it isn't a video to
 -- look up; its link still names the video for artwork and chapters.

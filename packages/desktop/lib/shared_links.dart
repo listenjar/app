@@ -1,4 +1,4 @@
-// Links shared to ListenJar from other apps, and what it does with them.
+// Links shared to Listenjar from other apps, and what it does with them.
 //
 // Each platform's runner holds them until Dart takes them: Android's share
 // sheet and links opened with the app wait in SharedLinks.java, which Dart
@@ -8,7 +8,7 @@
 // a second launch's on that channel.
 //
 // A YouTube channel or playlist takes a paid plan: followed on this device,
-// streaming from YouTube, or as a ListenJar Cloud feed, as the listener
+// streaming from YouTube, or as a Listenjar Cloud feed, as the listener
 // picks. A YouTube video becomes a podcast of a single episode in the
 // library, free; on a paid plan the listener may add it to a podcast of
 // their own instead, on this device or in the Cloud. Any other link goes to search, which knows
@@ -169,7 +169,7 @@ Future<void> openLink(BuildContext context, Uri link, {bool Function()? replaced
     return;
   }
   if (isPaid(s.account.user)) {
-    // Their podcasts in ListenJar Cloud list from its feeds, which load just
+    // Their podcasts in Listenjar Cloud list from its feeds, which load just
     // after the account: wait, or they'd be missing from the choices.
     // What it is, for the question to name: looked up meanwhile.
     final video = _lookUp(s, youtube);
@@ -270,7 +270,7 @@ Future<void> openApplePodcasts(BuildContext context, ApplePodcastsLink link, Uri
 
 /// Follows the YouTube playlist or channel [link], called [what], with a
 /// plan: its videos list here and stream from YouTube at once. On a plan
-/// with ListenJar Cloud this device then uploads them too, and it becomes a
+/// with Listenjar Cloud this device then uploads them too, and it becomes a
 /// podcast for any podcast app (cloud_shows.dart).
 Future<void> followYouTube(BuildContext context, YouTubeLink link, String what) async {
   if (!await mayFollowInCloud(context, what) || !context.mounted) return;
@@ -284,7 +284,7 @@ Future<void> followYouTube(BuildContext context, YouTubeLink link, String what) 
   });
 }
 
-/// Whether the listener's plan has ListenJar Cloud (10 GB, 100 GB). On
+/// Whether the listener's plan has Listenjar Cloud (10 GB, 100 GB). On
 /// Local it doesn't: offers the plans that have it, under [title]. Signed
 /// out or free, callers have asked [mayFollowInCloud] and the like first.
 Future<bool> mayUseCloud(BuildContext context, String title) async {
@@ -295,7 +295,7 @@ Future<bool> mayUseCloud(BuildContext context, String title) async {
 }
 
 /// Whether the listener may follow [what] (“Lex Fridman”, this YouTube
-/// channel), on this device or in ListenJar Cloud: both take a plan. If they
+/// channel), on this device or in Listenjar Cloud: both take a plan. If they
 /// can't, says why: signed out, offers to sign in; on the free plan, the
 /// plans.
 Future<bool> mayFollowInCloud(BuildContext context, String what) async {
@@ -305,8 +305,8 @@ Future<bool> mayFollowInCloud(BuildContext context, String what) async {
       context,
       title: 'Follow $what',
       body: 'Single videos play here for free. Following a playlist or a channel takes a plan: '
-        'with ListenJar Local, its new videos stream here from YouTube; with 10 GB or 100 GB, '
-        'they become a podcast in ListenJar Cloud for any podcast app. Sign in to pick a plan.',
+        'with Listenjar Local, its new videos stream here from YouTube; with 10 GB or 100 GB, '
+        'they become a podcast in Listenjar Cloud for any podcast app. Sign in to pick a plan.',
     );
     return false;
   }
@@ -326,7 +326,7 @@ Future<bool> mayMakePodcast(BuildContext context) async {
       context,
       title: 'Make a podcast of your own',
       body: 'Gather any YouTube videos into a podcast with your own name and artwork: '
-        'on this device with ListenJar Local, or in ListenJar Cloud for any podcast app with 10 GB or 100 GB. '
+        'on this device with Listenjar Local, or in Listenjar Cloud for any podcast app with 10 GB or 100 GB. '
         'That takes an account and a plan.',
     );
     return false;
@@ -339,10 +339,10 @@ Future<bool> mayMakePodcast(BuildContext context) async {
 }
 
 /// A podcast of the listener's own: on this device, where its videos
-/// stream from YouTube, or in ListenJar Cloud, which uploads them for any
+/// stream from YouTube, or in Listenjar Cloud, which uploads them for any
 /// podcast app. Where the videos they pick can go.
 /// A podcast of the listener's own: a show in the library, or, made on a
-/// plan with ListenJar Cloud, a feed ListenJar hosts. Which one is the
+/// plan with Listenjar Cloud, a feed Listenjar hosts. Which one is the
 /// plan's business; it lists, opens and fills the same either way.
 final class OwnPodcast {
   const OwnPodcast.show(Podcast this.show) : feed = null;
@@ -355,7 +355,7 @@ final class OwnPodcast {
   String get title => feed?.title ?? show!.title;
 }
 
-/// The listener's podcasts of their own: those here, then those ListenJar
+/// The listener's podcasts of their own: those here, then those Listenjar
 /// hosts that aren't one of them on its way up.
 List<OwnPodcast> ownPodcasts(BuildContext context) {
   final s = Services.of(context);
@@ -371,8 +371,8 @@ List<OwnPodcast> ownPodcasts(BuildContext context) {
 OwnPodcast? ownPodcast(BuildContext context, String id) => ownPodcasts(context).where((o) => o.id == id).firstOrNull;
 
 /// Makes a podcast of the listener's own, asking its name, offered as
-/// [name]. It starts here; on a plan with ListenJar Cloud it becomes a
-/// feed ListenJar hosts too (cloud_shows.dart). Null when they cancel or
+/// [name]. It starts here; on a plan with Listenjar Cloud it becomes a
+/// feed Listenjar hosts too (cloud_shows.dart). Null when they cancel or
 /// it fails, which it says.
 Future<OwnPodcast?> newOwnPodcast(BuildContext context, {String? name}) async {
   if (!await mayMakePodcast(context) || !context.mounted) return null;
@@ -399,7 +399,7 @@ Future<OwnPodcast?> addVideoToOwnPodcast(BuildContext context, String url, OwnPo
   final token = TimeoutCancellationToken(const Duration(minutes: 2));
   var added = false;
   await _guard(context, () async {
-    // Here first, streaming at once; then in its ListenJar feed, if it has
+    // Here first, streaming at once; then in its Listenjar feed, if it has
     // one, which uploads it.
     final feed = target.feed ?? s.feeds.feeds.where((f) => f.id == target.show!.cloudFeedId).firstOrNull;
     final show = target.show ?? s.library.podcasts.where((p) => p.cloudFeedId == feed!.id).firstOrNull;

@@ -31,7 +31,7 @@ class FlutterWindow : public Win32Window {
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
-  // Links a second ListenJar.exe hands over (instance.h), for
+  // Links a second Listenjar.exe hands over (instance.h), for
   // lib/shared_links.dart.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> links_;
 

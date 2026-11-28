@@ -14,15 +14,15 @@
 
 [Setup]
 AppId={{6F4B7C1E-2D8A-4E5B-9C3F-1A7D0E2B8C46}
-AppName=ListenJar
+AppName=Listenjar
 AppVersion={#AppVersion}
 VersionInfoVersion={#AppVersion}
-AppPublisher=ListenJar
+AppPublisher=Listenjar
 AppPublisherURL=https://listenjar.com/
 AppSupportURL=https://github.com/listenjar/app/issues
 AppUpdatesURL=https://github.com/listenjar/app/releases
-DefaultDirName={localappdata}\Programs\ListenJar
-DefaultGroupName=ListenJar
+DefaultDirName={localappdata}\Programs\Listenjar
+DefaultGroupName=Listenjar
 PrivilegesRequired=lowest
 DisableDirPage=yes
 DisableProgramGroupPage=yes
@@ -35,13 +35,15 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 #endif
 MinVersion=10.0
-; The running app holds this mutex (windows/runner/instance.h).
-AppMutex=Local\ListenJar
+; The running app holds this mutex (windows/runner/instance.h); builds from
+; before the rename to Listenjar hold Local\ListenJar, mutex names being
+; case-sensitive.
+AppMutex=Local\Listenjar,Local\ListenJar
 CloseApplications=no
 RestartApplications=no
 UninstallDisplayIcon={app}\listenjar.exe
 OutputDir=..\build\release
-OutputBaseFilename=ListenJar-{#AppVersion}-windows-{#Arch}-setup
+OutputBaseFilename=Listenjar-{#AppVersion}-windows-{#Arch}-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -50,10 +52,10 @@ WizardStyle=modern
 Source: "{#Payload}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\ListenJar"; Filename: "{app}\listenjar.exe"
+Name: "{group}\Listenjar"; Filename: "{app}\listenjar.exe"
 
 [Run]
-Filename: "{app}\listenjar.exe"; Description: "Open ListenJar"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\listenjar.exe"; Description: "Open Listenjar"; Flags: nowait postinstall skipifsilent
 ; An update runs silently: open the new version where the old one closed.
 Filename: "{app}\listenjar.exe"; Flags: nowait; Check: WizardSilent
 
@@ -68,9 +70,9 @@ var
   Deadline: Int64;
 begin
   Deadline := GetTickCount64 + 60000;
-  while CheckForMutexes('Local\ListenJar') and (GetTickCount64 < Deadline) do
+  while CheckForMutexes('Local\Listenjar,Local\ListenJar') and (GetTickCount64 < Deadline) do
     Sleep(100);
-  Result := not CheckForMutexes('Local\ListenJar');
+  Result := not CheckForMutexes('Local\Listenjar,Local\ListenJar');
   if not Result then
-    MsgBox('ListenJar is still open. Quit it from the tray icon, then run this installer again.', mbError, MB_OK);
+    MsgBox('Listenjar is still open. Quit it from the tray icon, then run this installer again.', mbError, MB_OK);
 end;

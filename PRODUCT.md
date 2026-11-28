@@ -14,7 +14,7 @@ channels, audiobooks posted as video) as podcast feeds.
 
 ## Product Purpose
 
-The ListenJar app is a podcast player first: follow any RSS feed or a show from the directory,
+The Listenjar app is a podcast player first: follow any RSS feed or a show from the directory,
 refresh, download for offline, Up Next, playback speed, a sleep timer, and the system's media
 controls and headphone buttons. All of it is free and needs no account. A single YouTube video
 plays here as an episode of its own, also free.
@@ -24,9 +24,9 @@ listener's own: YouTube videos they gather under their own name and artwork. Eve
 the device, in the app's library: its videos list at once and stream from YouTube. The plans
 differ in what happens next:
 
-- ListenJar Local: that's all. The library stays on this device.
-- ListenJar Cloud (10 GB or 100 GB): the same device sync also uploads each video's audio to
-  ListenJar, and the show becomes a classic podcast: an RSS feed ListenJar hosts, for any podcast
+- Listenjar Local: that's all. The library stays on this device.
+- Listenjar Cloud (10 GB or 100 GB): the same device sync also uploads each video's audio to
+  Listenjar, and the show becomes a classic podcast: an RSS feed Listenjar hosts, for any podcast
   app. From there the library syncs between the listener's devices the classic way, RSS shows,
   places and Up Next, with nothing in it about YouTube. The plan's storage pays for the audio.
 
@@ -47,7 +47,7 @@ open source and sends no telemetry, tracing or crash reports.
 
 - Phones, in a pocket or on a lock screen, and computers, beside other work: most listening is
   away from the window, through the system's media controls and headphones.
-- Its counterpart is the ListenJar website (listenjar.com), where listeners also manage feeds.
+- Its counterpart is the Listenjar website (listenjar.com), where listeners also manage feeds.
 - Talks to each podcast's host, Apple's podcast directory, YouTube, and the API in
   [public.yaml](public.yaml) (`https://api.listenjar.com`) only when signed in.
 
@@ -66,7 +66,7 @@ open source and sends no telemetry, tracing or crash reports.
 
 ## Brand Commitments
 
-- Name: ListenJar. Logo: not made yet (`resources/icon.png` is a placeholder).
+- Name: Listenjar. Logo: not made yet (`resources/icon.png` is a placeholder).
 - Visual reference named by the user: [mave.digital](https://mave.digital/). New visual work takes its
   direction from it. Take its feel and structure, not its brand: no copying its name, logo, illustrations
   or copy.
@@ -83,4 +83,4 @@ None yet: no testimonials, reviews or usage numbers. Do not invent them.
 3. Say plainly what happens on the listener's device: what it downloads, where, and that it
    deletes it.
 4. Nothing leaves the device except requests to podcast hosts, Apple's directory and YouTube, and,
-   signed in, uploads to ListenJar.
+   signed in, uploads to Listenjar.

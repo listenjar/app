@@ -61,7 +61,7 @@ final class DownloadsPage extends StatelessWidget {
             EmptyState(
               title: 'Nothing downloaded',
               body: 'Download an episode to play it without a connection. '
-                '${Platform.isIOS || Platform.isAndroid ? 'Downloads carry on while the app is in the background.' : 'Downloads carry on while ListenJar is open.'} '
+                '${Platform.isIOS || Platform.isAndroid ? 'Downloads carry on while the app is in the background.' : 'Downloads carry on while Listenjar is open.'} '
                 'Shows can download their new episodes on their own, from each show’s menu or in Settings.',
             ),
           ],

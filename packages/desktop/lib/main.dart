@@ -1,6 +1,6 @@
-// ListenJar: a podcast player first, free and without an account (the
+// Listenjar: a podcast player first, free and without an account (the
 // library, refresh, downloads and playback: library.dart, podcasts.dart,
-// downloads.dart, player.dart), and ListenJar Cloud beside it for listeners
+// downloads.dart, player.dart), and Listenjar Cloud beside it for listeners
 // who sign in (cloud.dart: their YouTube feeds, synced from this device by
 // feeds.dart and sync.dart). Their own feeds play here like any podcast.
 // The window is shell.dart. Everything below lives for the process: the
@@ -86,7 +86,7 @@ Future<void> main([List<String> arguments = const []]) async {
   runApp(App(links: links, services: services));
 }
 
-/// The library between the listener's devices, on a ListenJar Cloud plan.
+/// The library between the listener's devices, on a Listenjar Cloud plan.
 LibrarySync? librarySync;
 
 /// What the app is doing, for `ext.listenjar.state` (log.dart). Nothing
@@ -160,7 +160,7 @@ void control(AppServices? s, Map<String, String> parameters) {
     case 'seek':
       unawaited(player.seek(Duration(milliseconds: ((double.tryParse(parameters['seconds'] ?? '') ?? 0) * 1000).round())));
     case 'syncLibrary':
-      // A library sync pass with ListenJar Cloud now.
+      // A library sync pass with Listenjar Cloud now.
       unawaited(librarySync?.sync());
     case 'refresh':
       unawaited(s.podcasts.refreshAll(force: true));
@@ -223,7 +223,7 @@ void control(AppServices? s, Map<String, String> parameters) {
         ?? (throw ArgumentError('no feed ${parameters['feed']}'));
       unawaited(s.feeds.setVisibility(feed, FeedVisibility.fromJson(parameters['to'] ?? 'public')));
     case 'open':
-      // A ListenJar `feed` (an id), a `show` (an id), `settings`,
+      // A Listenjar `feed` (an id), a `show` (an id), `settings`,
       // `nowPlaying`, `plans` (the sheet, titled by its value if any),
       // `newPodcast` (making one, as the Library's button does) or `search`.
       switch (parameters) {
@@ -359,7 +359,7 @@ class _AppState extends State<App> {
       child: NavigationScope(
         navigation: _navigation,
         child: MaterialApp(
-          title: 'ListenJar',
+          title: 'Listenjar',
           debugShowCheckedModeBanner: false,
           // macOS's window buttons are the status bar (shell.dart).
           builder: (context, child) => windowInsets(

@@ -28,7 +28,7 @@ class MainFlutterWindow: NSWindow {
     titlebarAppearsTransparent = true
     titleVisibility = .hidden
     styleMask.insert(.fullSizeContentView)
-    let toolbar = NSToolbar(identifier: "ListenJar")
+    let toolbar = NSToolbar(identifier: "Listenjar")
     toolbar.showsBaselineSeparator = false
     self.toolbar = toolbar
     toolbarStyle = .unified
@@ -200,7 +200,7 @@ private func frontWindow(of bundleId: String) -> NSRect? {
   return nil
 }
 
-/// Ink, like ListenJar's dark buttons (lib/theme.dart), with the accent
+/// Ink, like Listenjar's dark buttons (lib/theme.dart), with the accent
 /// keycap as the one thing to look at.
 private final class ToastView: NSView {
   var onClick: (() -> Void)?

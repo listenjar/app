@@ -121,7 +121,7 @@ final class YouTubeJsUpdates {
   YouTubeJsUpdates();
 
   final _http = HttpClient()
-    ..userAgent = 'ListenJar'
+    ..userAgent = 'Listenjar'
     ..connectionTimeout = const Duration(seconds: 15);
   Directory? _directory;
 

@@ -18,7 +18,7 @@ import UIKit
   }
 }
 
-/// Hands links opened with ListenJar, a $(LISTENJAR_URL_SCHEME)://open?url=…
+/// Hands links opened with Listenjar, a $(LISTENJAR_URL_SCHEME)://open?url=…
 /// link (Info.plist), to SharedLinks.swift. Sign-in links are left to
 /// signin.dart.
 final class LinkScenes: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {

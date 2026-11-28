@@ -32,7 +32,7 @@ android {
         manifestPlaceholders["urlScheme"] = "listenjar"
     }
 
-    // ListenJar's one release key, a PKCS12 keystore whose store password is
+    // Listenjar's one release key, a PKCS12 keystore whose store password is
     // also the key's, and the only key release builds are signed with.
     // Android installs an update only over an APK signed with the same key,
     // and listenjar.com's passkeys accept only its certificate (passkeys.ts):

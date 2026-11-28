@@ -1,6 +1,6 @@
 import Foundation
 
-/// Links opened with ListenJar, for lib/shared_links.dart, which calls this
+/// Links opened with Listenjar, for lib/shared_links.dart, which calls this
 /// through the FFIgen bindings in lib/shared_links_ios.g.dart
 /// (tool/ffigen.dart regenerates them from this file). AppDelegate.swift's
 /// LinkScenes hands over each link; the links wait here, even from before

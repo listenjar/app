@@ -22,7 +22,7 @@ import 'rss.dart';
 
 /// What a show in the library is.
 enum PodcastKind {
-  /// A podcast's RSS feed, a ListenJar feed among them.
+  /// A podcast's RSS feed, a Listenjar feed among them.
   rss,
 
   /// A single YouTube video kept as a show of one episode, on this device
@@ -30,12 +30,12 @@ enum PodcastKind {
   youtube,
 
   /// A YouTube playlist or channel followed on this device only: its videos
-  /// stream from YouTube, and refreshing lists the new ones. In ListenJar
+  /// stream from YouTube, and refreshing lists the new ones. In Listenjar
   /// Cloud instead, it is an [rss] show.
   youtubeFeed,
 
   /// A podcast of the listener's own on this device only: YouTube videos
-  /// they gathered, which stream from YouTube as they play. In ListenJar
+  /// they gathered, which stream from YouTube as they play. In Listenjar
   /// Cloud instead, it is an [rss] show.
   own,
 }
@@ -81,7 +81,7 @@ final class Podcast {
   /// Why the last refresh failed, until one succeeds.
   final String? refreshError;
 
-  /// The listener's ListenJar feed this is, while they are signed in.
+  /// The listener's Listenjar feed this is, while they are signed in.
   final String? cloudFeedId;
   final bool autoDownload;
 
@@ -336,7 +336,7 @@ final class Library extends ChangeNotifier {
   };
 
   /// Keys [podcast]'s episodes by source, a show made of sources from now
-  /// on: of several made from one source, one stays, the copy its ListenJar
+  /// on: of several made from one source, one stays, the copy its Listenjar
   /// feed has, else the one listened to, with where the listener was, Up
   /// Next and Now Playing moved to it. Returns the download paths of those
   /// that went, to delete. Run inside a transaction.
@@ -431,7 +431,7 @@ final class Library extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The library's database, for keeping it in step with ListenJar Cloud
+  /// The library's database, for keeping it in step with Listenjar Cloud
   /// (library_sync.dart), which calls [reload] after changing it.
   Database get database => _db;
   void reload() => _changed();
@@ -523,7 +523,7 @@ final class Library extends ChangeNotifier {
   }
 
   /// The show of the YouTube playlist or channel at [url]: followed here
-  /// as it is, or the RSS show ListenJar hosts of it, whose `<link>` is
+  /// as it is, or the RSS show Listenjar hosts of it, whose `<link>` is
   /// its source (apps/backend/src/rss.ts). One show per source.
   Podcast? podcastBySource(String url) {
     final source = canonicalSourceUrl(url);
@@ -637,7 +637,7 @@ final class Library extends ChangeNotifier {
   static const _newestCount = 3;
 
   /// Stores [episodes] of [podcast] and updates the ones it has; returns the
-  /// ids of the new ones. In a show ListenJar hosts, an episode still
+  /// ids of the new ones. In a show Listenjar hosts, an episode still
   /// streaming from its source becomes the feed's once its upload is in
   /// it, matched by source URL ([canonicalSourceUrl]): the same row, so
   /// where the listener is, its download and its place in Up Next stay.
@@ -647,7 +647,7 @@ final class Library extends ChangeNotifier {
     final known = {
       for (final row in _db.select('select guid from episodes where podcast_id = ?', [podcast])) row['guid'] as String,
     };
-    // A ListenJar feed is made of sources, one episode each: the feed's
+    // A Listenjar feed is made of sources, one episode each: the feed's
     // episode of a source here already, streaming or under a guid the feed
     // had for it before, is that row. Once the feed has its audio it plays
     // that, no longer the video ([PodcastEpisode.audioUrl]).
@@ -889,7 +889,7 @@ final class Library extends ChangeNotifier {
       // Oldest first, so the newest gets the highest id and lists first.
       for (final (i, v) in videos.indexed.toList().reversed) {
         final url = _watchUrl(v.id);
-        // A video the show has already, uploaded to its ListenJar feed
+        // A video the show has already, uploaded to its Listenjar feed
         // under the feed's guid, is the same episode: one per source.
         final rows = _db.select('''
           insert into episodes (podcast_id, guid, title, published_at, duration_ms, link, youtube_id, played, added_at, source_url, number)
@@ -919,7 +919,7 @@ final class Library extends ChangeNotifier {
   // Podcasts of the listener's own on this device.
 
   /// Makes a podcast of the listener's own, empty until they add videos. On
-  /// a plan with ListenJar Cloud it becomes a feed ListenJar hosts
+  /// a plan with Listenjar Cloud it becomes a feed Listenjar hosts
   /// ([hostedAt]).
   Podcast createOwn(String title) {
     final now = DateTime.now();
@@ -933,9 +933,9 @@ final class Library extends ChangeNotifier {
   }
 
   /// Adds the YouTube video [videoId] to [podcast], a podcast of the
-  /// listener's own, dated [addedAt] (now by default), as ListenJar Cloud
+  /// listener's own, dated [addedAt] (now by default), as Listenjar Cloud
   /// dates what is added to one there. Null when it's already there,
-  /// streaming or uploaded to its ListenJar feed: one episode per source.
+  /// streaming or uploaded to its Listenjar feed: one episode per source.
   PodcastEpisode? addOwnVideo(int podcast, {required String videoId, required String title, Duration? duration, DateTime? addedAt}) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final url = _watchUrl(videoId);
@@ -961,7 +961,7 @@ final class Library extends ChangeNotifier {
   }
 
   /// [podcast], a YouTube playlist or channel or a podcast of the
-  /// listener's own, now that ListenJar hosts it at [rssUrl]: a classic
+  /// listener's own, now that Listenjar hosts it at [rssUrl]: a classic
   /// podcast of that feed from here on, which syncs between the listener's
   /// devices like any other (library_sync.dart). Its episodes stay as they
   /// are, streaming from their source, until the feed's refresh hands each
@@ -986,7 +986,7 @@ final class Library extends ChangeNotifier {
     return true;
   }
 
-  /// Keeps [podcast], a ListenJar Cloud show whose feed is gone, on this
+  /// Keeps [podcast], a Listenjar Cloud show whose feed is gone, on this
   /// device instead: the YouTube playlist or channel at [source], or with
   /// none a podcast of the listener's own. Its episodes become the YouTube
   /// videos they are, streaming from there; where the listener was, Up
@@ -1050,7 +1050,7 @@ final class Library extends ChangeNotifier {
     _changed();
   }
 
-  /// Links [podcast] to the listener's ListenJar feed, or unlinks it.
+  /// Links [podcast] to the listener's Listenjar feed, or unlinks it.
   /// A show linked to a feed is made of sources from then on, its episodes
   /// keyed by theirs ([_keySources]).
   void setCloudFeed(int podcast, String? feedId) {

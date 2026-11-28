@@ -1,9 +1,9 @@
-# Developing ListenJar
+# Developing Listenjar
 
-How the [ListenJar](https://listenjar.com) app is built, run and released. For what it does, see
+How the [Listenjar](https://listenjar.com) app is built, run and released. For what it does, see
 the [README](README.md).
 
-It talks to the ListenJar API described in [public.yaml](public.yaml) (OpenAPI 3.2), through
+It talks to the Listenjar API described in [public.yaml](public.yaml) (OpenAPI 3.2), through
 a Dart client that [oasmith](https://github.com/responsibleapi/oasmith) generates into the
 Git-ignored `packages/desktop/lib/backend`.
 
@@ -187,7 +187,7 @@ committed [pricing](pricing) catalog, which `moon run root:pricing-sync` in the 
 
 A YouTube or podcast link shared to the app opens as if typed into its link field: a video is
 added as an episode (or, signed in on a paid plan, to a podcast of your choice), a playlist or
-channel goes to ListenJar Cloud, anything else is searched
+channel goes to Listenjar Cloud, anything else is searched
 ([shared_links.dart](packages/desktop/lib/shared_links.dart)). Each platform hands links over on
 the `listenjar/links` channel:
 
@@ -263,5 +263,5 @@ forgets it.
 
 Feeds and episode files come from each podcast's own host. Podcast search and the charts go to
 Apple's directory (`itunes.apple.com`, `rss.marketingtools.apple.com`), and YouTube search and
-videos to YouTube. The ListenJar API only when you're signed in. Nothing else: no telemetry,
+videos to YouTube. The Listenjar API only when you're signed in. Nothing else: no telemetry,
 tracing or crash reports. The [README](README.md#privacy) says the same for listeners.

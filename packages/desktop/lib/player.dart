@@ -77,7 +77,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   /// Starts the player and hands it to the system. Restores what was
   /// playing when the app last stopped, paused where it was.
   static Future<Player> start(Library library, YouTubeService youtube, Downloads downloads) async {
-    JustAudioMediaKit.title = 'ListenJar';
+    JustAudioMediaKit.title = 'Listenjar';
     try {
       JustAudioMediaKit.ensureInitialized(linux: true, windows: true);
     } catch (e) {
@@ -95,7 +95,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
         config: AudioServiceConfig(
           androidNotificationChannelId: 'com.listenjar.desktop.playback',
           // On Linux this names the player to the desktop (MPRIS Identity).
-          androidNotificationChannelName: Platform.isLinux ? 'ListenJar' : 'Playback',
+          androidNotificationChannelName: Platform.isLinux ? 'Listenjar' : 'Playback',
           androidStopForegroundOnPause: true,
           fastForwardInterval: settings.skipForward,
           rewindInterval: settings.skipBack,
@@ -510,7 +510,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   }
 
   /// [episode]'s chapters, once it loads: [found] with its YouTube stream,
-  /// else its download's own; else, for a YouTube video (a ListenJar Cloud
+  /// else its download's own; else, for a YouTube video (a Listenjar Cloud
   /// episode, a download without them), YouTube's, kept on this device once
   /// found, and for a podcast episode, its stream's own, read with range
   /// requests. Without any of those, the ones its show notes list; for a

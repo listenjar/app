@@ -3,7 +3,7 @@
 // session whose token the system credential store keeps.
 //
 // Google follows RFC 8252 (OAuth for native apps): the app listens on a
-// loopback port, opens Google in the browser for the "ListenJar desktop"
+// loopback port, opens Google in the browser for the "Listenjar desktop"
 // client, and Google comes back to the port with a one-time code, which the
 // API trades, with the PKCE verifier only the app knows, for the app's
 // token. Passkeys are listenjar.com's, through the platform's own prompt
@@ -70,7 +70,7 @@ final class UnknownPasskey extends SignInRefused {
   const UnknownPasskey();
 }
 
-/// The platform has no ListenJar passkey to offer.
+/// The platform has no Listenjar passkey to offer.
 final class NoPasskey extends SignInRefused {
   const NoPasskey();
 }
@@ -203,7 +203,7 @@ Future<Session> signInWithGoogle(
         response.headers.contentType = ContentType.html;
         response.write(denied
           ? _callbackPage('Not signed in', 'You chose Cancel on Google’s page, so the app isn’t signed in. Sign in again from the app.')
-          : _callbackPage('Back to ListenJar', 'The app is finishing signing you in. You can close this tab.'));
+          : _callbackPage('Back to Listenjar', 'The app is finishing signing you in. You can close this tab.'));
         if (!code.isCompleted) denied ? code.completeError(const AccessDenied()) : code.complete(value);
       }
       await response.close();
@@ -335,11 +335,11 @@ String _callbackPage(String title, String body) {
   return '<!doctype html><html lang="en"><meta charset="utf-8">'
     '<meta name="viewport" content="width=device-width,initial-scale=1">'
     '<meta name="color-scheme" content="light"><meta name="theme-color" content="#f5f4f0">'
-    '<title>$title | ListenJar</title>'
+    '<title>$title | Listenjar</title>'
     '<link rel="icon" href="data:image/svg+xml,${Uri.encodeComponent(_mark)}">'
     '<style>$_callbackStyle</style>'
     '<main><section>$_mark<h1>$title</h1><p>$body</p>'
-    '<a class="button" href="$link">Open ListenJar'
+    '<a class="button" href="$link">Open Listenjar'
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></a>'
     '</section></main>'
     '<script>location.href = "$link"</script></html>';

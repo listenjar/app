@@ -1,4 +1,4 @@
-// Recognises the YouTube links ListenJar takes, as the website does
+// Recognises the YouTube links Listenjar takes, as the website does
 // (apps/web/src/lib/youtube.ts in the listenjar monorepo): a video, a playlist
 // or a channel, rewritten to its canonical https form.
 import 'backend/api.dart' show SourceKind;
@@ -57,7 +57,7 @@ String youTubeVideoUrl(String id) => _video(id).url;
 
 /// The one spelling of a source's URL: a show's (a playlist, a channel) or
 /// an episode's (a video). Sources match by it everywhere: a show here and
-/// the ListenJar feed made of it, an episode streaming from its source and
+/// the Listenjar feed made of it, an episode streaming from its source and
 /// the same one uploaded, and the media bucket's key for its audio, a hash
 /// of it (apps/backend/src/media.ts). Each source rewrites its own
 /// variants statically, as YouTube's short, mobile and embed links become

@@ -48,7 +48,7 @@ void RegisterUrlScheme() {
     return;
   }
   const std::wstring key = std::wstring(L"Software\\Classes\\") + kUrlScheme;
-  SetValue(HKEY_CURRENT_USER, key, nullptr, L"URL:ListenJar");
+  SetValue(HKEY_CURRENT_USER, key, nullptr, L"URL:Listenjar");
   SetValue(HKEY_CURRENT_USER, key, L"URL Protocol", L"");
   SetValue(HKEY_CURRENT_USER, key + L"\\shell\\open\\command", nullptr,
            L"\"" + std::wstring(path, length) + L"\" \"%1\"");

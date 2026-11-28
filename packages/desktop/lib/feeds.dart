@@ -1,5 +1,5 @@
 // The signed-in listener's feeds and their sync (sync.dart): fetched from
-// the ListenJar API, added from YouTube links, removed, and kept in step with
+// the Listenjar API, added from YouTube links, removed, and kept in step with
 // YouTube. Follows the Account (account.dart): syncs while someone is signed
 // in, stops and forgets the feeds when they sign out. While signed in it
 // watches the list (watchMyFeeds), so a feed added on the web dashboard

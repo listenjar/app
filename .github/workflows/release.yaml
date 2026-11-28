@@ -1,4 +1,4 @@
-# Releases ListenJar from a vX.Y.Z tag whose packages/desktop/pubspec.yaml
+# Releases Listenjar from a vX.Y.Z tag whose packages/desktop/pubspec.yaml
 # says X.Y.Z+N: version.yaml reserves one on every push to master and
 # dispatches this on it (a pushed tag starts this too). Each platform builds
 # on its own runner into build/release/ (`moon run app:package-<platform>`,
@@ -101,7 +101,7 @@ jobs:
           MACOS_UPDATE_SEED_BASE64: ${{ secrets.MACOS_UPDATE_SEED_BASE64 }}
         run: >-
           node tool/release.ts prepare macos
-          "build/release/ListenJar-${{ needs.generate.outputs.version }}-macos.dmg" release-macos
+          "build/release/Listenjar-${{ needs.generate.outputs.version }}-macos.dmg" release-macos
       - uses: actions/upload-artifact@v7
         with:
           name: release-macos
@@ -203,7 +203,7 @@ jobs:
           WINDOWS_UPDATE_SEED_BASE64: ${{ secrets.WINDOWS_UPDATE_SEED_BASE64 }}
         run: >-
           node tool/release.ts prepare windows-${{ matrix.arch }}
-          "build/release/ListenJar-${{ needs.generate.outputs.version }}-windows-${{ matrix.arch }}-setup.exe" release-windows-${{ matrix.arch }}
+          "build/release/Listenjar-${{ needs.generate.outputs.version }}-windows-${{ matrix.arch }}-setup.exe" release-windows-${{ matrix.arch }}
       - uses: actions/upload-artifact@v7
         with:
           name: release-windows-${{ matrix.arch }}
@@ -231,7 +231,7 @@ jobs:
       - name: Write its manifest
         run: >-
           node tool/release.ts prepare linux-x64
-          "build/release/ListenJar-${{ needs.generate.outputs.version }}-linux-x64.tar.gz" release-linux-x64
+          "build/release/Listenjar-${{ needs.generate.outputs.version }}-linux-x64.tar.gz" release-linux-x64
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux-x64
@@ -281,7 +281,7 @@ jobs:
           VERSION: ${{ needs.generate.outputs.version }}
         run: |
           for abi in arm64-v8a armeabi-v7a x86_64; do
-            node tool/release.ts prepare "android-$abi" "build/release/ListenJar-$VERSION-android-$abi.apk" release-android
+            node tool/release.ts prepare "android-$abi" "build/release/Listenjar-$VERSION-android-$abi.apk" release-android
           done
       - uses: actions/upload-artifact@v7
         with:
@@ -322,7 +322,7 @@ jobs:
       - name: Build, sign and export the IPA
         run: moon run app:package-ios
       - name: Upload to TestFlight, add to the public group and submit for review
-        run: node tool/testflight.ts "build/release/ListenJar-${{ needs.generate.outputs.version }}-ios.ipa"
+        run: node tool/testflight.ts "build/release/Listenjar-${{ needs.generate.outputs.version }}-ios.ipa"
       - name: Remove the keychain and credentials
         if: always()
         run: bash tool/ios-signing.sh cleanup
@@ -372,6 +372,6 @@ jobs:
       - name: Attest each package's build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: artifacts/ListenJar-*
+          subject-path: artifacts/Listenjar-*
       - name: Upload and make it the latest release
         run: node tool/release.ts publish artifacts

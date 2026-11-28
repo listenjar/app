@@ -18,7 +18,7 @@ import 'log.dart';
 final _log = Logger('rss');
 
 /// Who the player says it is to podcast hosts; some refuse Dart's default.
-const userAgent = 'ListenJar/0.1 (+https://listenjar.com)';
+const userAgent = 'Listenjar/0.1 (+https://listenjar.com)';
 
 const _fetchTimeout = Duration(seconds: 45);
 
@@ -98,7 +98,7 @@ final class FeedFetch {
   final Uri url;
 }
 
-/// The feed is there but isn't one ListenJar can read.
+/// The feed is there but isn't one Listenjar can read.
 final class NotAFeed implements Exception {
   const NotAFeed(this.reason);
   final String reason;
@@ -112,7 +112,7 @@ final class FeedStatus implements Exception {
   @override
   String toString() => switch (statusCode) {
     404 || 410 => 'The feed is gone (HTTP $statusCode)',
-    401 || 403 => 'The feed refused ListenJar (HTTP $statusCode)',
+    401 || 403 => 'The feed refused Listenjar (HTTP $statusCode)',
     _ => 'The feed answered HTTP $statusCode',
   };
 }

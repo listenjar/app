@@ -83,7 +83,7 @@ final class AppMenu {
   }
 }
 
-/// Links opened with ListenJar, for lib/shared_links.dart. One that arrives
+/// Links opened with Listenjar, for lib/shared_links.dart. One that arrives
 /// before Dart listens waits until Dart asks for `pending`.
 final class SharedLinks {
   /// Made with the window (MainFlutterWindow.swift).

@@ -1373,7 +1373,7 @@ final class _UpNextButton extends StatelessWidget {
 
 /// Where a YouTube video that's playing can stay: in the library, free and
 /// on this device; or as an episode of one of the listener's own podcasts,
-/// on this device or in ListenJar Cloud.
+/// on this device or in Listenjar Cloud.
 final class _AddVideoButton extends StatefulWidget {
   const _AddVideoButton({required this.episode});
   final PodcastEpisode episode;

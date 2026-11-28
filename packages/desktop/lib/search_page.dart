@@ -2,7 +2,7 @@
 // (directory.dart) and opens shows to look at or follow; before anything is
 // typed it shows the region's charts. YouTube asks YouTube from this device
 // (youtube.dart): a video plays free as an episode of its own, while
-// following a playlist or channel is ListenJar Cloud's, which keeps it as a
+// following a playlist or channel is Listenjar Cloud's, which keeps it as a
 // podcast for every app. A pasted link says what it is: a podcast feed
 // opens, a YouTube link switches to YouTube.
 import 'dart:async';
@@ -274,7 +274,7 @@ final class _SearchPageState extends State<SearchPage> {
   }, 'Couldn’t play that video');
 
   /// Playlists and channels take a plan; they stream here at once, and on
-  /// a plan with ListenJar Cloud they upload too.
+  /// a plan with Listenjar Cloud they upload too.
   Future<void> _follow(String url, String title) async {
     final link = parseYouTubeLink(url);
     if (link == null) return;
@@ -584,7 +584,7 @@ final class _SearchPageState extends State<SearchPage> {
     ]);
   }
 
-  /// Follow: it lists here at once, and uploads on a plan with ListenJar
+  /// Follow: it lists here at once, and uploads on a plan with Listenjar
   /// Cloud. Without a plan, says
   /// what following takes.
   Widget _followButton(BuildContext context, String url, String title) => TextButton.icon(
@@ -682,7 +682,7 @@ final class _SearchPageState extends State<SearchPage> {
           constraints: const BoxConstraints(maxWidth: 560),
           child: Text(
             'Search YouTube or paste a link. Any single video plays here as an episode, free, straight from YouTube to this device. '
-            'Following a playlist or a channel turns it into a podcast that ListenJar Cloud keeps up to date, for this app and any other.',
+            'Following a playlist or a channel turns it into a podcast that Listenjar Cloud keeps up to date, for this app and any other.',
             style: text.bodyMedium!.copyWith(color: brand.fgSoft),
           ),
         ),
@@ -692,7 +692,7 @@ final class _SearchPageState extends State<SearchPage> {
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: () => Navigation.of(context).openSettings(),
             icon: const Icon(Icons.cloud_outlined, size: 18),
-            label: const Text('About ListenJar Cloud'),
+            label: const Text('About Listenjar Cloud'),
           ),
         ],
       ]),

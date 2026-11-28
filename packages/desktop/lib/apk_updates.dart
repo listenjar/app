@@ -1,4 +1,4 @@
-// Android's in-app updates, the APK's Sparkle: ListenJar isn't in a store, so
+// Android's in-app updates, the APK's Sparkle: Listenjar isn't in a store, so
 // it reads the manifest of its ABI's APK in listenjar/app's latest GitHub
 // release (tool/release.ts publishes one APK per ABI beside its manifest, and
 // makes a release the latest only once everything is up):
@@ -167,7 +167,7 @@ Future<void> skipApkUpdate(ApkRelease release) async {
 }
 
 /// Downloads [release] (unless it already is), checks it, and installs it:
-/// Android asks to confirm, after "Install unknown apps" if ListenJar
+/// Android asks to confirm, after "Install unknown apps" if Listenjar
 /// hasn't got it yet. Tapping the settings row while it downloads stops it.
 Future<void> installApkUpdate(ApkRelease release) async {
   if (_working != null) return;
@@ -175,11 +175,11 @@ Future<void> installApkUpdate(ApkRelease release) async {
   try {
     final apk = await _downloaded(release, token);
     if (!ApkInstaller.canInstall(_context)) {
-      _set(status: 'Allow ListenJar to install apps, then come back.');
+      _set(status: 'Allow Listenjar to install apps, then come back.');
       ApkInstaller.askToInstall(_context);
       await _resumed().asCancellable(token);
       if (!ApkInstaller.canInstall(_context)) {
-        _set(busy: false, status: 'ListenJar needs “Install unknown apps” to update itself.');
+        _set(busy: false, status: 'Listenjar needs “Install unknown apps” to update itself.');
         return;
       }
     }
@@ -200,7 +200,7 @@ Future<void> installApkUpdate(ApkRelease release) async {
 }
 
 /// ApkInstaller's word on the install. Success ends this process. An APK it
-/// refuses (not ListenJar, not newer, not from ListenJar's key) is deleted,
+/// refuses (not Listenjar, not newer, not from Listenjar's key) is deleted,
 /// and automatic checks stop offering that build.
 void _installed(JString? status, JString? message) {
   final s = status?.toDartString(releaseOriginal: true);
@@ -208,7 +208,7 @@ void _installed(JString? status, JString? message) {
   _log.warning('install: $s ${why ?? ''}');
   switch (s) {
     case 'refused':
-      _set(busy: false, status: 'Couldn’t update: ${why ?? 'the download isn’t a ListenJar update.'}');
+      _set(busy: false, status: 'Couldn’t update: ${why ?? 'the download isn’t a Listenjar update.'}');
       if (_installing case final release?) _prefs['skipped'] = release.build;
       unawaited(_forget());
     case 'confirming':

@@ -1,6 +1,6 @@
 // Library: every show the listener follows, as covers, newest episode
 // first, with how many episodes they haven't heard. The listener's
-// ListenJar Cloud feeds are shows here like any other, each saying what its
+// Listenjar Cloud feeds are shows here like any other, each saying what its
 // sync is doing, and one with nothing uploaded yet waits here too.
 // Podcasts of the listener's own start here; OPML in and out lives here,
 // and on phones the way to Downloads and Settings.
@@ -75,7 +75,7 @@ final class LibraryPage extends StatelessWidget {
           if (s.account.user != null && s.feeds.storageFull) ...[const SizedBox(height: 8), const StorageFullNotice(), const SizedBox(height: 16)],
           if (s.feeds.feedsError case final error? when s.account.user != null) ...[
             const SizedBox(height: 8),
-            problem(context, failure('Couldn’t load your ListenJar podcasts', error, other: 'Sync again in Settings.'), error),
+            problem(context, failure('Couldn’t load your Listenjar podcasts', error, other: 'Sync again in Settings.'), error),
             const SizedBox(height: 16),
           ],
           if (count == 0) ...[
@@ -123,7 +123,7 @@ final class LibraryPage extends StatelessWidget {
     );
   }
 
-  /// A show, saying what its ListenJar feed's sync is doing when it has one.
+  /// A show, saying what its Listenjar feed's sync is doing when it has one.
   Widget _showTile(BuildContext context, Podcast show, Feed? feed, double size) {
     final s = Services.of(context);
     final sync = feed == null ? null : s.feeds.statusOf(feed);
@@ -157,7 +157,7 @@ final class LibraryPage extends StatelessWidget {
     );
   }
 
-  /// A ListenJar feed with no episode published yet.
+  /// A Listenjar feed with no episode published yet.
   Widget _feedTile(BuildContext context, Feed feed, double size) {
     final sync = Services.of(context).feeds.statusOf(feed);
     final status = feedTileStatus(feed, sync, playable: false)!;
@@ -351,19 +351,19 @@ Future<void> importOpml(BuildContext context) async {
 
 Future<void> exportOpml(BuildContext context) async {
   final podcasts = Services.of(context).podcasts;
-  final data = XFile.fromData(utf8.encode(podcasts.exportOpml()), mimeType: 'text/x-opml', name: 'ListenJar.opml');
+  final data = XFile.fromData(utf8.encode(podcasts.exportOpml()), mimeType: 'text/x-opml', name: 'Listenjar.opml');
   // Phones have no save dialog: the share sheet saves to Files or Drive,
   // or hands the file to another podcast app.
   if (Platform.isAndroid || Platform.isIOS) {
     final box = context.findRenderObject() as RenderBox?;
     await SharePlus.instance.share(ShareParams(
       files: [data],
-      fileNameOverrides: const ['ListenJar.opml'],
+      fileNameOverrides: const ['Listenjar.opml'],
       sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
     ));
     return;
   }
-  final where = await getSaveLocation(suggestedName: 'ListenJar.opml', acceptedTypeGroups: const [_opml]);
+  final where = await getSaveLocation(suggestedName: 'Listenjar.opml', acceptedTypeGroups: const [_opml]);
   if (where == null) return;
   await data.saveTo(where.path);
   if (context.mounted) tell(context, 'Exported your shows.');

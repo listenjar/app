@@ -7,7 +7,7 @@
 namespace {
 
 #ifdef LISTENJAR_UPDATE_PUBLIC_KEY
-constexpr char kRegistryPath[] = "Software\\ListenJar\\Updates";
+constexpr char kRegistryPath[] = "Software\\Listenjar\\Updates";
 // Each architecture's own installer (tool/release.ts), as WinSparkle takes
 // only an enclosure for the architecture it was built for.
 #if defined(_M_ARM64)
@@ -28,7 +28,7 @@ HWND window_ = nullptr;
 bool started_ = false;
 
 // WinSparkle asks the user on the second launch whether to check
-// automatically. ListenJar checks by default, like the Mac app, unless a
+// automatically. Listenjar checks by default, like the Mac app, unless a
 // choice is already saved: per user, or per machine by an administrator.
 bool PreferenceSaved() {
   for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
@@ -67,7 +67,7 @@ void StartUpdates(HWND window) {
   // The version people see, and the build number appcasts compare
   // (pubspec.yaml's version: X.Y.Z+N).
   win_sparkle_set_app_details(
-      L"ListenJar", L"ListenJar",
+      L"Listenjar", L"Listenjar",
       LISTENJAR_WIDEN(LISTENJAR_STRINGIFY(FLUTTER_VERSION_MAJOR) "." LISTENJAR_STRINGIFY(
           FLUTTER_VERSION_MINOR) "." LISTENJAR_STRINGIFY(FLUTTER_VERSION_PATCH)));
   win_sparkle_set_app_build_version(LISTENJAR_WIDEN(LISTENJAR_STRINGIFY(FLUTTER_VERSION_BUILD)));

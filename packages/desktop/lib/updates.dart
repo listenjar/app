@@ -143,7 +143,7 @@ class _UpdatePromptState extends State<UpdatePrompt> {
     return AlertDialog(
       backgroundColor: brand.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-      title: Text('ListenJar ${release.version} is out', style: text.titleLarge),
+      title: Text('Listenjar ${release.version} is out', style: text.titleLarge),
       content: Text(
         '${current.isEmpty ? '' : 'You have $current. '}'
         'It downloads here (${formatBytes(release.length)}), then Android asks you to install it. '

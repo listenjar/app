@@ -147,7 +147,7 @@ tasks:
   reinstall:
     description: >-
       Build the release macOS app with Sparkle's update key, sign it with this Mac's Developer ID
-      (not notarized) and replace /Applications/ListenJar.app with it (tool/reinstall-macos.sh).
+      (not notarized) and replace /Applications/Listenjar.app with it (tool/reinstall-macos.sh).
     deps: [~:codegen, ~:scripts]
     script: tool/reinstall-macos.sh
     inputs: []
@@ -171,7 +171,7 @@ tasks:
   package-ios:
     description: >-
       Build the release iOS app and export it for App Store Connect as
-      build/release/ListenJar-<version>-ios.ipa (tool/package-ios.sh), which tool/testflight.ts
+      build/release/Listenjar-<version>-ios.ipa (tool/package-ios.sh), which tool/testflight.ts
       sends to TestFlight. Signs with LISTENJAR_IOS_PROFILE's and LISTENJAR_IOS_SHARE_PROFILE's App Store profiles when given them.
     deps: [~:codegen, ~:scripts]
     script: tool/package-ios.sh
@@ -202,7 +202,7 @@ tasks:
       cache: false
       runInCI: true
   package-linux:
-    description: Build and package build/release/ListenJar-<version>-linux-x64.tar.gz.
+    description: Build and package build/release/Listenjar-<version>-linux-x64.tar.gz.
     deps: [~:codegen, ~:scripts]
     command: dart tool/release.dart build linux
     inputs: []
@@ -212,7 +212,7 @@ tasks:
       os: linux
   package-android:
     description: >-
-      Build and package build/release/ListenJar-<version>-android.apk, signed with the release key
+      Build and package build/release/Listenjar-<version>-android.apk, signed with the release key
       and checked against passkeys.ts (tool/release.dart).
     deps: [~:codegen, ~:scripts]
     command: dart tool/release.dart build android

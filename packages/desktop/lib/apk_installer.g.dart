@@ -41,7 +41,7 @@ const _$jniVersionCheck = jni$_.JniVersionCheck(1, 2);
 
 /// from: `com.listenjar.desktop.ApkInstaller`
 ///
-/// Installs ListenJar's own updates, for lib/apk_updates.dart, which calls it
+/// Installs Listenjar's own updates, for lib/apk_updates.dart, which calls it
 /// through the JNIgen bindings in lib/apk_installer.g.dart (tool/jnigen.dart
 /// regenerates them). Dart checks listenjar/desktop's latest release, asks,
 /// downloads the APK and checks its SHA-256; this checks that the APK is this
@@ -49,7 +49,7 @@ const _$jniVersionCheck = jni$_.JniVersionCheck(1, 2);
 /// app is, and hands it to PackageInstaller.
 ///
 /// Android always asks the listener to confirm, as ReVanced Manager does:
-/// once ListenJar is its own installer of record (Android 12+) it could
+/// once Listenjar is its own installer of record (Android 12+) it could
 /// update silently, but it would vanish mid-use with nothing to reopen it.
 /// Android stops the app to replace it, so success shows as the new version
 /// starting.
@@ -192,7 +192,7 @@ extension type ApkInstaller._(jni$_.JObject _$this) implements jni$_.JObject {
 
   /// from: `static public boolean canInstall(android.content.Context context)`
   ///
-  /// Whether "Install unknown apps" allows ListenJar.
+  /// Whether "Install unknown apps" allows Listenjar.
   static core$_.bool canInstall(Context? context) {
     final _$$classRef = _class.reference;
     final _$context = context?.reference ?? jni$_.jNullReference;
@@ -228,7 +228,7 @@ extension type ApkInstaller._(jni$_.JObject _$this) implements jni$_.JObject {
 
   /// from: `static public void askToInstall(android.content.Context context)`
   ///
-  /// Opens ListenJar's "Install unknown apps" setting.
+  /// Opens Listenjar's "Install unknown apps" setting.
   static void askToInstall(Context? context) {
     final _$$classRef = _class.reference;
     final _$context = context?.reference ?? jni$_.jNullReference;
@@ -407,7 +407,7 @@ final class $ApkInstaller$Status$Type$
 /// from: `com.listenjar.desktop.ApkInstaller$Listener`
 ///
 /// How an install went: `confirming`, `installed`, `cancelled`, `refused`
-/// (the APK isn't a ListenJar update from ListenJar's key) or `failed`,
+/// (the APK isn't a Listenjar update from Listenjar's key) or `failed`,
 /// with why.
 extension type ApkInstaller$Listener._(jni$_.JObject _$this)
     implements jni$_.JObject {

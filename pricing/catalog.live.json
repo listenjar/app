@@ -2,7 +2,7 @@
   "plans": [
     {
       "product_id": "prod_listenjar_local",
-      "name": "ListenJar Local",
+      "name": "Listenjar Local",
       "description": "Playlists, channels and podcasts of your own, kept on your device: nothing uploaded or synced.",
       "storage_bytes": 0,
       "prices": [
@@ -16,7 +16,7 @@
     },
     {
       "product_id": "prod_VgJSdGSaTq1Zxz",
-      "name": "ListenJar 10 GB",
+      "name": "Listenjar 10 GB",
       "description": "Playlists, channels and podcasts of your own, up to 10 GB of audio (about 170 hours).",
       "storage_bytes": 10000000000,
       "prices": [
@@ -36,7 +36,7 @@
     },
     {
       "product_id": "prod_VgJScKj2ChFoQQ",
-      "name": "ListenJar 100 GB",
+      "name": "Listenjar 100 GB",
       "description": "Playlists, channels and podcasts of your own, up to 100 GB of audio (about 1,700 hours).",
       "storage_bytes": 100000000000,
       "prices": [

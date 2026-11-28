@@ -21,7 +21,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Installs ListenJar's own updates, for lib/apk_updates.dart, which calls it
+ * Installs Listenjar's own updates, for lib/apk_updates.dart, which calls it
  * through the JNIgen bindings in lib/apk_installer.g.dart (tool/jnigen.dart
  * regenerates them). Dart checks listenjar/desktop's latest release, asks,
  * downloads the APK and checks its SHA-256; this checks that the APK is this
@@ -29,7 +29,7 @@ import java.util.Set;
  * app is, and hands it to PackageInstaller.
  *
  * Android always asks the listener to confirm, as ReVanced Manager does:
- * once ListenJar is its own installer of record (Android 12+) it could
+ * once Listenjar is its own installer of record (Android 12+) it could
  * update silently, but it would vanish mid-use with nothing to reopen it.
  * Android stops the app to replace it, so success shows as the new version
  * starting.
@@ -42,7 +42,7 @@ public final class ApkInstaller {
 
     /**
      * How an install went: `confirming`, `installed`, `cancelled`, `refused`
-     * (the APK isn't a ListenJar update from ListenJar's key) or `failed`,
+     * (the APK isn't a Listenjar update from Listenjar's key) or `failed`,
      * with why.
      */
     @Keep
@@ -68,12 +68,12 @@ public final class ApkInstaller {
         return own(context, 0).getLongVersionCode();
     }
 
-    /** Whether "Install unknown apps" allows ListenJar. */
+    /** Whether "Install unknown apps" allows Listenjar. */
     public static boolean canInstall(Context context) {
         return context.getPackageManager().canRequestPackageInstalls();
     }
 
-    /** Opens ListenJar's "Install unknown apps" setting. */
+    /** Opens Listenjar's "Install unknown apps" setting. */
     public static void askToInstall(Context context) {
         Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.getPackageName()));
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
@@ -100,24 +100,24 @@ public final class ApkInstaller {
             } catch (Exception e) {
                 report("failed", e.getMessage() == null ? e.toString() : e.getMessage());
             }
-        }, "ListenJar update").start();
+        }, "Listenjar update").start();
     }
 
     private static PackageInfo own(Context context, int flags) throws PackageManager.NameNotFoundException {
         return context.getPackageManager().getPackageInfo(context.getPackageName(), flags);
     }
 
-    /** Refuses an APK Android would refuse, or one not from ListenJar's key. */
+    /** Refuses an APK Android would refuse, or one not from Listenjar's key. */
     private static void check(Context context, File apk) throws PackageManager.NameNotFoundException {
         PackageInfo info = context.getPackageManager().getPackageArchiveInfo(apk.getPath(), PackageManager.GET_SIGNING_CERTIFICATES);
         if (info == null) throw new IllegalArgumentException("The download isn’t an app Android can read.");
         PackageInfo own = own(context, PackageManager.GET_SIGNING_CERTIFICATES);
-        if (!own.packageName.equals(info.packageName)) throw new IllegalArgumentException("The download is " + info.packageName + ", not ListenJar.");
+        if (!own.packageName.equals(info.packageName)) throw new IllegalArgumentException("The download is " + info.packageName + ", not Listenjar.");
         if (info.getLongVersionCode() <= own.getLongVersionCode()) throw new IllegalArgumentException("The download isn’t newer than this version.");
         int minimum = info.applicationInfo == null ? 0 : info.applicationInfo.minSdkVersion;
         if (minimum > Build.VERSION.SDK_INT) throw new IllegalArgumentException("This version needs a newer Android.");
         Set<String> theirs = signers(info);
-        if (theirs.isEmpty() || !theirs.equals(signers(own))) throw new IllegalArgumentException("The download isn’t signed with ListenJar’s key.");
+        if (theirs.isEmpty() || !theirs.equals(signers(own))) throw new IllegalArgumentException("The download isn’t signed with Listenjar’s key.");
     }
 
     private static Set<String> signers(PackageInfo info) {

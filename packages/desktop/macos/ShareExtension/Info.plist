@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>ListenJar</string>
+	<string>Listenjar</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,7 +23,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<!-- The scheme ShareViewController.swift opens the app with (Runner/Configs). -->
-	<key>ListenJarURLScheme</key>
+	<key>ListenjarURLScheme</key>
 	<string>$(LISTENJAR_URL_SCHEME)</string>
 	<key>NSExtension</key>
 	<dict>

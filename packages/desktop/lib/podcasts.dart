@@ -3,7 +3,7 @@
 // at a time, about hourly and at launch, see schedule.dart), downloads new
 // episodes of shows set to, keeps YouTube videos as shows of one episode,
 // imports and exports OPML, and follows the signed-in listener's own
-// ListenJar feeds, so they play here like any podcast. The library
+// Listenjar feeds, so they play here like any podcast. The library
 // (library.dart) holds the results. No widgets here.
 import 'dart:async';
 import 'dart:io';
@@ -238,7 +238,7 @@ final class Podcasts extends ChangeNotifier {
       final added = library.refreshed(podcast.id, fetch);
       unawaited(_appleArtwork(podcast.id));
       if (added.isNotEmpty) await _downloads.downloadNew(added);
-      // A playlist or channel ListenJar hosts still lists here first: its
+      // A playlist or channel Listenjar hosts still lists here first: its
       // new videos stream from YouTube until their uploads reach the feed.
       if (podcast.cloudFeedId != null && paid() == true) {
         if (parseYouTubeLink(podcast.link ?? '') case final source? when source.kind != SourceKind.video) {
@@ -430,7 +430,7 @@ final class Podcasts extends ChangeNotifier {
 
   /// Follows the YouTube playlist or channel [link] on this device: its
   /// videos list as episodes and stream from YouTube, with no upload and no
-  /// ListenJar feed. The whole listing comes now; refreshes add new videos.
+  /// Listenjar feed. The whole listing comes now; refreshes add new videos.
   Future<Podcast> followYouTube(YouTubeLink link, CancellationToken token) => traced<Podcast>(
     _log,
     'follow YouTube ${link.kind.name} ${link.id}',
@@ -442,7 +442,7 @@ final class Podcasts extends ChangeNotifier {
       // itself, not its uploads playlist.
       final channel = link.kind == SourceKind.channel ? await youtube.resolve(_sourceOf(link), merged) : null;
       if (channel != null) link = parseYouTubeLink(channel.url) ?? (throw StateError('YouTube gave no channel for ${link.url}'));
-      // Followed already, here or as the feed ListenJar hosts of it: that
+      // Followed already, here or as the feed Listenjar hosts of it: that
       // show, not a second one.
       if (library.podcastBySource(link.url) case final known?) {
         _log.info('${link.url} is show ${known.id} already');
@@ -503,9 +503,9 @@ final class Podcasts extends ChangeNotifier {
     for (final v in snapshot.videos) (id: v.id, title: v.title, seconds: v.durationSeconds),
   ];
 
-  // The listener's ListenJar feeds.
+  // The listener's Listenjar feeds.
 
-  /// Follows each of the signed-in listener's ListenJar feeds once it has an
+  /// Follows each of the signed-in listener's Listenjar feeds once it has an
   /// RSS address, and lets go of ones they removed. A playlist, channel or
   /// podcast of their own here that the feed was made of ([CloudShows])
   /// becomes that RSS show in place ([Library.hostedAt]); one made on
@@ -533,7 +533,7 @@ final class Podcasts extends ChangeNotifier {
       if (rss == null) continue;
       final source = library.podcasts.where((p) => p.cloudFeedId == feed.id && p.kind != PodcastKind.rss).firstOrNull;
       if (source != null && library.hostedAt(source.id, rss)) {
-        _log.info('Show ${source.id} is ListenJar feed ${feed.id} now');
+        _log.info('Show ${source.id} is Listenjar feed ${feed.id} now');
         await refresh(library.podcast(source.id)!);
         continue;
       }
@@ -547,13 +547,13 @@ final class Podcasts extends ChangeNotifier {
         final fetch = await fetchFeed(_http, Uri.parse(rss), _life);
         library.subscribe(rss, fetch.feed!, etag: fetch.etag, lastModified: fetch.lastModified, cloudFeedId: feed.id);
       } catch (e) {
-        _log.warning('Couldn’t follow ListenJar feed ${feed.id}', e);
+        _log.warning('Couldn’t follow Listenjar feed ${feed.id}', e);
       }
     }
   }
 
   /// The account was deleted, and its feeds with it: lets go of every
-  /// ListenJar Cloud show, its downloads and the artwork kept for it.
+  /// Listenjar Cloud show, its downloads and the artwork kept for it.
   Future<void> forgetCloud() async {
     for (final show in library.podcasts.where((p) => p.cloudFeedId != null).toList()) {
       await unfollow(show);
@@ -561,7 +561,7 @@ final class Podcasts extends ChangeNotifier {
     await _forgetCloudArtwork();
   }
 
-  /// Keeps [show], a ListenJar Cloud playlist, channel or podcast of the
+  /// Keeps [show], a Listenjar Cloud playlist, channel or podcast of the
   /// listener's own whose feed is gone, on this device, with the artwork
   /// [_keepCloudArtwork] kept; false for a single video, which goes as on
   /// the free plan.
@@ -579,18 +579,18 @@ final class Podcasts extends ChangeNotifier {
       artwork = file.uri.toString();
     }
     if (library.keepOnDevice(show.id, source: source, artworkUrl: artwork)) {
-      _log.info('Kept ListenJar feed $feedId on this device as show ${show.id}');
+      _log.info('Kept Listenjar feed $feedId on this device as show ${show.id}');
       return true;
     }
     if (artwork != null) await File.fromUri(Uri.parse(artwork)).delete();
     return false;
   }
 
-  /// Where the artwork of the ListenJar feed [feedId] is kept while there's
+  /// Where the artwork of the Listenjar feed [feedId] is kept while there's
   /// no plan: the cleanup deletes the feed's own with it.
   File _cloudArtwork(String feedId) => File('${library.directory.path}/artwork/cloud-$feedId.jpg');
 
-  /// Keeps the artwork of each ListenJar playlist, channel and podcast of
+  /// Keeps the artwork of each Listenjar playlist, channel and podcast of
   /// the listener's own here, for [keepOnDevice].
   Future<void> _keepCloudArtwork() async {
     for (final show in library.podcasts) {
@@ -615,7 +615,7 @@ final class Podcasts extends ChangeNotifier {
     }
   }
 
-  /// A ListenJar feed published new episodes: refresh its show now rather
+  /// A Listenjar feed published new episodes: refresh its show now rather
   /// than on the next pass.
   Future<void> cloudPublished(String feedId) async {
     final show = library.podcasts.where((p) => p.cloudFeedId == feedId).firstOrNull;
@@ -629,7 +629,7 @@ final class Podcasts extends ChangeNotifier {
     final builder = XmlBuilder()..processing('xml', 'version="1.0" encoding="UTF-8"');
     builder.element('opml', attributes: {'version': '2.0'}, nest: () {
       builder.element('head', nest: () {
-        builder.element('title', nest: 'ListenJar subscriptions');
+        builder.element('title', nest: 'Listenjar subscriptions');
         builder.element('dateCreated', nest: HttpDate.format(DateTime.now()));
       });
       builder.element('body', nest: () {

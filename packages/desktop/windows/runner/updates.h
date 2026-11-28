@@ -8,7 +8,7 @@
 // the Ed25519 key release builds carry (LISTENJAR_UPDATE_PUBLIC_KEY, which
 // CMakeLists.txt takes from the environment). Debug and local builds have no
 // key, so no updater. WinSparkle keeps its preferences under
-// HKCU\Software\ListenJar\Updates.
+// HKCU\Software\Listenjar\Updates.
 
 // Asks the window to close for good, so the installer WinSparkle has started
 // can replace the app (tool/windows-installer.iss waits for it).

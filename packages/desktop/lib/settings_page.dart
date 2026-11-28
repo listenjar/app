@@ -1,4 +1,4 @@
-// Settings: the ListenJar Cloud account (cloud.dart), how the player skips and downloads, the space downloads take
+// Settings: the Listenjar Cloud account (cloud.dart), how the player skips and downloads, the space downloads take
 // (storage_page.dart), moving shows in and out, updates (updates.dart), and what the app sends where.
 import 'dart:async';
 import 'dart:io';
@@ -34,7 +34,7 @@ final class SettingsPage extends StatelessWidget {
         return PageBody(maxWidth: 720, children: [
           if (pushed) backButton(context, 'Library'),
           pageTitle(context, 'Settings'),
-          sectionHeading(context, 'ListenJar Cloud', top: 20),
+          sectionHeading(context, 'Listenjar Cloud', top: 20),
           const AccountPanel(),
           sectionHeading(context, 'Playback'),
           _group([
@@ -107,7 +107,7 @@ final class SettingsPage extends StatelessWidget {
           Text(
             'Your library, your place in each episode and your downloads stay on this device. '
             'The app fetches feeds and audio from each podcast’s host, searches podcasts through Apple’s directory, '
-            'and reaches YouTube for YouTube search and videos. It talks to ListenJar only when you’re signed in. '
+            'and reaches YouTube for YouTube search and videos. It talks to Listenjar only when you’re signed in. '
             'No telemetry, tracing or crash reports.',
             style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: brand.fgSoft),
           ),
@@ -159,7 +159,7 @@ final class _Updates extends StatelessWidget {
         settingRow(
           context,
           'Check for updates',
-          state.status ?? '${version}ListenJar also looks once a day.',
+          state.status ?? '${version}Listenjar also looks once a day.',
           const Icon(Icons.chevron_right_rounded, color: brand.fgSoft),
           onTap: state.canCheck ? () => unawaited(checkForUpdates()) : null,
         ),
@@ -167,7 +167,7 @@ final class _Updates extends StatelessWidget {
           context,
           'Check automatically',
           Platform.isWindows
-            ? 'Looks for a new version every day. A change applies the next time ListenJar starts.'
+            ? 'Looks for a new version every day. A change applies the next time Listenjar starts.'
             : 'Looks for a new version every day.',
           state.automatic,
           (v) => unawaited(setAutomaticUpdates(v)),
@@ -176,7 +176,7 @@ final class _Updates extends StatelessWidget {
           _switch(
             context,
             'Install automatically',
-            'New versions download in the background and install when ListenJar quits.',
+            'New versions download in the background and install when Listenjar quits.',
             downloads,
             (v) => unawaited(setAutomaticDownloads(v)),
           ),

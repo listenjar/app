@@ -1,6 +1,6 @@
-// ListenJar Cloud inside the one player: the signed-in listener's own
-// ListenJar feeds (account.dart) and how each syncs from this device
-// (feeds.dart, sync.dart) through the ListenJar API (public.yaml) and its
+// Listenjar Cloud inside the one player: the signed-in listener's own
+// Listenjar feeds (account.dart) and how each syncs from this device
+// (feeds.dart, sync.dart) through the Listenjar API (public.yaml) and its
 // oasmith client in lib/backend (`moon run app:codegen`). There is no
 // Cloud section and no Cloud page: a feed is a show like any other, in the
 // Library (library_page.dart) and on its show page (show_page.dart), which
@@ -48,7 +48,7 @@ String _removeConsequence(Feeds feeds, Feed feed) {
       if (shared) 'If another podcast of yours has this video, it stays there.',
     ],
     SourceKind.playlist || SourceKind.channel => [
-      'ListenJar stops following it. Its episodes leave your podcast app, and their audio is deleted.',
+      'Listenjar stops following it. Its episodes leave your podcast app, and their audio is deleted.',
       if (shared) 'Videos another podcast of yours also has stay there.',
     ],
     null => [
@@ -202,7 +202,7 @@ final class StorageFullNotice extends StatelessWidget {
           TextButton(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: () => manageBilling(context),
-            child: Text('Move to ${bigger.name.replaceFirst('ListenJar ', '')}'),
+            child: Text('Move to ${bigger.name.replaceFirst('Listenjar ', '')}'),
           ),
         TextButton(
           style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
@@ -219,7 +219,7 @@ final class StorageFullNotice extends StatelessWidget {
   }
 }
 
-/// Settings' ListenJar Cloud: how to sign in, while nobody is; then who is,
+/// Settings' Listenjar Cloud: how to sign in, while nobody is; then who is,
 /// their plan and storage, syncing now, signing out and deleting the
 /// account ([deleteAccount]).
 final class AccountPanel extends StatefulWidget {
@@ -319,7 +319,7 @@ final class _AccountPanelState extends State<AccountPanel> {
       const Divider(color: brand.line, height: 1),
       const SizedBox(height: 12),
       Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 12, runSpacing: 4, children: [
-        Text('Deleting your account deletes everything in ListenJar Cloud.', style: soft),
+        Text('Deleting your account deletes everything in Listenjar Cloud.', style: soft),
         TextButton.icon(
           style: _dangerQuiet,
           onPressed: () => unawaited(deleteAccount(context)),
@@ -376,7 +376,7 @@ final class _AccountPanelState extends State<AccountPanel> {
           ),
           TextButton(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
-            onPressed: () => _plans('ListenJar Cloud plans'),
+            onPressed: () => _plans('Listenjar Cloud plans'),
             child: const Text('See plans'),
           ),
         ]),
@@ -421,7 +421,7 @@ Future<void> deleteAccount(BuildContext context) async {
   if (deleted != true) return;
   await s.feeds.forgetDeleted();
   await s.podcasts.forgetCloud();
-  if (context.mounted) tell(context, 'Your ListenJar account is deleted.');
+  if (context.mounted) tell(context, 'Your Listenjar account is deleted.');
 }
 
 final class _DeleteAccountDialog extends StatefulWidget {
@@ -474,7 +474,7 @@ final class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
       child: AlertDialog(
         backgroundColor: brand.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(brand.radiusSheet)),
-        title: Text('Delete your ListenJar account?', style: text.titleLarge),
+        title: Text('Delete your Listenjar account?', style: text.titleLarge),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 440),
           child: SingleChildScrollView(
@@ -487,7 +487,7 @@ final class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
                 style: body,
               ),
               const SizedBox(height: 4),
-              point('your podcasts in ListenJar Cloud, their RSS feeds and audio, so podcast apps stop getting new episodes'),
+              point('your podcasts in Listenjar Cloud, their RSS feeds and audio, so podcast apps stop getting new episodes'),
               point('your artwork, passkeys, password and connected Google'),
               point('your sign-in on every device, the website’s too'),
               if (widget.user.plan == Plan.paid) ...[
@@ -524,7 +524,7 @@ final class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
 }
 
 /// What failed, said as [what], and what the listener can do about it: check
-/// their connection when the network failed, wait when ListenJar's server
+/// their connection when the network failed, wait when Listenjar's server
 /// did, and [other] otherwise.
 String failure(String what, Object error, {required String other}) => switch (error) {
   CancelledException() => '$what. Check your connection, then try again.',

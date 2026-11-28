@@ -1,6 +1,6 @@
 // YouTube.js's YTNodes (src/parser/nodes.ts): the parsed pieces of a
 // response. A node YouTube.js parsed into a class not listed here is a plain
-// [YTNode] with its [YTNode.type]; listed ones carry the properties ListenJar
+// [YTNode] with its [YTNode.type]; listed ones carry the properties Listenjar
 // reads so far. Add others by their upstream names.
 // ignore_for_file: non_constant_identifier_names
 import 'package:meta/meta.dart';

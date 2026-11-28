@@ -1,8 +1,8 @@
 // The listener's library, the same on each of their devices, on a
-// ListenJar Cloud plan (10 GB, 100 GB): a classic podcast library. Every RSS
+// Listenjar Cloud plan (10 GB, 100 GB): a classic podcast library. Every RSS
 // show they follow, where they are in each episode, and Up Next, by feed
 // URL and episode guid. Nothing here is YouTube's: a YouTube playlist,
-// channel or podcast of the listener's own joins once ListenJar hosts it
+// channel or podcast of the listener's own joins once Listenjar hosts it
 // and it is an RSS show like any other (cloud_shows.dart); until then, and
 // for a single video, it stays on the device it was made on. Downloads and
 // settings stay each device's. None of it counts against the plan's
@@ -95,7 +95,7 @@ final class LibrarySync extends ChangeNotifier {
   Object? error;
 
   /// Whether the library syncs between the listener's devices: signed in,
-  /// on a ListenJar Cloud plan.
+  /// on a Listenjar Cloud plan.
   bool get on => _user != null;
 
   void _follow() {
@@ -282,7 +282,7 @@ final class LibrarySync extends ChangeNotifier {
   }
 
   /// Follows the RSS show at [url], or lets it go when [json] is gone;
-  /// false to try again on a later pass. A show ListenJar hosts comes and
+  /// false to try again on a later pass. A show Listenjar hosts comes and
   /// goes with its feed ([Podcasts.followCloud]), and a show here that
   /// isn't RSS yet is this device's alone.
   Future<bool> _applyShow(String url, String? json) async {
@@ -410,7 +410,7 @@ final class LibrarySync extends ChangeNotifier {
 
   static _Local _local(LibraryKind kind, LibraryData data, int? changedAt) => (sig: _sig(kind, data)!, data: data, changedAt: changedAt);
 
-  /// The RSS shows the listener follows, those ListenJar hosts among them.
+  /// The RSS shows the listener follows, those Listenjar hosts among them.
   Map<_Key, _Local> _showsHere() => {
     for (final r in _db.select('''
       select p.feed_url, p.title, p.author, p.artwork_url, p.subscribed_at
