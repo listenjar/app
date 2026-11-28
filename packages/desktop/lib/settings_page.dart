@@ -1,13 +1,15 @@
 // Settings: the Listenjar Cloud account (cloud.dart), how the player skips and downloads, the space downloads take
 // (storage_page.dart), moving shows in and out, updates (updates.dart), and what the app sends where.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'cloud.dart' show AccountPanel;
 import 'library.dart';
-import 'library_page.dart' show exportOpml, importOpml;
 import 'marks.dart';
 import 'menu.dart';
 import 'now_playing.dart' show speedLabel;
@@ -255,3 +257,43 @@ Widget settingChoice<T>(
       ),
     ),
   );
+
+const _opml = XTypeGroup(label: 'OPML', extensions: ['opml', 'xml'], uniformTypeIdentifiers: ['public.xml', 'public.data'], mimeTypes: ['text/x-opml', 'text/xml', 'application/xml']);
+
+Future<void> importOpml(BuildContext context) async {
+  final podcasts = Services.of(context).podcasts;
+  final file = await openFile(acceptedTypeGroups: const [_opml]);
+  if (file == null || !context.mounted) return;
+  tell(context, 'Importing your shows…');
+  try {
+    final (followed, failed) = await podcasts.importOpml(utf8.decode(await file.readAsBytes(), allowMalformed: true));
+    if (!context.mounted) return;
+    tell(context, [
+      'Followed $followed ${followed == 1 ? 'show' : 'shows'}.',
+      if (failed > 0) '$failed couldn’t be read.',
+    ].join(' '));
+    unawaited(podcasts.refreshAll(force: true));
+  } catch (e) {
+    if (context.mounted) tell(context, 'Couldn’t import that file: $e');
+  }
+}
+
+Future<void> exportOpml(BuildContext context) async {
+  final podcasts = Services.of(context).podcasts;
+  final data = XFile.fromData(utf8.encode(podcasts.exportOpml()), mimeType: 'text/x-opml', name: 'Listenjar.opml');
+  // Phones have no save dialog: the share sheet saves to Files or Drive,
+  // or hands the file to another podcast app.
+  if (Platform.isAndroid || Platform.isIOS) {
+    final box = context.findRenderObject() as RenderBox?;
+    await SharePlus.instance.share(ShareParams(
+      files: [data],
+      fileNameOverrides: const ['Listenjar.opml'],
+      sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
+    ));
+    return;
+  }
+  final where = await getSaveLocation(suggestedName: 'Listenjar.opml', acceptedTypeGroups: const [_opml]);
+  if (where == null) return;
+  await data.saveTo(where.path);
+  if (context.mounted) tell(context, 'Exported your shows.');
+}

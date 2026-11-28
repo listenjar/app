@@ -2,15 +2,11 @@
 // first, with how many episodes they haven't heard. The listener's
 // Listenjar Cloud feeds are shows here like any other, each saying what its
 // sync is doing, and one with nothing uploaded yet waits here too.
-// Podcasts of the listener's own start here; OPML in and out lives here,
-// and on phones the way to Downloads and Settings.
+// Podcasts of the listener's own start here, and on phones the way to
+// Downloads and Settings.
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:share_plus/share_plus.dart';
 
 import 'backend/api.dart' show Feed;
 import 'cloud.dart';
@@ -56,7 +52,6 @@ final class LibraryPage extends StatelessWidget {
               )
             else
               const _PhoneActions(),
-            if (wide) const OpmlMenu(),
           ]),
           if (s.account.user != null && s.feeds.storageFull) ...[const SizedBox(height: 8), const StorageFullNotice(), const SizedBox(height: 16)],
           if (s.feeds.feedsError case final error? when s.account.user != null) ...[
@@ -300,26 +295,9 @@ final class _ShowTileState extends State<_ShowTile> {
   }
 }
 
-/// Moving subscriptions between podcast apps: OPML in and out.
-final class OpmlMenu extends StatelessWidget {
-  const OpmlMenu({super.key});
-
-  @override
-  Widget build(BuildContext context) => Dropdown(
-    align: MenuAlign.end,
-    items: _opmlEntries(context),
-    builder: (context, menu) => MoreButton(menu: menu, tooltip: 'Import or export'),
-  );
-}
-
-List<Widget> _opmlEntries(BuildContext context) => [
-  MenuEntry('Import OPML…', icon: Glyphs.upload, onPressed: () => unawaited(importOpml(context))),
-  MenuEntry('Export OPML…', icon: Glyphs.download, onPressed: () => unawaited(exportOpml(context))),
-];
-
 /// Library's actions on a phone, where there's no sidebar: one white pill
 /// holding New podcast and More. More holds the ways to Downloads and
-/// Settings (counting downloads under way, as the sidebar does), then OPML.
+/// Settings (counting downloads under way, as the sidebar does).
 final class _PhoneActions extends StatelessWidget {
   const _PhoneActions();
 
@@ -349,8 +327,6 @@ final class _PhoneActions extends StatelessWidget {
               items: [
                 MenuEntry('Downloads', icon: Glyphs.download, count: downloading > 0 ? '$downloading' : null, onPressed: () => open(const DownloadsPage(pushed: true))),
                 MenuEntry('Settings', icon: Glyphs.gear, onPressed: () => open(const SettingsPage(pushed: true))),
-                const MenuDivider(),
-                ..._opmlEntries(context),
               ],
               builder: (context, menu) => MoreButton(menu: menu, tooltip: 'More', compact: true),
             ),
@@ -359,44 +335,4 @@ final class _PhoneActions extends StatelessWidget {
       ),
     );
   }
-}
-
-const _opml = XTypeGroup(label: 'OPML', extensions: ['opml', 'xml'], uniformTypeIdentifiers: ['public.xml', 'public.data'], mimeTypes: ['text/x-opml', 'text/xml', 'application/xml']);
-
-Future<void> importOpml(BuildContext context) async {
-  final podcasts = Services.of(context).podcasts;
-  final file = await openFile(acceptedTypeGroups: const [_opml]);
-  if (file == null || !context.mounted) return;
-  tell(context, 'Importing your shows…');
-  try {
-    final (followed, failed) = await podcasts.importOpml(utf8.decode(await file.readAsBytes(), allowMalformed: true));
-    if (!context.mounted) return;
-    tell(context, [
-      'Followed $followed ${followed == 1 ? 'show' : 'shows'}.',
-      if (failed > 0) '$failed couldn’t be read.',
-    ].join(' '));
-    unawaited(podcasts.refreshAll(force: true));
-  } catch (e) {
-    if (context.mounted) tell(context, 'Couldn’t import that file: $e');
-  }
-}
-
-Future<void> exportOpml(BuildContext context) async {
-  final podcasts = Services.of(context).podcasts;
-  final data = XFile.fromData(utf8.encode(podcasts.exportOpml()), mimeType: 'text/x-opml', name: 'Listenjar.opml');
-  // Phones have no save dialog: the share sheet saves to Files or Drive,
-  // or hands the file to another podcast app.
-  if (Platform.isAndroid || Platform.isIOS) {
-    final box = context.findRenderObject() as RenderBox?;
-    await SharePlus.instance.share(ShareParams(
-      files: [data],
-      fileNameOverrides: const ['Listenjar.opml'],
-      sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
-    ));
-    return;
-  }
-  final where = await getSaveLocation(suggestedName: 'Listenjar.opml', acceptedTypeGroups: const [_opml]);
-  if (where == null) return;
-  await data.saveTo(where.path);
-  if (context.mounted) tell(context, 'Exported your shows.');
 }
