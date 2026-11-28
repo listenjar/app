@@ -111,6 +111,17 @@ if (localization) {
     relationships: { build: { data: { type: "builds", id: buildId } } } } })
 }
 
+// Every push to master is a release, so TestFlight would email and push every
+// tester several times a day. Only a release with notes for listeners tells
+// them; the rest still reach TestFlight and its automatic updates, silently.
+const autoNotifyEnabled = changes.length > 0
+await once404sClear(async () => {
+  const details = (await api("GET", `/v1/builds/${buildId}/buildBetaDetail`))!.data as Resource
+  await api("PATCH", `/v1/buildBetaDetails/${details.id}`,
+    { data: { type: "buildBetaDetails", id: details.id, attributes: { autoNotifyEnabled } } })
+})
+console.log(autoNotifyEnabled ? "Testers get told about this build" : "No release notes: testers aren't told about this build")
+
 const external = (await list(`/v1/apps/${app.id}/betaGroups`))
   .find(each => each.attributes.name === group && each.attributes.isInternalGroup === false)
 if (!external) throw new Error(`No external TestFlight group named ${group}`)
