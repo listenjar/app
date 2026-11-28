@@ -583,6 +583,7 @@ paths:
         Exchanges the code with Google, reads the person's Google account and
         signs into its user: the one it signed in before, else the one with its
         verified email, else a new one.
+        Past 30 failed sign-ins in 15 minutes from the caller's network (any way of signing in, any address), it answers 429 until the oldest is that old.
       security: []
       requestBody:
         required: true
@@ -599,6 +600,8 @@ paths:
                 $ref: "#/components/schemas/Session"
         "400":
           description: Google refused the code, or the account has no verified email.
+        "429":
+          $ref: "#/components/responses/SignInLimited"
   /desktop/password:
     post:
       operationId: signInWithPassword
@@ -606,6 +609,7 @@ paths:
       description: >-
         Ten wrong passwords for an address within 15 minutes, on the website
         or here, and it answers 429 until the oldest is that old.
+        Past 30 failed sign-ins in 15 minutes from the caller's network (any way of signing in, any address), it answers 429 until the oldest is that old.
       security: []
       requestBody:
         required: true
@@ -627,7 +631,14 @@ paths:
             No account with that email and password: none at all, one that
             signs in only with Google or passkeys, or a wrong password.
         "429":
-          description: Too many wrong passwords for the address lately.
+          description: >-
+            Too many wrong passwords for the address lately, or failed
+            sign-ins from the caller's network; then with `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds until the network may try again; absent when the address is the reason.
+              schema:
+                type: integer
   /desktop/signups:
     post:
       operationId: signUp
@@ -694,7 +705,8 @@ paths:
         PublicKeyCredentialRequestOptionsJSON for the platform's passkey
         prompt, with `rpId` (listenjar.com; localhost in development) and no
         credentials listed, so it offers every Listenjar passkey it has. The
-        challenge works once, for five minutes.
+        challenge works once, for five minutes. The server signs it rather
+        than storing it, so asking costs nothing to keep.
       security: []
       responses:
         "200":
@@ -711,6 +723,7 @@ paths:
         Takes the platform's answer as AuthenticationResponseJSON. Its client
         data must be signed for `https://<rpId>` (macOS, iOS, Windows) or by
         an Android build that listenjar.com's assetlinks.json lists.
+        Past 30 failed sign-ins in 15 minutes from the caller's network (any way of signing in, any address), it answers 429 until the oldest is that old.
       security: []
       requestBody:
         required: true
@@ -731,6 +744,8 @@ paths:
           description: >-
             The passkey belongs to no account (removed, perhaps), or the
             answer doesn't check out.
+        "429":
+          $ref: "#/components/responses/SignInLimited"
   /billing/checkout:
     post:
       operationId: createCheckout
@@ -912,6 +927,16 @@ components:
       scheme: bearer
       description: The `Session` token from any of the sign-ins.
   responses:
+    SignInLimited:
+      description: >-
+        Too many failed sign-ins from the caller's network lately (an IPv4
+        address, an IPv6 /64); nothing was checked. `Retry-After` says when
+        it may try again.
+      headers:
+        Retry-After:
+          description: Seconds until the network may try again.
+          schema:
+            type: integer
     EmailLimited:
       description: >-
         Too many emails asked for this address lately, or from this network;

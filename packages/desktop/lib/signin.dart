@@ -65,6 +65,15 @@ final class TooManyPasswords extends SignInRefused {
   const TooManyPasswords();
 }
 
+/// Thirty failed sign-ins from this network in 15 minutes, any way and any
+/// address: the API checks nothing more until [retryAfter] passes.
+final class TooManySignIns extends SignInRefused {
+  const TooManySignIns(this.retryAfter);
+
+  /// How long until this network may try again.
+  final Duration retryAfter;
+}
+
 /// The passkey belongs to no account, or its answer didn't check out.
 final class UnknownPasskey extends SignInRefused {
   const UnknownPasskey();
@@ -189,6 +198,8 @@ String _randomString() {
 Future<T> _refusing<T>(Future<T> call, int status, SignInRefused refused) async {
   try {
     return await call;
+  } on RetryLater catch (e) {
+    throw TooManySignIns(e.retryAfter ?? const Duration(minutes: 15));
   } on ApiStatusException catch (e) {
     if (e.statusCode == status) throw refused;
     rethrow;
@@ -253,9 +264,11 @@ Future<Session> signInWithPassword(PublicApiClient api, String email, String pas
   try {
     return await api.signInWithPassword(body: PasswordSignIn(email: email.trim(), password: password)).asCancellable(token);
   } on ApiStatusException catch (e) {
-    throw switch (e.statusCode) {
-      HttpStatus.badRequest || HttpStatus.unauthorized => const WrongPassword(),
-      HttpStatus.tooManyRequests => const TooManyPasswords(),
+    throw switch (e) {
+      // The network's budget says when; the address's own limit doesn't.
+      RetryLater(retryAfter: final wait?) => TooManySignIns(wait),
+      ApiStatusException(statusCode: HttpStatus.badRequest || HttpStatus.unauthorized) => const WrongPassword(),
+      ApiStatusException(statusCode: HttpStatus.tooManyRequests) => const TooManyPasswords(),
       _ => e,
     };
   }

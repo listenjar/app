@@ -39,17 +39,19 @@ final class _Abandoned implements Exception {
 }
 
 /// listenjar.com's words for a held-back email (apps/web's emailLimits.ts).
-String tooManyEmails(Duration retryAfter) {
-  final seconds = retryAfter.inSeconds < 1 ? 1 : retryAfter.inSeconds;
+String tooManyEmails(Duration retryAfter) => 'That’s a lot of emails for now. Try again ${_after(retryAfter)}.';
+
+/// When a wait of [wait] ends, as "in 42 seconds", "in a minute"…
+String _after(Duration wait) {
+  final seconds = wait.inSeconds < 1 ? 1 : wait.inSeconds;
   final minutes = (seconds / 60).ceil();
-  final wait = switch (seconds) {
+  return switch (seconds) {
     1 => 'in a second',
     < 60 => 'in $seconds seconds',
     _ when minutes == 1 => 'in a minute',
     _ when minutes < 90 => 'in $minutes minutes',
     _ => 'in ${(minutes / 60).ceil()} hours',
   };
-  return 'That’s a lot of emails for now. Try again $wait.';
 }
 
 final class SignInForm extends StatefulWidget {
@@ -437,6 +439,8 @@ final class _SignInFormState extends State<SignInForm> {
     WrongPassword() =>
       'That email and password don’t match. If you signed up with Google, continue with Google, or reset your password.',
     TooManyPasswords() => 'Too many wrong passwords for this email. Wait 15 minutes, or reset your password.',
+    TooManySignIns(:final retryAfter) =>
+      'Too many sign-ins from this network didn’t work, so they’re paused. Try again ${_after(retryAfter)}.',
     GoogleRefused() => 'Google didn’t confirm your account. Try again, or pick another account.',
     AccessDenied() => 'You chose Cancel on Google’s page, so you’re not signed in.',
     UnknownPasskey() =>
