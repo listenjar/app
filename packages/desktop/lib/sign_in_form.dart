@@ -6,11 +6,13 @@
 import 'dart:async';
 
 import 'package:cancellation_token/cancellation_token.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'account.dart';
+import 'config.dart';
 import 'marks.dart';
 import 'signin.dart';
 import 'theme.dart' as brand;
@@ -302,6 +304,11 @@ final class _SignInFormState extends State<SignInForm> {
             }),
           ),
         ),
+        // Continue with Google and Create account both make accounts.
+        if (_mode != _Mode.forgot) ...[
+          const SizedBox(height: 14),
+          const _TermsLine(),
+        ],
         const SizedBox(height: 16),
         Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
           Text(
@@ -424,6 +431,52 @@ final class _Alert extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// What making an account accepts, said by the buttons that make one, so
+/// there is no box to tick: listenjar.com/signup's line. The backend stores
+/// the Terms' version with the new account.
+final class _TermsLine extends StatefulWidget {
+  const _TermsLine();
+
+  @override
+  State<_TermsLine> createState() => _TermsLineState();
+}
+
+final class _TermsLineState extends State<_TermsLine> {
+  late final _terms = TapGestureRecognizer()..onTap = () => _open('/terms');
+  late final _privacy = TapGestureRecognizer()..onTap = () => _open('/privacy');
+
+  void _open(String path) =>
+    unawaited(launchUrl(currentConfig().web.resolve(path), mode: LaunchMode.externalApplication));
+
+  @override
+  void dispose() {
+    _terms.dispose();
+    _privacy.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodySmall!.copyWith(fontSize: 12.5, height: 1.45, color: brand.fgSoft);
+    final link = style.copyWith(
+      color: brand.fg,
+      fontWeight: FontWeight.w500,
+      decoration: TextDecoration.underline,
+      decorationColor: brand.fg.withValues(alpha: 0.3),
+    );
+    return Text.rich(
+      TextSpan(style: style, children: [
+        const TextSpan(text: 'By continuing, you agree to Listenjar’s '),
+        TextSpan(text: 'Terms of Service', style: link, recognizer: _terms, mouseCursor: SystemMouseCursors.click),
+        const TextSpan(text: ' and '),
+        TextSpan(text: 'Privacy Policy', style: link, recognizer: _privacy, mouseCursor: SystemMouseCursors.click),
+        const TextSpan(text: '.'),
+      ]),
+      textAlign: TextAlign.center,
+    );
+  }
 }
 
 /// The rule between the one-click ways in and the email form.
