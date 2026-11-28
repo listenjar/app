@@ -23,7 +23,7 @@
 //
 // Release notes: a commit that changes something a listener sees or does
 // carries a `Release-note:` trailer, one line per change, written for
-// listeners (see AGENTS.md). A release's notes are those trailers from the
+// listeners. A release's notes are those trailers from the
 // commits since the previous release; the GitHub release and TestFlight's
 // What to Test both show them. Commit subjects are written for developers and
 // never reach listeners.
