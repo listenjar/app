@@ -249,13 +249,13 @@ paths). Change a token on the website, change it here.
 
 ## Signing in
 
-"Sign in with your browser" follows [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252)
-([signin.dart](packages/desktop/lib/signin.dart)): the app listens on a random `127.0.0.1`
-port, opens `listenjar.com/desktop/authorize` in the default browser, where you sign in and
-allow the app, and trades the one-time code the browser brings back for its own token, proving
-with PKCE that it started the sign-in. The page the browser lands on opens `listenjar://sign-in`
-(`listenjar-dev://` in debug builds), which each platform's runner registers, to bring the app
-back to the front. The token lives in the system credential store
+The app signs in by itself ([signin.dart](packages/desktop/lib/signin.dart), public.yaml), in
+listenjar.com's three ways: an email and password, a passkey through the platform's own prompt,
+or Google, which follows [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252): the app listens on
+a random `127.0.0.1` port, opens Google in the default browser, and trades the one-time code
+Google brings back for its own token, proving with PKCE that it started the sign-in. The page
+the browser lands on opens `listenjar://sign-in` (`listenjar-dev://` in debug builds), which
+each platform's runner registers, to bring the app back to the front. The token lives in the system credential store
 (Keychain, Credential Manager, Secret Service or the Android Keystore); "Sign out" revokes and
 forgets it.
 

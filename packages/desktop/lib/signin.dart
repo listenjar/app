@@ -325,8 +325,8 @@ Future<Session> signInWithPasskey(PublicApiClient api, CancellationToken cancell
   ).asCancellable(token);
 }
 
-/// The page the browser lands on, in listenjar.com's look (DESIGN.md): the
-/// authorize page's white card on paper. It hands the person back to the app
+/// The page the browser lands on, in listenjar.com's look (DESIGN.md): a
+/// white card on paper. It hands the person back to the app
 /// through [appScheme], which the runners register (Info.plist, the Android
 /// manifest, the Windows registry, a Linux .desktop file) and which focuses
 /// the running window; the button covers browsers that want a click first.

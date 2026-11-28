@@ -33,13 +33,6 @@ info:
       so one made on the website signs in here too.
 
 
-    The app used to sign in through the browser instead: it opens
-    `https://listenjar.com/desktop/authorize?redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`,
-    the person signs in there and allows the app, and the browser comes back
-    to the app's loopback address with a code for `createDesktopToken`. That
-    still works.
-
-
     Feeds: the listener's feeds are under `/me/feeds`. The app adds a YouTube
     video, playlist or channel with `addFeed` after reading its title from
     YouTube itself. Free listeners add videos only, each its own podcast,
@@ -724,31 +717,6 @@ paths:
           description: >-
             The passkey belongs to no account (removed, perhaps), or the
             answer doesn't check out.
-  /desktop/token:
-    post:
-      operationId: createDesktopToken
-      summary: Trade the code from the browser for the app's token
-      description: >-
-        The code is single-use and expires five minutes after the person
-        allowed the app. `codeVerifier` must hash (S256) to the
-        `code_challenge` the app opened the browser with, and `redirectUri`
-        must be the same loopback address.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/DesktopTokenRequest"
-      responses:
-        "200":
-          description: The app is signed in.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Session"
-        "400":
-          description: The code is unknown, used, expired, or does not match the verifier or redirect URI.
   /billing/checkout:
     post:
       operationId: createCheckout
@@ -928,7 +896,7 @@ components:
     token:
       type: http
       scheme: bearer
-      description: The token from `createDesktopToken`.
+      description: The `Session` token from any of the sign-ins.
   schemas:
     CheckoutRequest:
       type: object
@@ -1415,14 +1383,3 @@ components:
         A WebAuthn options or credential object in its JSON form (WebAuthn
         Level 3), as SimpleWebAuthn's server takes and gives them.
       additionalProperties: true
-    DesktopTokenRequest:
-      type: object
-      required: [code, codeVerifier, redirectUri]
-      properties:
-        code:
-          type: string
-        codeVerifier:
-          type: string
-        redirectUri:
-          type: string
-          format: uri
