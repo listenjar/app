@@ -25,7 +25,7 @@ info:
       `requestPasswordLink` email a link that opens on listenjar.com, which
       makes the account or sets its password; the person then signs in here
       with that password. Both need a Cloudflare Turnstile token from
-      listenjar.com/app-check.
+      listenjar.com/auth/app-check.
 
     - Passkeys: the platform's own passkey prompt (macOS and iOS with the
       `webcredentials:listenjar.com` Associated Domain, Android's Credential
@@ -650,7 +650,7 @@ paths:
         with it. An address that has an account gets an email saying so
         instead, with a link that sets a password. The answer is the same
         either way, so it never tells who has an account. It needs a token
-        from the Turnstile widget on listenjar.com/app-check, which the app
+        from the Turnstile widget on listenjar.com/auth/app-check, which the app
         shows in a WebView, or opens in the browser where it has none.
         Turnstile is checked first; then the email limits: one request a
         minute and five a day for an address, whether or not it has an
@@ -684,7 +684,7 @@ paths:
         account that signs in only with Google or passkeys. Setting it signs
         the account out everywhere, this app too. The same email limits as
         sign-up's apply, and count together with them, after Turnstile: it
-        needs a token from listenjar.com/app-check, like `signUp`.
+        needs a token from listenjar.com/auth/app-check, like `signUp`.
       security: []
       requestBody:
         required: true
@@ -1419,7 +1419,7 @@ components:
           maxLength: 256
         turnstileToken:
           type: string
-          description: The token listenjar.com/app-check's Cloudflare Turnstile widget gave; each works once.
+          description: The token listenjar.com/auth/app-check's Cloudflare Turnstile widget gave; each works once.
     PasswordLinkRequest:
       type: object
       required: [email, turnstileToken]
@@ -1429,7 +1429,7 @@ components:
           format: email
         turnstileToken:
           type: string
-          description: The token listenjar.com/app-check's Cloudflare Turnstile widget gave; each works once.
+          description: The token listenjar.com/auth/app-check's Cloudflare Turnstile widget gave; each works once.
     WebAuthnJson:
       type: object
       description: >-

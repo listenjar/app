@@ -1,10 +1,10 @@
 // Signing in, in Settings' account panel (AccountPanel in cloud.dart): the
-// app's version of listenjar.com/login, with the same three ways in, the same
+// app's version of listenjar.com/auth/login, with the same three ways in, the same
 // order and the same words. Google and a passkey first, then the email form,
 // which also signs up and asks for a password link; both links open on
 // listenjar.com, and the person comes back here to sign in with the password.
 // Signing up and asking for a password link pass Cloudflare Turnstile first,
-// as on listenjar.com/signup and /forgot-password (turnstile.dart): its widget
+// as on listenjar.com/auth/signup and /auth/forgot-password (turnstile.dart): its widget
 // sits above Create account or Email me a link, or, without a WebView, opens
 // in the browser when the button is pressed.
 // The way this device signed in last wears listenjar.com's "Last used" mark.
@@ -442,7 +442,7 @@ final class _SignInFormState extends State<SignInForm> {
     ));
   }
 
-  /// listenjar.com/login's words for each refusal.
+  /// listenjar.com/auth/login's words for each refusal.
   String _explain(Object error) => switch (error) {
     WrongPassword() =>
       'That email and password don’t match. If you signed up with Google, continue with Google, or reset your password.',
@@ -594,7 +594,7 @@ final class _Alert extends StatelessWidget {
 }
 
 /// What making an account accepts, said by the buttons that make one, so
-/// there is no box to tick: listenjar.com/signup's line. The backend stores
+/// there is no box to tick: listenjar.com/auth/signup's line. The backend stores
 /// the Terms' version with the new account.
 final class _TermsLine extends StatefulWidget {
   const _TermsLine();

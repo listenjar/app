@@ -91,7 +91,7 @@ final class PasskeysUnavailable extends SignInRefused {
   const PasskeysUnavailable();
 }
 
-/// Turnstile refused the token listenjar.com/app-check gave (turnstile.dart).
+/// Turnstile refused the token listenjar.com/auth/app-check gave (turnstile.dart).
 final class HumanCheckRefused extends SignInRefused {
   const HumanCheckRefused();
 }
@@ -301,7 +301,7 @@ Future<bool> _accepted(Future<void> call, CancellationToken token) async {
 }
 
 /// Turnstile in the browser, where the app has no WebView (turnstile.dart):
-/// opens listenjar.com/app-check with [open], which hands its token to the
+/// opens listenjar.com/auth/app-check with [open], which hands its token to the
 /// app's loopback address, as Google's page hands its code.
 Future<String> turnstileInBrowser(Future<void> Function(Uri) open, CancellationToken cancellation) async {
   final token = cancellation.merge(TimeoutCancellationToken(signInTimeout));
@@ -321,7 +321,7 @@ Future<String> turnstileInBrowser(Future<void> Function(Uri) open, CancellationT
       }
       await response.close();
     });
-    await open(currentConfig().web.replace(path: '/app-check', queryParameters: {'return': back}));
+    await open(currentConfig().web.replace(path: '/auth/app-check', queryParameters: {'return': back}));
     return await passed.future;
   } finally {
     await server.close(force: true);
