@@ -12,6 +12,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:nativeapi/nativeapi.dart' as native show Size;
+import 'package:nativeapi_flutter/nativeapi_flutter.dart' show Application, WindowManager;
 
 import 'account.dart';
 import 'cloud_shows.dart';
@@ -271,8 +273,14 @@ void control(AppServices? s, Map<String, String> parameters) {
         final key => throw ArgumentError('key $key? up, down, left, right, space, enter, escape or tab'),
       };
       _press(physical, logical);
+    case 'window':
+      // The window resized to `width` × `height` logical pixels, to see the
+      // narrow (phone) layout on a computer; macOS stops it at 520 wide.
+      double at(String key) => double.tryParse(parameters[key] ?? '') ?? (throw ArgumentError('$key?'));
+      final window = Application.instance.getPrimaryWindow() ?? WindowManager.instance.getCurrent() ?? (throw StateError('no window'));
+      window.setSize(native.Size(width: at('width'), height: at('height')), false);
     case final action:
-      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open, download, drag or key');
+      throw ArgumentError('unknown action $action; play, pause, stop, seek, refresh, add, follow, unfollow, move, open, download, drag, key or window');
   }
 }
 
