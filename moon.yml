@@ -69,7 +69,9 @@ tasks:
   # worktree shares (.moon/workspace.yml), so each version compiles once per machine.
   engine-macos:
     description: Prebuild QuickJS for macOS on arm64 and x64 (tool/engine.dart).
-    command: dart packages/youtubei/tool/engine.dart macos-arm64 macos-x64
+    # The tool needs the workspace's packages, which CI's macOS and iOS jobs
+    # only fetch in flutter build.
+    script: flutter pub get --enforce-lockfile && dart packages/youtubei/tool/engine.dart macos-arm64 macos-x64
     inputs: ["@group(engine)"]
     outputs: [packages/youtubei/native/engine/macos-*/**/*]
     options:
@@ -78,7 +80,9 @@ tasks:
       outputStyle: buffer-only-failure
   engine-ios:
     description: Prebuild QuickJS for iOS devices and Apple silicon simulators (tool/engine.dart).
-    command: dart packages/youtubei/tool/engine.dart ios-arm64 ios-arm64-simulator
+    # The tool needs the workspace's packages, which CI's macOS and iOS jobs
+    # only fetch in flutter build.
+    script: flutter pub get --enforce-lockfile && dart packages/youtubei/tool/engine.dart ios-arm64 ios-arm64-simulator
     inputs: ["@group(engine)"]
     outputs: [packages/youtubei/native/engine/ios-*/**/*]
     options:
@@ -87,7 +91,9 @@ tasks:
       outputStyle: buffer-only-failure
   engine-linux:
     description: Prebuild QuickJS for Linux on this machine's architecture (tool/engine.dart).
-    command: dart packages/youtubei/tool/engine.dart host
+    # The tool needs the workspace's packages, which CI's macOS and iOS jobs
+    # only fetch in flutter build.
+    script: flutter pub get --enforce-lockfile && dart packages/youtubei/tool/engine.dart host
     inputs: ["@group(engine)"]
     outputs: [packages/youtubei/native/engine/linux-*/**/*]
     options:
