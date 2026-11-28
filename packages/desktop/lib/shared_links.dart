@@ -33,6 +33,7 @@ import 'library.dart' show Podcast;
 import 'config.dart' show appScheme;
 import 'links.dart';
 import 'log.dart';
+import 'marks.dart';
 import 'plans.dart' show askNewPodcast, hasCloud, isPaid, showPlans;
 import 'shared_links.g.dart' as android;
 import 'shared_links_ios.g.dart' as ios;
@@ -488,13 +489,13 @@ Future<SearchResult?> _lookUp(Services s, YouTubeLink link) async {
 Future<_Where?> _askWhere(BuildContext context, YouTubeLink video, Future<SearchResult?> found) {
   final text = Theme.of(context).textTheme;
   final own = ownPodcasts(context);
-  Widget option(IconData icon, String title, String? body, _Where where) => InkWell(
+  Widget option(Glyph icon, String title, String? body, _Where where) => InkWell(
     borderRadius: BorderRadius.circular(14),
     onTap: () => Navigator.pop(context, where),
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Row(children: [
-        Icon(icon, color: brand.fgSoft, size: 22),
+        GlyphIcon(icon, color: brand.fgSoft, size: 22),
         const SizedBox(width: 14),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -521,8 +522,8 @@ Future<_Where?> _askWhere(BuildContext context, YouTubeLink video, Future<Search
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: _VideoHeader(link: video, found: found),
             ),
-            for (final o in own) option(Icons.playlist_add_rounded, 'Add to “${o.title}”', null, _Own(o)),
-            option(Icons.add_rounded, 'Add to a new podcast…', null, const _New()),
+            for (final o in own) option(Glyphs.queueAdd, 'Add to “${o.title}”', null, _Own(o)),
+            option(Glyphs.plus, 'Add to a new podcast…', null, const _New()),
           ]),
         ),
       ),

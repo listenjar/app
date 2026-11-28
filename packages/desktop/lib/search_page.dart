@@ -15,6 +15,7 @@ import 'backend/api.dart' show SourceKind;
 import 'directory.dart';
 import 'library.dart' show PodcastEpisode;
 import 'links.dart';
+import 'marks.dart';
 import 'menu.dart';
 import 'shared_links.dart' show OwnPodcast, addVideoToOwnPodcast, followYouTube, openApplePodcasts, ownPodcast, ownPodcasts;
 import 'plans.dart';
@@ -331,8 +332,8 @@ final class _SearchPageState extends State<SearchPage> {
             dimension: 20,
             child: _searching != null || _lookingUp.isNotEmpty
               ? const Padding(padding: EdgeInsets.all(2), child: CircularProgressIndicator(strokeWidth: 2, color: brand.accent))
-              : Icon(
-                  _youtubeLink != null || _feed != null ? Icons.link_rounded : Icons.search_rounded,
+              : GlyphIcon(
+                  _youtubeLink != null || _feed != null ? Glyphs.link : Glyphs.search,
                   size: 20,
                   color: focused ? brand.accent : brand.fgSoft,
                 ),
@@ -362,7 +363,7 @@ final class _SearchPageState extends State<SearchPage> {
                 _field.clear();
                 _focus.requestFocus();
               },
-              icon: const Icon(Icons.close_rounded, size: 20, color: brand.fgSoft),
+              icon: const GlyphIcon(Glyphs.close, size: 20, color: brand.fgSoft),
             ),
         ]),
       ),
@@ -379,7 +380,7 @@ final class _SearchPageState extends State<SearchPage> {
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
       decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(12)),
       child: Row(children: [
-        const Icon(Icons.podcasts_rounded, size: 18, color: brand.accent),
+        const GlyphIcon(Glyphs.podcast, size: 18, color: brand.accent),
         const SizedBox(width: 10),
         Expanded(
           child: Text.rich(
@@ -460,13 +461,13 @@ final class _SearchPageState extends State<SearchPage> {
           ? TextButton.icon(
               style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
               onPressed: () => Navigation.of(context).openShow(known!.id),
-              icon: const Icon(Icons.check_rounded, size: 18),
+              icon: const GlyphIcon(Glyphs.check, size: 18),
               label: Text('Following', style: text.labelLarge!.copyWith(fontSize: 14)),
             )
           : TextButton.icon(
               style: brand.button(brand.Tone.ink, brand.ButtonSize.sm),
               onPressed: () => unawaited(_openFeed(p.feedUrl, follow: true)),
-              icon: const Icon(Icons.add_rounded, size: 18),
+              icon: const GlyphIcon(Glyphs.plus, size: 18),
               label: const Text('Follow'),
             ),
     );
@@ -538,19 +539,19 @@ final class _SearchPageState extends State<SearchPage> {
         items: [
           MenuEntry(
             kept ? 'In your Library' : 'Add to Library',
-            icon: kept ? Icons.library_add_check_rounded : Icons.library_add_outlined,
+            icon: kept ? Glyphs.saved : Glyphs.save,
             onPressed: kept ? null : () => unawaited(_playVideo(link, result: r, keep: true)),
           ),
           const MenuDivider(),
           const MenuHeader('Add to a podcast of yours'),
           for (final o in own)
-            MenuEntry(o.title, icon: Icons.podcasts_rounded, onPressed: () => unawaited(_addToPodcast(link, o, title: r?.title))),
-          MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_addToPodcast(link, null, title: r?.title))),
+            MenuEntry(o.title, icon: Glyphs.podcast, onPressed: () => unawaited(_addToPodcast(link, o, title: r?.title))),
+          MenuEntry('New podcast…', icon: Glyphs.plus, onPressed: () => unawaited(_addToPodcast(link, null, title: r?.title))),
         ],
         builder: (context, menu) => IconButton(
           tooltip: 'Add to Library or a podcast',
           onPressed: menu.toggle,
-          icon: Icon(kept ? Icons.library_add_check_rounded : Icons.library_add_outlined, color: kept ? brand.accent : brand.fgSoft),
+          icon: GlyphIcon(kept ? Glyphs.saved : Glyphs.save, color: kept ? brand.accent : brand.fgSoft),
         ),
       ),
       const SizedBox(width: 4),
@@ -558,7 +559,7 @@ final class _SearchPageState extends State<SearchPage> {
         TextButton.icon(
           style: brand.button(added ? brand.Tone.quiet : brand.Tone.accent, brand.ButtonSize.sm),
           onPressed: added ? null : () => unawaited(_addToPodcast(link, into, title: r?.title)),
-          icon: Icon(added ? Icons.check_rounded : Icons.add_rounded, size: 18),
+          icon: GlyphIcon(added ? Glyphs.check : Glyphs.plus, size: 18),
           label: Text(added ? 'Added' : 'Add'),
         ),
         if (play) const SizedBox(width: 8),
@@ -578,7 +579,7 @@ final class _SearchPageState extends State<SearchPage> {
               doneTyping();
               unawaited(_playVideo(link, result: r));
             },
-            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+            icon: const GlyphIcon(Glyphs.play, size: 22),
           ),
         ),
     ]);
@@ -590,7 +591,7 @@ final class _SearchPageState extends State<SearchPage> {
   Widget _followButton(BuildContext context, String url, String title) => TextButton.icon(
     style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
     onPressed: () => unawaited(_follow(url, title)),
-    icon: const Icon(Icons.add_rounded, size: 18),
+    icon: const GlyphIcon(Glyphs.plus, size: 18),
     label: const Text('Follow'),
   );
 
@@ -642,7 +643,7 @@ final class _SearchPageState extends State<SearchPage> {
           width: 52,
           height: 52,
           decoration: BoxDecoration(color: brand.mist, borderRadius: BorderRadius.circular(14)),
-          child: Icon(apple ? Icons.podcasts_rounded : Icons.rss_feed_rounded, color: brand.accent),
+          child: GlyphIcon(apple ? Glyphs.podcast : Glyphs.feed, color: brand.accent),
         ),
         const SizedBox(width: 16),
         Expanded(
@@ -691,7 +692,7 @@ final class _SearchPageState extends State<SearchPage> {
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: () => Navigation.of(context).openSettings(),
-            icon: const Icon(Icons.cloud_outlined, size: 18),
+            icon: const GlyphIcon(Glyphs.cloud, size: 18),
             label: const Text('About Listenjar Cloud'),
           ),
         ],
@@ -803,12 +804,12 @@ final class _Thumbnail extends StatelessWidget {
               return Stack(fit: StackFit.expand, children: [
                 image(width),
                 if (playing)
-                  const Positioned(right: 6, bottom: 9, child: _Badge(icon: Icons.graphic_eq_rounded, label: 'Playing', accent: true))
+                  const Positioned(right: 6, bottom: 9, child: _Badge(icon: Glyphs.playing, label: 'Playing', accent: true))
                 else if (result.badge case final badge?)
                   Positioned(
                     right: 6,
                     bottom: progress == null ? 6 : 9,
-                    child: _Badge(icon: result.kind == SourceRefKind.playlist ? Icons.playlist_play_rounded : null, label: badge),
+                    child: _Badge(icon: result.kind == SourceRefKind.playlist ? Glyphs.queue : null, label: badge),
                   ),
                 if (progress != null)
                   Positioned(
@@ -835,7 +836,7 @@ final class _Thumbnail extends StatelessWidget {
 final class _Badge extends StatelessWidget {
   const _Badge({required this.label, this.icon, this.accent = false});
   final String label;
-  final IconData? icon;
+  final Glyph? icon;
   final bool accent;
 
   @override
@@ -844,7 +845,7 @@ final class _Badge extends StatelessWidget {
     child: Padding(
       padding: EdgeInsets.fromLTRB(icon == null ? 6 : 4, 3, 6, 3),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        if (icon case final icon?) ...[Icon(icon, size: 13, color: brand.white), const SizedBox(width: 3)],
+        if (icon case final icon?) ...[GlyphIcon(icon, size: 13, color: brand.white), const SizedBox(width: 3)],
         Text(
           label,
           style: const TextStyle(color: brand.white, fontSize: 12, fontWeight: FontWeight.w600, height: 1.15, fontFeatures: [FontFeature.tabularFigures()]),
@@ -886,7 +887,7 @@ final class _SourceSwitch extends StatelessWidget {
               duration: still ? Duration.zero : brand.quick,
               child: isYouTube
                 ? YouTubeMark(key: ValueKey(on), size: 18, color: on ? brand.accent : brand.fgSoft)
-                : Icon(Icons.podcasts_rounded, key: ValueKey(on), size: 18, color: on ? brand.accent : brand.fgSoft),
+                : GlyphIcon(Glyphs.podcast, key: ValueKey(on), size: 18, color: on ? brand.accent : brand.fgSoft),
             ),
             const SizedBox(width: 8),
             Text(label),

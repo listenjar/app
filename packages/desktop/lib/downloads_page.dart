@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:material_ui/material_ui.dart';
 
 import 'library.dart';
+import 'marks.dart';
 import 'plans.dart' show formatBytes;
 import 'shell.dart';
 import 'storage_page.dart';
@@ -82,6 +83,6 @@ final class DownloadsPage extends StatelessWidget {
   Widget _cancel(BuildContext context, PodcastEpisode e) => IconButton(
     tooltip: e.downloadState == DownloadState.failed ? 'Remove' : 'Cancel',
     onPressed: () => unawaited(Services.of(context).downloads.delete(e)),
-    icon: const Icon(Icons.close_rounded, size: 20, color: brand.fgSoft),
+    icon: const GlyphIcon(Glyphs.close, size: 20, color: brand.fgSoft),
   );
 }

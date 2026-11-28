@@ -10,6 +10,7 @@
 // turning to the accent.
 import 'package:material_ui/material_ui.dart';
 
+import 'marks.dart';
 import 'theme.dart' as brand;
 
 enum MenuTone { paper, ink }
@@ -177,10 +178,14 @@ ButtonStyle _row(_Palette p, Color rest, {bool danger = false}) {
 
 /// The "…" that opens a trailing menu, held down while the menu is open.
 final class MoreButton extends StatelessWidget {
-  const MoreButton({super.key, required this.menu, this.tooltip = 'More', this.tone = MenuTone.paper});
+  const MoreButton({super.key, required this.menu, this.tooltip = 'More', this.tone = MenuTone.paper, this.compact = false});
   final MenuController menu;
   final String tooltip;
   final MenuTone tone;
+
+  /// Inside a pill of buttons: as tall as the pill and a little narrower,
+  /// in the pill's own icon colour.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -194,8 +199,10 @@ final class MoreButton extends StatelessWidget {
         hoverColor: held,
         highlightColor: held.withAlpha(0),
       ),
+      constraints: compact ? const BoxConstraints.tightFor(width: 42, height: 44) : null,
+      padding: compact ? EdgeInsets.zero : null,
       onPressed: menu.toggle,
-      icon: Icon(Icons.more_horiz_rounded, color: ink ? brand.snow : brand.fgSoft),
+      icon: GlyphIcon(Glyphs.more, color: ink ? brand.snow : (compact ? brand.fg : brand.fgSoft)),
     );
   }
 }
@@ -205,7 +212,8 @@ final class MoreButton extends StatelessWidget {
 /// [checked] makes it one of a set of choices: the check sits where the
 /// icon would, accent when chosen and an empty column when not. [danger]
 /// is for rows that take something away (unfollow, delete a download).
-/// [leading] stands in for [icon] when the row shows a picture.
+/// [leading] stands in for [icon] when the row shows a picture. [count] is
+/// a plain number at the row's end, in the faint colour.
 final class MenuEntry extends StatelessWidget {
   const MenuEntry(
     this.label, {
@@ -216,27 +224,32 @@ final class MenuEntry extends StatelessWidget {
     this.checked,
     this.danger = false,
     this.tabular = false,
+    this.count,
   });
 
   final String label;
-  final IconData? icon;
+  final Glyph? icon;
   final Widget? leading;
   final VoidCallback? onPressed;
   final bool? checked;
   final bool danger;
   final bool tabular;
+  final String? count;
 
   @override
   Widget build(BuildContext context) {
     final p = _palette(_Tone.of(context));
     final lead = switch (checked) {
-      true => Icon(Icons.check_rounded, size: 18, color: p.accent),
+      true => GlyphIcon(Glyphs.check, size: 18, color: p.accent),
       false => const SizedBox.square(dimension: 18),
-      null => leading ?? (icon == null ? null : Icon(icon)),
+      null => leading ?? switch (icon) { final icon? => GlyphIcon(icon), null => null },
     };
     return MenuItemButton(
       style: danger ? _row(p, p.hover.withAlpha(0), danger: true) : null,
       leadingIcon: lead,
+      trailingIcon: count == null
+        ? null
+        : Text(count!, style: TextStyle(color: p.faint, fontSize: 13.5, fontFeatures: const [FontFeature.tabularFigures()])),
       onPressed: onPressed,
       child: Text(
         label,

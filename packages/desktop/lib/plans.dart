@@ -373,7 +373,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
               tooltip: 'Close',
               visualDensity: VisualDensity.compact,
               onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close_rounded, size: 18, color: brand.fgSoft),
+              icon: const GlyphIcon(Glyphs.close, size: 18, color: brand.fgSoft),
             ),
           ]),
           const SizedBox(height: 12),
@@ -381,7 +381,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Padding(padding: EdgeInsets.only(top: 1), child: Icon(Icons.check_rounded, size: 17, color: brand.accent)),
+                const Padding(padding: EdgeInsets.only(top: 1), child: GlyphIcon(Glyphs.check, size: 17, color: brand.accent)),
                 const SizedBox(width: 10),
                 Expanded(child: Text(perk, style: text.bodySmall!.copyWith(color: brand.fg))),
               ]),
@@ -436,7 +436,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: () => setState(() => _signingIn = false),
-            icon: const Icon(Icons.arrow_back_rounded, size: 16),
+            icon: const GlyphIcon(Glyphs.back, size: 16),
             label: const Text('Plans'),
           ),
           const Spacer(),
@@ -444,7 +444,7 @@ final class _PlansSheetState extends State<_PlansSheet> {
             tooltip: 'Close',
             visualDensity: VisualDensity.compact,
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close_rounded, size: 18, color: brand.fgSoft),
+            icon: const GlyphIcon(Glyphs.close, size: 18, color: brand.fgSoft),
           ),
         ]),
         const SizedBox(height: 14),
@@ -549,7 +549,7 @@ final class _PlanTileState extends State<_PlanTile> {
     final check = AnimatedOpacity(
       opacity: widget.selected ? 1 : 0,
       duration: brand.quick,
-      child: const Icon(Icons.check_circle_rounded, size: 20, color: brand.accent),
+      child: const GlyphIcon(Glyphs.checkCircle, size: 20, color: brand.accent),
     );
     return Semantics(
       selected: widget.selected,
@@ -836,7 +836,7 @@ final class _MakeRoomSheetState extends State<_MakeRoomSheet> {
               tooltip: 'Close',
               visualDensity: VisualDensity.compact,
               onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close_rounded, size: 18, color: brand.fgSoft),
+              icon: const GlyphIcon(Glyphs.close, size: 18, color: brand.fgSoft),
             ),
           ]),
           const SizedBox(height: 10),
@@ -976,7 +976,7 @@ final class _MakeRoomSheetState extends State<_MakeRoomSheet> {
           tooltip: 'Remove this episode',
           visualDensity: VisualDensity.compact,
           onPressed: removing ? null : () => _removeEpisode(feed, episode),
-          icon: const Icon(Icons.close_rounded, size: 16, color: brand.fgSoft),
+          icon: const GlyphIcon(Glyphs.close, size: 16, color: brand.fgSoft),
         ),
       ]),
     );

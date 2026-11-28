@@ -20,6 +20,7 @@ import 'backend/api.dart' show Feed, FeedVisibility, Plan, SourceKind;
 import 'cloud.dart' show StorageFullNotice, failure, listenIn, podcastApps, removeCloudFeed;
 import 'hosted_feed.dart';
 import 'library.dart';
+import 'marks.dart';
 import 'menu.dart';
 import 'net.dart';
 import 'podcast_apps.dart' show PodcastApp;
@@ -131,7 +132,7 @@ final class _ShowPageState extends State<ShowPage> {
             if ((own ? feed?.pageUrl : show?.link) case final link? when Uri.tryParse(link)?.hasScheme ?? false)
               Builder(
                 builder: (context) => GlassIcon(
-                  icon: Icons.adaptive.share,
+                  icon: Glyphs.share,
                   tooltip: own ? 'Share its page' : 'Share',
                   size: 21,
                   onPressed: () => unawaited(shareLink(context, link, title: show?.title ?? feed!.title)),
@@ -199,7 +200,7 @@ final class _ShowPageState extends State<ShowPage> {
                           _ => null,
                         },
                       },
-                      icon: Icon(Icons.close_rounded, size: 17, color: p.fgFaint),
+                      icon: GlyphIcon(Glyphs.close, size: 17, color: p.fgFaint),
                     ),
                   ),
               ]),
@@ -231,7 +232,7 @@ final class _ShowPageState extends State<ShowPage> {
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
       decoration: BoxDecoration(color: brand.inkTile, borderRadius: BorderRadius.circular(12)),
       child: Row(children: [
-        const Icon(Icons.pause_circle_outline_rounded, size: 18, color: brand.accentLight),
+        const GlyphIcon(Glyphs.pauseCircle, size: 18, color: brand.accentLight),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -291,7 +292,7 @@ final class _ShowPageState extends State<ShowPage> {
         if (newest != null) PlayPill(episode: newest),
         if (own)
           SleeveCircle(
-            icon: Icons.add_rounded,
+            icon: Glyphs.plus,
             tooltip: 'Add videos',
             onPressed: () => Navigation.of(context).openSearch(youtube: true, into: feed?.id ?? OwnPodcast.show(show!).id),
           )
@@ -299,7 +300,7 @@ final class _ShowPageState extends State<ShowPage> {
           const SizedBox.shrink()
         else if (show.followed)
           SleeveCircle(
-            icon: Icons.check_rounded,
+            icon: Glyphs.check,
             tooltip: switch ((show.cloudFeedId, feed)) {
               (null, _) => show.isYouTube ? 'In Library · Remove' : 'Following · Unfollow',
               (_, null) => 'Following · Sign in to manage',
@@ -314,13 +315,13 @@ final class _ShowPageState extends State<ShowPage> {
           )
         else
           SleeveCircle(
-            icon: Icons.add_rounded,
+            icon: Glyphs.plus,
             tooltip: show.isYouTube ? 'Add to Library' : 'Follow',
             onPressed: () => s.podcasts.followShow(show),
           ),
         if (show?.refreshes ?? false)
           SleeveCircle(
-            icon: Icons.refresh_rounded,
+            icon: Glyphs.sync,
             tooltip: 'Check for new episodes',
             busy: refreshing,
             onPressed: () => unawaited(s.podcasts.refresh(show!)),
@@ -389,7 +390,7 @@ final class _ShowPageState extends State<ShowPage> {
         const MenuDivider(),
       ],
       if (own) ...[
-        MenuEntry('Change artwork', icon: Icons.image_outlined, onPressed: () {
+        MenuEntry('Change artwork', icon: Glyphs.image, onPressed: () {
           unawaited(feed != null ? _uploadArtwork(context, feed) : _pickArtwork(context, show!));
         }),
         const MenuDivider(),
@@ -406,27 +407,27 @@ final class _ShowPageState extends State<ShowPage> {
           )),
         ),
         if (feed.pageUrl case final url?) ...[
-          MenuEntry('Copy page link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, url, 'Page link copied.'))),
-          MenuEntry('Open page', icon: Icons.open_in_new_rounded, onPressed: () {
+          MenuEntry('Copy page link', icon: Glyphs.link, onPressed: () => unawaited(copyText(context, url, 'Page link copied.'))),
+          MenuEntry('Open page', icon: Glyphs.external, onPressed: () {
             unawaited(launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication));
           }),
         ],
         const MenuDivider(),
       ],
       if (show != null) ...[
-        MenuEntry('Mark all as played', icon: Icons.done_all_rounded, onPressed: () => s.library.setAllPlayed(show.id, true)),
-        MenuEntry('Add unplayed to Up Next', icon: Icons.playlist_add_rounded, onPressed: () {
+        MenuEntry('Mark all as played', icon: Glyphs.checkDouble, onPressed: () => s.library.setAllPlayed(show.id, true)),
+        MenuEntry('Add unplayed to Up Next', icon: Glyphs.queueAdd, onPressed: () {
           s.library.playLast([for (final e in s.library.episodes(show.id, filter: EpisodeFilter.unplayed, oldestFirst: true)) e.id]);
         }),
         if (show.kind == PodcastKind.rss && feed == null)
-          MenuEntry('Copy feed link', icon: Icons.link_rounded, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
+          MenuEntry('Copy feed link', icon: Glyphs.link, onPressed: () => unawaited(copyText(context, show.feedUrl, 'Feed link copied.'))),
       ],
       if (link case final link? when !own && (Uri.tryParse(link)?.hasScheme ?? false))
-        MenuEntry(youtube || feed?.source != null || (show?.fromYouTube ?? false) ? 'Open on YouTube' : 'Open website', icon: Icons.open_in_new_rounded, onPressed: () {
+        MenuEntry(youtube || feed?.source != null || (show?.fromYouTube ?? false) ? 'Open on YouTube' : 'Open website', icon: Glyphs.external, onPressed: () {
           unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication));
         }),
       if (feed != null) ...[
-        MenuEntry('Sync now', icon: Icons.sync_rounded, onPressed: s.feeds.loading ? null : s.feeds.syncNow),
+        MenuEntry('Sync now', icon: Glyphs.sync, onPressed: s.feeds.loading ? null : s.feeds.syncNow),
         const MenuDivider(),
         ...listenIn(context, feed, _apps),
       ],
@@ -434,7 +435,7 @@ final class _ShowPageState extends State<ShowPage> {
         const MenuDivider(),
         MenuEntry(
           own ? 'Delete podcast' : 'Remove',
-          icon: Icons.remove_circle_outline_rounded,
+          icon: Glyphs.minusCircle,
           danger: true,
           onPressed: () => unawaited(removeCloudFeed(context, feed)),
         ),
@@ -442,7 +443,7 @@ final class _ShowPageState extends State<ShowPage> {
         const MenuDivider(),
         MenuEntry(
           show.isOwn ? 'Delete podcast' : show.isYouTube ? 'Remove from Library' : 'Unfollow',
-          icon: Icons.remove_circle_outline_rounded,
+          icon: Glyphs.minusCircle,
           danger: true,
           onPressed: () => _unfollow(context, show),
         ),
@@ -458,7 +459,7 @@ final class _ShowPageState extends State<ShowPage> {
     final url = feed.pageUrl;
     return Wrap(crossAxisAlignment: WrapCrossAlignment.center, spacing: 8, runSpacing: 4, children: [
       Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(public ? Icons.public_rounded : Icons.lock_outline_rounded, size: 15, color: public ? brand.accentLight : brand.snowSoft),
+        GlyphIcon(public ? Glyphs.globe : Glyphs.lock, size: 15, color: public ? brand.accentLight : brand.snowSoft),
         const SizedBox(width: 8),
         Text(
           public ? 'Public: anyone with the link can listen on listenjar.com' : 'Private: no page on listenjar.com',
@@ -537,7 +538,7 @@ final class _ShowPageState extends State<ShowPage> {
             backgroundColor: WidgetStateProperty.fromMap({WidgetState.hovered: brand.inkTile, WidgetState.any: brand.inkTile.withAlpha(0)}),
           ),
           onPressed: () => setState(() => _oldestFirst = !oldestFirst),
-          icon: Icon(oldestFirst ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 16),
+          icon: GlyphIcon(oldestFirst ? Glyphs.arrowUp : Glyphs.arrowDown, size: 16),
           label: Text(show.serial ? (oldestFirst ? 'First' : 'Last') : (oldestFirst ? 'Oldest' : 'Newest')),
         ),
       );
@@ -582,7 +583,7 @@ final class _ShowPageState extends State<ShowPage> {
             shape: StadiumBorder(side: BorderSide(color: focused ? brand.accentLight.withValues(alpha: 0.7) : brand.inkLine, width: focused ? 1.5 : 1)),
           ),
           child: Row(children: [
-            Icon(Icons.search_rounded, size: 18, color: focused ? brand.accentLight : brand.snowSoft),
+            GlyphIcon(Glyphs.search, size: 18, color: focused ? brand.accentLight : brand.snowSoft),
             const SizedBox(width: 8),
             Expanded(
               child: CallbackShortcuts(
@@ -615,7 +616,7 @@ final class _ShowPageState extends State<ShowPage> {
                   clear();
                   _queryFocus.requestFocus();
                 },
-                icon: const Icon(Icons.close_rounded, color: brand.snowSoft),
+                icon: const GlyphIcon(Glyphs.close, color: brand.snowSoft),
               ))
             else
               const SizedBox(width: 10),

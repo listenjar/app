@@ -203,6 +203,8 @@ The app has three depths, from the bottom: the page (paper, or a sleeve with its
 
 The core's corners, plus the shapes glass takes. Every glass control is a full circle (one icon) or a full pill (several icons, or the mini player). The title bar is the one square-cornered piece of glass: it spans the screen edge to edge. Artwork is square, with corners by size (12px in rows, 18px in shelves and wide headers, none in the full-bleed hero). The hero's lower edge isn't a line: its bottom 25% fades into the ink.
 
+**Icons.** The core's one drawn set and nothing else: a 24 grid, 1.8 round strokes in the icon colour (`Glyphs` in marks.dart, drawn from the website's Icon.tsx paths, with the app's additions in the same hand). Never Material's icon font: its filled, heavier shapes are what made the app look unlike the website. Play, pause and the more dots are filled shapes stroked at the same 1.8, so their corners round alike. A skip button carries its seconds inside the arc. Share is the one icon that follows the OS (a box and arrow on Apple's, three joined dots elsewhere), since it opens the OS's own sheet. Settings is a gear, never sliders: sliders read as a filter.
+
 ## Components
 
 ### Floating controls (glass)
@@ -269,6 +271,7 @@ Wide windows only. A glass panel 216px wide, inset 10px from the window's top, l
 
 ### Paper pages
 Home, Library, Search, Up Next, Downloads and Settings keep the core's paper surfaces, panels and rows, with two changes: artwork leads wherever a show appears (shelves of 160px squares; 56px in rows), and a page's large title at the top folds into the light-glass title bar on scroll, the same way a sleeve does.
+- **Title actions on a phone:** at most two icons beside the large title, held together in one 44px white pill with the paper hairline; the rest go in its More menu. Library's pill is New podcast and More, and More holds the ways to Downloads (counting downloads under way, as the sidebar does) and Settings, then OPML. Wide windows reach those through the sidebar, so Library keeps its labelled New podcast button there.
 
 ### Search
 - **Source switch:** Podcasts and YouTube as one 44px segmented pill under the field: a paper-deep track, the chosen source on a white thumb that slides between them (300ms, ease-out-expo; instant with reduced motion). The chosen source's icon is periwinkle, its label the primary colour; the other is soft. YouTube is drawn as the app's own mark (`YouTubeMark`: a rounded screen with the play triangle cut out), in periwinkle or soft, never YouTube's red.

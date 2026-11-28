@@ -18,6 +18,7 @@ import 'downloads_page.dart';
 import 'home_page.dart' show unplayedLabel;
 import 'library.dart';
 import 'links.dart' show kindLabel;
+import 'marks.dart';
 import 'menu.dart';
 import 'settings_page.dart';
 import 'shell.dart';
@@ -50,27 +51,12 @@ final class LibraryPage extends StatelessWidget {
               TextButton.icon(
                 style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
                 onPressed: () => unawaited(createPodcast(context)),
-                icon: const Icon(Icons.add_rounded, size: 18),
+                icon: const GlyphIcon(Glyphs.plus, size: 18),
                 label: const Text('New podcast'),
               )
-            else ...[
-              IconButton(
-                tooltip: 'New podcast',
-                onPressed: () => unawaited(createPodcast(context)),
-                icon: const Icon(Icons.add_rounded, color: brand.fgSoft),
-              ),
-              IconButton(
-                tooltip: 'Downloads',
-                onPressed: () => Navigator.of(context).push(pageRoute(const DownloadsPage(pushed: true))),
-                icon: const Icon(Icons.download_rounded, color: brand.fgSoft),
-              ),
-              IconButton(
-                tooltip: 'Settings',
-                onPressed: () => Navigator.of(context).push(pageRoute(const SettingsPage(pushed: true))),
-                icon: const Icon(Icons.tune_rounded, color: brand.fgSoft),
-              ),
-            ],
-            const OpmlMenu(),
+            else
+              const _PhoneActions(),
+            if (wide) const OpmlMenu(),
           ]),
           if (s.account.user != null && s.feeds.storageFull) ...[const SizedBox(height: 8), const StorageFullNotice(), const SizedBox(height: 16)],
           if (s.feeds.feedsError case final error? when s.account.user != null) ...[
@@ -135,7 +121,7 @@ final class LibraryPage extends StatelessWidget {
       artworkUrl: show.artworkUrl,
       size: size,
       count: unplayed,
-      badge: show.isYouTube ? (Icons.smart_display_outlined, 'YouTube') : null,
+      badge: show.isYouTube ? (Glyphs.video, 'YouTube') : null,
       semantics: '${show.title}${unplayed.isEmpty ? '' : ', $unplayed unplayed'}${status == null ? '' : ', ${status.$1}'}',
       subtitle: switch (status) {
         final st? => st,
@@ -208,7 +194,7 @@ final class _ShowTile extends StatefulWidget {
   final String count;
 
   /// A single YouTube video kept as a show, rather than a podcast.
-  final (IconData, String)? badge;
+  final (Glyph, String)? badge;
   final String semantics;
 
   /// The line under the title, and whether it says something went wrong.
@@ -280,7 +266,7 @@ final class _ShowTileState extends State<_ShowTile> {
                           padding: const EdgeInsets.fromLTRB(7, 3, 8, 3),
                           decoration: BoxDecoration(color: const Color(0xD90A0B0F), borderRadius: BorderRadius.circular(99)),
                           child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(icon, size: 12, color: brand.snow),
+                            GlyphIcon(icon, size: 12, color: brand.snow),
                             const SizedBox(width: 4),
                             Text(label, style: text.labelSmall!.copyWith(color: brand.snow, fontSize: 11, fontWeight: FontWeight.w600)),
                           ]),
@@ -321,12 +307,58 @@ final class OpmlMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Dropdown(
     align: MenuAlign.end,
-    items: [
-      MenuEntry('Import OPML…', icon: Icons.file_upload_outlined, onPressed: () => unawaited(importOpml(context))),
-      MenuEntry('Export OPML…', icon: Icons.file_download_outlined, onPressed: () => unawaited(exportOpml(context))),
-    ],
+    items: _opmlEntries(context),
     builder: (context, menu) => MoreButton(menu: menu, tooltip: 'Import or export'),
   );
+}
+
+List<Widget> _opmlEntries(BuildContext context) => [
+  MenuEntry('Import OPML…', icon: Glyphs.upload, onPressed: () => unawaited(importOpml(context))),
+  MenuEntry('Export OPML…', icon: Glyphs.download, onPressed: () => unawaited(exportOpml(context))),
+];
+
+/// Library's actions on a phone, where there's no sidebar: one white pill
+/// holding New podcast and More. More holds the ways to Downloads and
+/// Settings (counting downloads under way, as the sidebar does), then OPML.
+final class _PhoneActions extends StatelessWidget {
+  const _PhoneActions();
+
+  @override
+  Widget build(BuildContext context) {
+    final downloading = Services.of(context).library.unfinishedDownloads().length;
+    void open(Widget page) => unawaited(Navigator.of(context).push(pageRoute(page)));
+    return DecoratedBox(
+      decoration: const ShapeDecoration(
+        color: brand.white,
+        shape: StadiumBorder(side: BorderSide(color: brand.line)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: IconTheme.merge(
+          data: const IconThemeData(color: brand.fg, size: 22),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            IconButton(
+              tooltip: 'New podcast',
+              constraints: const BoxConstraints.tightFor(width: 42, height: 44),
+              padding: EdgeInsets.zero,
+              onPressed: () => unawaited(createPodcast(context)),
+              icon: const GlyphIcon(Glyphs.plus),
+            ),
+            Dropdown(
+              align: MenuAlign.end,
+              items: [
+                MenuEntry('Downloads', icon: Glyphs.download, count: downloading > 0 ? '$downloading' : null, onPressed: () => open(const DownloadsPage(pushed: true))),
+                MenuEntry('Settings', icon: Glyphs.gear, onPressed: () => open(const SettingsPage(pushed: true))),
+                const MenuDivider(),
+                ..._opmlEntries(context),
+              ],
+              builder: (context, menu) => MoreButton(menu: menu, tooltip: 'More', compact: true),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 const _opml = XTypeGroup(label: 'OPML', extensions: ['opml', 'xml'], uniformTypeIdentifiers: ['public.xml', 'public.data'], mimeTypes: ['text/x-opml', 'text/xml', 'application/xml']);

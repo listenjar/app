@@ -15,6 +15,7 @@ import 'cloud.dart' show feedStatus;
 import 'feeds.dart';
 import 'library.dart' show PodcastEpisode, videoThumbnail;
 import 'links.dart' show canonicalSourceUrl, parseYouTubeLink;
+import 'marks.dart';
 import 'menu.dart';
 import 'podcasts.dart';
 import 'shared_links.dart' show addVideoToOwnPodcast, ownPodcasts;
@@ -278,7 +279,7 @@ final class OnTheWay extends StatelessWidget {
               tooltip: 'Remove episode',
               visualDensity: VisualDensity.compact,
               onPressed: removing ? null : () => unawaited(episodes.remove(episode)),
-              icon: Icon(Icons.close_rounded, size: 17, color: p.fgFaint),
+              icon: GlyphIcon(Glyphs.close, size: 17, color: p.fgFaint),
             ),
           ],
         ]),
@@ -319,14 +320,14 @@ final class AddToPodcast extends StatelessWidget {
     items: [
       const MenuHeader('Add to a podcast of yours'),
       for (final own in ownPodcasts(context))
-        MenuEntry(own.title, icon: Icons.podcasts_rounded, onPressed: () => unawaited(addVideoToOwnPodcast(context, url, own, title: feed.title))),
+        MenuEntry(own.title, icon: Glyphs.podcast, onPressed: () => unawaited(addVideoToOwnPodcast(context, url, own, title: feed.title))),
       if (ownPodcasts(context).isNotEmpty) const MenuDivider(),
-      MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(addVideoToOwnPodcast(context, url, null, title: feed.title))),
+      MenuEntry('New podcast…', icon: Glyphs.plus, onPressed: () => unawaited(addVideoToOwnPodcast(context, url, null, title: feed.title))),
     ],
     builder: (context, menu) => TextButton.icon(
       style: brand.button(brand.Tone.quietOnInk, brand.ButtonSize.sm),
       onPressed: menu.toggle,
-      icon: const Icon(Icons.playlist_add_rounded, size: 18),
+      icon: const GlyphIcon(Glyphs.queueAdd, size: 18),
       label: const Text('Add to a podcast'),
     ),
   );

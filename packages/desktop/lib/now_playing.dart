@@ -12,6 +12,7 @@ import 'package:material_ui/material_ui.dart';
 import 'backend/api.dart' show Plan;
 import 'chapters.dart';
 import 'library.dart';
+import 'marks.dart';
 import 'menu.dart';
 import 'player.dart';
 import 'shared_links.dart' show addVideoToOwnPodcast, ownPodcasts;
@@ -186,16 +187,11 @@ final class _SwipePhysics extends ScrollPhysics {
 }
 
 /// The icon for a skip of [d], when Material has one with that number.
-IconData _skipIcon(Duration d, {required bool forward}) => switch ((d.inSeconds, forward)) {
-  (5, false) => Icons.replay_5_rounded,
-  (10, false) => Icons.replay_10_rounded,
-  (30, false) => Icons.replay_30_rounded,
-  (5, true) => Icons.forward_5_rounded,
-  (10, true) => Icons.forward_10_rounded,
-  (30, true) => Icons.forward_30_rounded,
-  (_, false) => Icons.replay_rounded,
-  (_, true) => Icons.forward_rounded,
-};
+Glyph _skipIcon(Duration d, {required bool forward}) {
+  final glyph = forward ? Glyphs.forward : Glyphs.rewind;
+  final s = d.inSeconds;
+  return s > 0 && s < 100 ? glyph.labelled('$s') : glyph;
+}
 
 String speedLabel(double speed) {
   final text = speed.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
@@ -255,7 +251,7 @@ final class MiniPlayer extends StatelessWidget {
           const SizedBox(width: 18),
           _SpeedButton(player: player),
           _SleepButton(player: player),
-          _inkIcon(Icons.keyboard_arrow_up_rounded, 'Now Playing', () async => open()),
+          _inkIcon(Glyphs.chevronUp, 'Now Playing', () async => open()),
         ])
       : Row(children: [
           Artwork(url: e.artwork, title: e.podcastTitle, size: 44, radius: 9),
@@ -369,11 +365,11 @@ final class _LiftState extends State<_Lift> with SingleTickerProviderStateMixin 
   );
 }
 
-Widget _inkIcon(IconData icon, String tip, Future<void> Function() onPressed, {double size = 24}) => IconButton(
+Widget _inkIcon(Glyph icon, String tip, Future<void> Function() onPressed, {double size = 24}) => IconButton(
   tooltip: tip,
   onPressed: () => unawaited(onPressed()),
   style: IconButton.styleFrom(foregroundColor: brand.snow, hoverColor: brand.inkTile),
-  icon: Icon(icon, size: size),
+  icon: GlyphIcon(icon, size: size),
 );
 
 final class _InkPlay extends StatelessWidget {
@@ -393,7 +389,7 @@ final class _InkPlay extends StatelessWidget {
         onPressed: () => unawaited(player.toggle()),
         icon: player.loading
           ? SizedBox.square(dimension: size * 0.4, child: const CircularProgressIndicator(strokeWidth: 2.2, color: brand.ink))
-          : Icon(player.playing ? Icons.pause_rounded : Icons.play_arrow_rounded, size: size * 0.6),
+          : GlyphIcon(player.playing ? Glyphs.pause : Glyphs.play, size: size * 0.6),
       ),
     ),
   );
@@ -675,7 +671,7 @@ final class NowPlaying extends StatelessWidget {
         tooltip: 'Close (Esc)',
         onPressed: () => Navigator.of(context).maybePop(),
         style: IconButton.styleFrom(foregroundColor: brand.snow, hoverColor: brand.inkTile),
-        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+        icon: const GlyphIcon(Glyphs.chevronDown, size: 30),
       ),
       const Spacer(),
       if (e.youtubeId != null) _AddVideoButton(episode: e),
@@ -686,7 +682,7 @@ final class NowPlaying extends StatelessWidget {
             tooltip: e.youtubeId == null ? 'Share' : 'Share YouTube link',
             onPressed: () => unawaited(shareLink(context, url, title: e.title)),
             style: IconButton.styleFrom(foregroundColor: brand.snow, hoverColor: brand.inkTile),
-            icon: Icon(Icons.adaptive.share, size: 22),
+            icon: GlyphIcon(Glyphs.share, size: 22),
           ),
         ),
       EpisodeMenu(episode: e, showLink: true, tone: MenuTone.ink),
@@ -968,24 +964,24 @@ final class _ChapterNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final i = chapterAt(chapters, at);
     final style = Theme.of(context).textTheme.labelLarge!.copyWith(color: brand.snow, fontSize: 13);
-    Widget skip(IconData icon, String tip, Future<void> Function()? onPressed) => IconButton(
+    Widget skip(Glyph icon, String tip, Future<void> Function()? onPressed) => IconButton(
       tooltip: tip,
       onPressed: onPressed == null ? null : () => unawaited(onPressed()),
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 32, height: 32),
       style: IconButton.styleFrom(foregroundColor: brand.snowSoft, disabledForegroundColor: brand.inkLine, hoverColor: brand.inkTile),
-      icon: Icon(icon, size: 20),
+      icon: GlyphIcon(icon, size: 20),
     );
     return Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-      skip(Icons.chevron_left_rounded, 'Previous chapter', i < 0 ? null : player.previousChapter),
+      skip(Glyphs.chevronLeft, 'Previous chapter', i < 0 ? null : player.previousChapter),
       Flexible(
         child: Semantics(
           label: i < 0 ? null : 'Chapter ${i + 1} of ${chapters.length}',
           child: Text(i < 0 ? '' : chapters[i].title, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: style),
         ),
       ),
-      skip(Icons.chevron_right_rounded, 'Next chapter', i + 1 < chapters.length ? player.nextChapter : null),
+      skip(Glyphs.chevronRight, 'Next chapter', i + 1 < chapters.length ? player.nextChapter : null),
     ]);
   }
 }
@@ -1205,7 +1201,7 @@ final class _SidePanelState extends State<_SidePanel> {
 }
 
 /// The mini player's speed and sleep buttons: an icon and a label, no ground.
-Widget _pill(BuildContext context, {required IconData icon, required String label, required bool active, required VoidCallback onTap}) => TextButton(
+Widget _pill(BuildContext context, {required Glyph icon, required String label, required bool active, required VoidCallback onTap}) => TextButton(
   onPressed: onTap,
   style: TextButton.styleFrom(
     foregroundColor: active ? brand.accentLight : brand.snow,
@@ -1214,7 +1210,7 @@ Widget _pill(BuildContext context, {required IconData icon, required String labe
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     textStyle: Theme.of(context).textTheme.labelLarge!.copyWith(fontSize: 13, fontFeatures: const [FontFeature.tabularFigures()]),
   ),
-  child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 18), const SizedBox(width: 6), Text(label)]),
+  child: Row(mainAxisSize: MainAxisSize.min, children: [GlyphIcon(icon, size: 18), const SizedBox(width: 6), Text(label)]),
 );
 
 /// A control at either end of Now Playing's transport row: as tall as the
@@ -1243,10 +1239,10 @@ Widget _sideControl(BuildContext context, {required Widget child, String? captio
 
 /// A button in Now Playing's top bar: an icon, with a [count] after it when
 /// there is one, or a spinner while [busy].
-Widget _barButton(BuildContext context, {required IconData icon, required String tip, String? count, bool busy = false, required VoidCallback onTap}) {
+Widget _barButton(BuildContext context, {required Glyph icon, required String tip, String? count, bool busy = false, required VoidCallback onTap}) {
   final glyph = busy
     ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: brand.snow))
-    : Icon(icon, size: 24);
+    : GlyphIcon(icon, size: 24);
   return Tooltip(
     message: tip,
     child: Semantics(
@@ -1295,7 +1291,7 @@ final class _SpeedButton extends StatelessWidget {
           ? _sideControl(context, child: Text(speedLabel(speed)), active: (speed - 1).abs() > 0.01, onTap: menu.toggle)
           : _pill(
           context,
-          icon: Icons.speed_rounded,
+          icon: Glyphs.gauge,
           label: speedLabel(speed),
           active: (speed - 1).abs() > 0.01,
           onTap: menu.toggle,
@@ -1330,7 +1326,7 @@ final class _SleepButtonState extends State<_SleepButton> {
       tone: MenuTone.ink,
       items: [
         if (sleep is SleepAt) ...[
-          MenuEntry('5 more minutes', icon: Icons.more_time_rounded, onPressed: () => player.extendSleep(const Duration(minutes: 5))),
+          MenuEntry('5 more minutes', icon: Glyphs.clock, onPressed: () => player.extendSleep(const Duration(minutes: 5))),
           const MenuDivider(),
         ],
         const MenuHeader('Stop playing'),
@@ -1344,7 +1340,7 @@ final class _SleepButtonState extends State<_SleepButton> {
         MenuEntry('At the end of this episode', checked: sleep is SleepAtEnd, onPressed: () => player.setSleep(const SleepAtEnd())),
         if (sleep != null) ...[
           const MenuDivider(),
-          MenuEntry('Turn off', icon: Icons.timer_off_outlined, onPressed: () => player.setSleep(null)),
+          MenuEntry('Turn off', icon: Glyphs.power, onPressed: () => player.setSleep(null)),
         ],
       ],
       builder: (context, menu) => Tooltip(
@@ -1352,7 +1348,7 @@ final class _SleepButtonState extends State<_SleepButton> {
         child: widget.inline
           ? _sideControl(
               context,
-              child: Icon(sleep == null ? Icons.bedtime_outlined : Icons.bedtime_rounded, size: sleep == null ? 26 : 20),
+              child: GlyphIcon(sleep == null ? Glyphs.moon : Glyphs.moonFilled, size: sleep == null ? 26 : 20),
               caption: switch (sleep) {
                 SleepAt() => label,
                 SleepAtEnd() => 'End',
@@ -1363,7 +1359,7 @@ final class _SleepButtonState extends State<_SleepButton> {
             )
           : _pill(
           context,
-          icon: sleep == null ? Icons.bedtime_outlined : Icons.bedtime_rounded,
+          icon: sleep == null ? Glyphs.moon : Glyphs.moonFilled,
           label: label,
           active: sleep != null,
           onTap: menu.toggle,
@@ -1382,7 +1378,7 @@ final class _UpNextButton extends StatelessWidget {
     final count = library.queue.length;
     return _barButton(
       context,
-      icon: Icons.queue_music_rounded,
+      icon: Glyphs.queue,
       tip: count == 0 ? 'Up Next' : 'Up Next · $count',
       count: count == 0 ? null : '$count',
       onTap: () => showModalBottomSheet<void>(
@@ -1472,7 +1468,7 @@ final class _AddVideoButtonState extends State<_AddVideoButton> {
         items: [
           MenuEntry(
             kept ? 'In your Library' : 'Add to Library',
-            icon: Icons.library_add_outlined,
+            icon: Glyphs.save,
             checked: kept ? true : null,
             onPressed: kept || show == null
               ? null
@@ -1487,20 +1483,20 @@ final class _AddVideoButtonState extends State<_AddVideoButton> {
             for (final own in ownPodcasts(context))
               MenuEntry(
                 own.title,
-                icon: Icons.podcasts_rounded,
+                icon: Glyphs.podcast,
                 onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, own, title: e.title))),
               ),
-            MenuEntry('New podcast…', icon: Icons.add_rounded, onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null, title: e.title)))),
+            MenuEntry('New podcast…', icon: Glyphs.plus, onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null, title: e.title)))),
           ] else
             MenuEntry(
               'Add to a podcast of yours…',
-              icon: Icons.playlist_add_rounded,
+              icon: Glyphs.queueAdd,
               onPressed: () => unawaited(_run((c) => addVideoToOwnPodcast(c, url, null))),
             ),
         ],
         builder: (context, menu) => _barButton(
           context,
-          icon: kept ? Icons.library_add_check_outlined : Icons.library_add_outlined,
+          icon: kept ? Glyphs.saved : Glyphs.save,
           tip: _busy ? 'Adding…' : 'Keep this video',
           busy: _busy,
           onTap: () {
@@ -1580,14 +1576,14 @@ final class UpNextList extends StatelessWidget {
                 alignment: Alignment.centerRight,
                 padding: const EdgeInsets.only(right: 24),
                 decoration: BoxDecoration(color: const Color(0x14D4483F), borderRadius: BorderRadius.circular(14)),
-                child: const Icon(Icons.playlist_remove_rounded, color: brand.danger),
+                child: const GlyphIcon(Glyphs.queueRemove, color: brand.danger),
               ),
               child: Row(children: [
                 ReorderableDragStartListener(
                   index: i,
                   child: const MouseRegion(
                     cursor: SystemMouseCursors.grab,
-                    child: Padding(padding: EdgeInsets.all(8), child: Icon(Icons.drag_indicator_rounded, color: brand.fgFaint)),
+                    child: Padding(padding: EdgeInsets.all(8), child: GlyphIcon(Glyphs.drag, color: brand.fgFaint)),
                   ),
                 ),
                 Expanded(
@@ -1597,7 +1593,7 @@ final class UpNextList extends StatelessWidget {
                     trailing: IconButton(
                       tooltip: 'Remove from Up Next',
                       onPressed: () => library.dequeue(e.id),
-                      icon: const Icon(Icons.close_rounded, size: 20, color: brand.fgSoft),
+                      icon: const GlyphIcon(Glyphs.close, size: 20, color: brand.fgSoft),
                     ),
                   ),
                 ),

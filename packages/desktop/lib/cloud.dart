@@ -17,6 +17,7 @@ import 'package:material_ui/material_ui.dart';
 import 'account.dart';
 import 'backend/api.dart';
 import 'feeds.dart';
+import 'marks.dart';
 import 'menu.dart';
 import 'net.dart';
 import 'plans.dart';
@@ -300,13 +301,13 @@ final class _AccountPanelState extends State<AccountPanel> {
           TextButton.icon(
             style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
             onPressed: () => manageBilling(context),
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            icon: const GlyphIcon(Glyphs.external, size: 16),
             label: const Text('Manage plan'),
           ),
         TextButton.icon(
           style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
           onPressed: s.feeds.loading ? null : s.feeds.syncNow,
-          icon: const Icon(Icons.sync_rounded, size: 16),
+          icon: const GlyphIcon(Glyphs.sync, size: 16),
           label: const Text('Sync now'),
         ),
         TextButton(
@@ -323,7 +324,7 @@ final class _AccountPanelState extends State<AccountPanel> {
         TextButton.icon(
           style: _dangerQuiet,
           onPressed: () => unawaited(deleteAccount(context)),
-          icon: const Icon(Icons.delete_outline_rounded, size: 16),
+          icon: const GlyphIcon(Glyphs.trash, size: 16),
           label: const Text('Delete account…'),
         ),
       ]),

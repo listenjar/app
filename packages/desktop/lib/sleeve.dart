@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'library.dart';
+import 'marks.dart';
 import 'menu.dart';
 import 'shell.dart' show Shown, wideWidth;
 import 'theme.dart' as brand;
@@ -445,7 +446,7 @@ final class _SleevePageState extends State<SleevePage> with TickerProviderStateM
                 glass: 1 - fold,
                 tint: glass,
                 shape: const CircleBorder(),
-                child: GlassIcon(icon: Icons.chevron_left_rounded, tooltip: 'Back', onPressed: () => Navigator.of(context).maybePop()),
+                child: GlassIcon(icon: Glyphs.chevronLeft, tooltip: 'Back', onPressed: () => Navigator.of(context).maybePop()),
               ),
             ),
           if (widget.actions.isNotEmpty)
@@ -563,7 +564,7 @@ final class _GlassControl extends StatelessWidget {
 /// pointer.
 final class GlassIcon extends StatelessWidget {
   const GlassIcon({super.key, required this.icon, required this.tooltip, required this.onPressed, this.size = 24});
-  final IconData icon;
+  final Glyph icon;
   final String tooltip;
   final VoidCallback? onPressed;
   final double size;
@@ -576,7 +577,7 @@ final class GlassIcon extends StatelessWidget {
       onPressed: onPressed,
       padding: EdgeInsets.zero,
       style: IconButton.styleFrom(foregroundColor: brand.snow, hoverColor: brand.inkTile, highlightColor: brand.inkTile),
-      icon: Icon(icon, size: size),
+      icon: GlyphIcon(icon, size: size),
     ),
   );
 }
@@ -586,7 +587,7 @@ Widget glassMore(List<Widget> items) => Dropdown(
   tone: MenuTone.ink,
   align: MenuAlign.end,
   items: items,
-  builder: (context, menu) => GlassIcon(icon: Icons.more_horiz_rounded, tooltip: 'More', onPressed: menu.toggle),
+  builder: (context, menu) => GlassIcon(icon: Glyphs.more, tooltip: 'More', onPressed: menu.toggle),
 );
 
 // The sleeve's actions.
@@ -680,7 +681,7 @@ final class _PlayPillState extends State<PlayPill> with SingleTickerProviderStat
                                   child: CircularProgressIndicator(strokeWidth: 2, color: brand.white),
                                 )
                               : played
-                                ? const Icon(Icons.check_rounded, color: brand.white)
+                                ? const GlyphIcon(Glyphs.check, color: brand.white)
                                 : AnimatedIcon(icon: AnimatedIcons.play_pause, progress: _icon, color: brand.white),
                           ),
                           const SizedBox(width: 8),
@@ -710,7 +711,7 @@ final class _PlayPillState extends State<PlayPill> with SingleTickerProviderStat
 /// faint circle with a light-periwinkle icon.
 final class SleeveCircle extends StatelessWidget {
   const SleeveCircle({super.key, required this.icon, required this.tooltip, required this.onPressed, this.busy = false});
-  final IconData icon;
+  final Glyph icon;
   final String tooltip;
   final VoidCallback? onPressed;
   final bool busy;
@@ -731,7 +732,7 @@ final class SleeveCircle extends StatelessWidget {
       ),
       icon: busy
         ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: brand.accentLight))
-        : Icon(icon, size: 22),
+        : GlyphIcon(icon, size: 22),
     ),
   );
 }

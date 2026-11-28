@@ -20,6 +20,7 @@ import 'directory.dart';
 import 'downloads.dart';
 import 'feeds.dart';
 import 'library.dart';
+import 'marks.dart';
 import 'menu.dart';
 import 'player.dart';
 import 'shared_links.dart' show openWebLink;
@@ -310,7 +311,7 @@ final class PlayButton extends StatelessWidget {
                     dimension: size * 0.4,
                     child: CircularProgressIndicator(strokeWidth: 2, color: foreground),
                   )
-                : Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, size: size * 0.55),
+                : GlyphIcon(playing ? Glyphs.pause : Glyphs.play, size: size * 0.55),
             ),
           ),
         );
@@ -366,7 +367,7 @@ final class DownloadButton extends StatelessWidget {
     final (tip, icon, action) = switch (episode.downloadState) {
       DownloadState.none => (
         'Download',
-        Icon(Icons.arrow_circle_down_rounded, size: 22, color: p.fgSoft),
+        GlyphIcon(Glyphs.downloadCircle, size: 22, color: p.fgSoft),
         () => downloads.download(episode),
       ),
       DownloadState.queued => (
@@ -389,12 +390,12 @@ final class DownloadButton extends StatelessWidget {
       ),
       DownloadState.done => (
         'Downloaded · Delete download',
-        Icon(Icons.check_circle_rounded, size: 22, color: p.ok),
+        GlyphIcon(Glyphs.checkCircle, size: 22, color: p.ok),
         () => downloads.delete(episode),
       ),
       DownloadState.failed => (
         '${episode.downloadError ?? 'The download failed'} · Try again',
-        Icon(Icons.error_outline_rounded, size: 22, color: p.danger),
+        GlyphIcon(Glyphs.alert, size: 22, color: p.danger),
         () => downloads.download(episode),
       ),
     };
@@ -417,16 +418,16 @@ List<Widget> episodeActions(BuildContext context, PodcastEpisode e, {bool showLi
   final current = s.player.current?.id == e.id;
   return [
     if (!current) ...[
-      MenuEntry('Play next', icon: Icons.playlist_play_rounded, onPressed: () => s.library.playNext(e.id)),
+      MenuEntry('Play next', icon: Glyphs.queue, onPressed: () => s.library.playNext(e.id)),
       if (queued)
-        MenuEntry('Remove from Up Next', icon: Icons.playlist_remove_rounded, onPressed: () => s.library.dequeue(e.id))
+        MenuEntry('Remove from Up Next', icon: Glyphs.queueRemove, onPressed: () => s.library.dequeue(e.id))
       else
-        MenuEntry('Play last', icon: Icons.playlist_add_rounded, onPressed: () => s.library.playLast([e.id])),
+        MenuEntry('Play last', icon: Glyphs.queueAdd, onPressed: () => s.library.playLast([e.id])),
     ],
     if (e.played)
-      MenuEntry('Mark as unplayed', icon: Icons.replay_rounded, onPressed: () => s.library.setPlayed([e.id], false))
+      MenuEntry('Mark as unplayed', icon: Glyphs.rewind, onPressed: () => s.library.setPlayed([e.id], false))
     else
-      MenuEntry('Mark as played', icon: Icons.done_all_rounded, onPressed: () {
+      MenuEntry('Mark as played', icon: Glyphs.checkDouble, onPressed: () {
         if (current) {
           unawaited(s.player.markPlayedAndNext());
         } else {
@@ -434,15 +435,15 @@ List<Widget> episodeActions(BuildContext context, PodcastEpisode e, {bool showLi
         }
       }),
     if (e.downloadState == DownloadState.none || e.downloadState == DownloadState.failed)
-      MenuEntry('Download', icon: Icons.download_rounded, onPressed: () => unawaited(s.downloads.download(e)))
+      MenuEntry('Download', icon: Glyphs.download, onPressed: () => unawaited(s.downloads.download(e)))
     else
-      MenuEntry('Delete download', icon: Icons.delete_outline_rounded, danger: true, onPressed: () => unawaited(s.downloads.delete(e))),
-    if (showLink) MenuEntry('Go to show', icon: Icons.podcasts_rounded, onPressed: () => Navigation.of(context).openShow(e.podcastId)),
-    if (episodeUrl(e) case final url?) MenuEntry('Share…', icon: Icons.adaptive.share, onPressed: () => unawaited(shareLink(context, url, title: e.title))),
+      MenuEntry('Delete download', icon: Glyphs.trash, danger: true, onPressed: () => unawaited(s.downloads.delete(e))),
+    if (showLink) MenuEntry('Go to show', icon: Glyphs.podcast, onPressed: () => Navigation.of(context).openShow(e.podcastId)),
+    if (episodeUrl(e) case final url?) MenuEntry('Share…', icon: Glyphs.share, onPressed: () => unawaited(shareLink(context, url, title: e.title))),
     if (e.link case final link? when Uri.tryParse(link)?.hasScheme ?? false)
       MenuEntry(
         e.videoId == null ? 'Open episode page' : 'Open on YouTube',
-        icon: e.videoId == null ? Icons.open_in_new_rounded : Icons.smart_display_outlined,
+        icon: e.videoId == null ? Glyphs.external : Glyphs.video,
         onPressed: () => unawaited(launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication)),
       ),
   ];
@@ -688,7 +689,7 @@ Widget problem(BuildContext context, String message, [Object? error]) => Tooltip
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(color: p.danger.withValues(alpha: p.onInk ? 0.12 : 0.08), borderRadius: BorderRadius.circular(12)),
       child: Row(children: [
-        Icon(Icons.error_outline_rounded, size: 18, color: p.danger),
+        GlyphIcon(Glyphs.alert, size: 18, color: p.danger),
         const SizedBox(width: 10),
         Expanded(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: p.fg))),
       ]),
@@ -705,7 +706,7 @@ final class OfflineLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = brand.Surface.of(context);
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.cloud_off_rounded, size: 15, color: p.fgFaint),
+      GlyphIcon(Glyphs.cloudOff, size: 15, color: p.fgFaint),
       const SizedBox(width: 8),
       Flexible(child: Text(message, style: Theme.of(context).textTheme.bodySmall!.copyWith(color: p.fgSoft))),
     ]);

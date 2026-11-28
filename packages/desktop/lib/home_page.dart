@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import 'library.dart';
+import 'marks.dart';
 import 'shell.dart';
 import 'theme.dart' as brand;
 import 'ui.dart';
@@ -79,7 +80,7 @@ final class _RefreshButton extends StatelessWidget {
       style: IconButton.styleFrom(hoverColor: brand.paperDeep),
       icon: refreshing
         ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: brand.accent))
-        : const Icon(Icons.refresh_rounded, color: brand.fgSoft),
+        : const GlyphIcon(Glyphs.sync, color: brand.fgSoft),
     ),
   );
 }
@@ -111,14 +112,14 @@ final class _Welcome extends StatelessWidget {
             child: TextButton.icon(
               style: brand.button(brand.Tone.accent),
               onPressed: () => navigation.openSearch(),
-              icon: const Icon(Icons.search_rounded, size: 20),
+              icon: const GlyphIcon(Glyphs.search, size: 20),
               label: const Text('Find a podcast'),
             ),
           ),
           TextButton.icon(
             style: brand.button(brand.Tone.quiet),
             onPressed: () => navigation.openSearch(youtube: true),
-            icon: const Icon(Icons.smart_display_outlined, size: 20),
+            icon: const GlyphIcon(Glyphs.video, size: 20),
             label: const Text('Search YouTube'),
           ),
         ]),

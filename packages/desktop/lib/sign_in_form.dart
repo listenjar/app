@@ -380,7 +380,7 @@ final class _SignInFormState extends State<SignInForm> {
             suffix: IconButton(
               tooltip: _showPassword ? 'Hide password' : 'Show password',
               onPressed: () => setState(() => _showPassword = !_showPassword),
-              icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20, color: brand.fgSoft),
+              icon: GlyphIcon(_showPassword ? Glyphs.eyeOff : Glyphs.eye, size: 20, color: brand.fgSoft),
             ),
           ),
         ],

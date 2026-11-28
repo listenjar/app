@@ -8,6 +8,7 @@ import 'package:material_ui/material_ui.dart';
 import 'cloud.dart' show AccountPanel;
 import 'library.dart';
 import 'library_page.dart' show exportOpml, importOpml;
+import 'marks.dart';
 import 'menu.dart';
 import 'now_playing.dart' show speedLabel;
 import 'player.dart' show speeds;
@@ -134,7 +135,7 @@ final class SettingsPage extends StatelessWidget {
     settingChoice(context, title, null, value, options, label, onChanged);
 
   Widget _action(BuildContext context, String title, String body, VoidCallback onTap) =>
-    settingRow(context, title, body, const Icon(Icons.chevron_right_rounded, color: brand.fgSoft), onTap: onTap);
+    settingRow(context, title, body, const GlyphIcon(Glyphs.chevronRight, color: brand.fgSoft), onTap: onTap);
 }
 
 /// Sparkle's, WinSparkle's and Android's update preferences (updates.dart).
@@ -160,7 +161,7 @@ final class _Updates extends StatelessWidget {
           context,
           'Check for updates',
           state.status ?? '${version}Listenjar also looks once a day.',
-          const Icon(Icons.chevron_right_rounded, color: brand.fgSoft),
+          const GlyphIcon(Glyphs.chevronRight, color: brand.fgSoft),
           onTap: state.canCheck ? () => unawaited(checkForUpdates()) : null,
         ),
         _switch(
@@ -249,7 +250,7 @@ Widget settingChoice<T>(
         style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
         onPressed: menu.toggle,
         iconAlignment: IconAlignment.end,
-        icon: const Icon(Icons.unfold_more_rounded, size: 18),
+        icon: const GlyphIcon(Glyphs.unfold, size: 18),
         label: Text(label(value), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),
       ),
     ),

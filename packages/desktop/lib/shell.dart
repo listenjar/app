@@ -31,16 +31,16 @@ import 'theme.dart' as brand;
 import 'ui.dart';
 
 enum Section {
-  home('Listen Now', Icons.headphones_rounded),
-  library('Library', Icons.grid_view_rounded),
-  search('Search', Icons.search_rounded),
-  queue('Up Next', Icons.queue_music_rounded),
-  downloads('Downloads', Icons.download_rounded),
-  settings('Settings', Icons.tune_rounded);
+  home('Listen Now', Glyphs.headphones),
+  library('Library', Glyphs.grid),
+  search('Search', Glyphs.search),
+  queue('Up Next', Glyphs.queue),
+  downloads('Downloads', Glyphs.download),
+  settings('Settings', Glyphs.gear);
 
   const Section(this.label, this.icon);
   final String label;
-  final IconData icon;
+  final Glyph icon;
 }
 
 /// Phones' bottom bar: Downloads and Settings are a tap away in Library.
@@ -626,7 +626,7 @@ final class _Sidebar extends StatelessWidget {
                       // A show in front takes the pill; its section keeps
                       // its accent.
                       selected: item == section && !shows.any((p) => p.id == showing.show) && !pending.any((f) => f.id == showing.feed),
-                      icon: Icon(item.icon, size: 18, color: item == section ? tone.accent : tone.soft),
+                      icon: GlyphIcon(item.icon, size: 18, color: item == section ? tone.accent : tone.soft),
                       label: item.label,
                       count: switch (item) {
                         Section.queue when queued > 0 => '$queued',
@@ -669,7 +669,7 @@ final class _Sidebar extends StatelessWidget {
             child: _RailItem(
               tone: tone,
               selected: section == Section.settings,
-              icon: Icon(Section.settings.icon, size: 18, color: section == Section.settings ? tone.accent : tone.soft),
+              icon: GlyphIcon(Section.settings.icon, size: 18, color: section == Section.settings ? tone.accent : tone.soft),
               label: Section.settings.label,
               onTap: () => onGo(Section.settings),
             ),
@@ -775,7 +775,7 @@ final class _PhoneBar extends StatelessWidget {
         onDestinationSelected: (i) => onGo(_phoneSections[i]),
         destinations: [
           for (final s in _phoneSections)
-            NavigationDestination(icon: Icon(s.icon), label: s.label),
+            NavigationDestination(icon: GlyphIcon(s.icon), label: s.label),
         ],
       ),
     );
@@ -863,7 +863,7 @@ Widget backButton(BuildContext context, String label) => Align(
         backgroundColor: WidgetStateProperty.fromMap({WidgetState.hovered: brand.paperDeep, WidgetState.any: const Color(0x00000000)}),
       ),
       onPressed: () => Navigator.of(context).maybePop(),
-      icon: const Icon(Icons.chevron_left_rounded, size: 20),
+      icon: const GlyphIcon(Glyphs.chevronLeft, size: 20),
       label: Text(label),
     ),
   ),
