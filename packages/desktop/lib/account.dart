@@ -203,8 +203,10 @@ final class Account extends ChangeNotifier {
   Future<bool> signUp(String email, String password, String turnstileToken) =>
     auth.signUp(api, email, password, turnstileToken, timeout());
 
-  /// Emails a link that sets the password; false when the address won't do.
-  Future<bool> requestPasswordLink(String email) => auth.requestPasswordLink(api, email, timeout());
+  /// Emails a link that sets the password, with Turnstile's [turnstileToken];
+  /// false when the address won't do.
+  Future<bool> requestPasswordLink(String email, String turnstileToken) =>
+    auth.requestPasswordLink(api, email, turnstileToken, timeout());
 
   /// Runs one sign-in at a time and keeps the token it gets.
   Future<void> _signIn(SignInMethod method, Future<Session> Function(CancellationToken) how) async {

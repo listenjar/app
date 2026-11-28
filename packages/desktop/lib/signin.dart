@@ -282,9 +282,10 @@ Future<Session> signInWithPassword(PublicApiClient api, String email, String pas
 Future<bool> signUp(PublicApiClient api, String email, String password, String turnstileToken, CancellationToken token) =>
   _accepted(api.signUp(body: SignUp(email: email.trim(), password: password, turnstileToken: turnstileToken)), token);
 
-/// Emails [email], if it has an account, a link that sets its password.
-Future<bool> requestPasswordLink(PublicApiClient api, String email, CancellationToken token) =>
-  _accepted(api.requestPasswordLink(body: PasswordLinkRequest(email: email.trim())), token);
+/// Emails [email], if it has an account, a link that sets its password, once
+/// Turnstile passes [turnstileToken], answering like [signUp].
+Future<bool> requestPasswordLink(PublicApiClient api, String email, String turnstileToken, CancellationToken token) =>
+  _accepted(api.requestPasswordLink(body: PasswordLinkRequest(email: email.trim(), turnstileToken: turnstileToken)), token);
 
 Future<bool> _accepted(Future<void> call, CancellationToken token) async {
   try {

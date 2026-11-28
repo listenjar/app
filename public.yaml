@@ -24,7 +24,8 @@ info:
     - Email and password: `signInWithPassword`. `signUp` and
       `requestPasswordLink` email a link that opens on listenjar.com, which
       makes the account or sets its password; the person then signs in here
-      with that password.
+      with that password. Both need a Cloudflare Turnstile token from
+      listenjar.com/app-check.
 
     - Passkeys: the platform's own passkey prompt (macOS and iOS with the
       `webcredentials:listenjar.com` Associated Domain, Android's Credential
@@ -682,7 +683,8 @@ paths:
         valid for an hour, that sets a new password, or a first one for an
         account that signs in only with Google or passkeys. Setting it signs
         the account out everywhere, this app too. The same email limits as
-        sign-up's apply, and count together with them.
+        sign-up's apply, and count together with them, after Turnstile: it
+        needs a token from listenjar.com/app-check, like `signUp`.
       security: []
       requestBody:
         required: true
@@ -694,9 +696,13 @@ paths:
         "202":
           description: Sent if the address has an account.
         "400":
-          description: Not an email address.
+          description: Not an email address, or no Turnstile token.
+        "403":
+          description: Turnstile refused the token (spent, expired, or not from listenjar.com's widget).
         "429":
           $ref: "#/components/responses/EmailLimited"
+        "503":
+          description: Turnstile couldn't check the token; try again.
   /desktop/passkey/options:
     post:
       operationId: passkeySignInOptions
@@ -1416,11 +1422,14 @@ components:
           description: The token listenjar.com/app-check's Cloudflare Turnstile widget gave; each works once.
     PasswordLinkRequest:
       type: object
-      required: [email]
+      required: [email, turnstileToken]
       properties:
         email:
           type: string
           format: email
+        turnstileToken:
+          type: string
+          description: The token listenjar.com/app-check's Cloudflare Turnstile widget gave; each works once.
     WebAuthnJson:
       type: object
       description: >-

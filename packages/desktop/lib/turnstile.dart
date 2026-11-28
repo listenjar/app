@@ -1,6 +1,6 @@
-// Cloudflare Turnstile for signing up by email (public.yaml's
-// /desktop/signups checks its token): the same widget as listenjar.com's
-// sign-up. Turnstile runs only on a page of the widget's own hostname, so the
+// Cloudflare Turnstile for signing up by email and asking for a password link
+// (public.yaml's /desktop/signups and /desktop/password-resets check its
+// token): the same widget as listenjar.com's sign-up. Turnstile runs only on a page of the widget's own hostname, so the
 // app shows listenjar.com/app-check, which holds nothing but the widget: in a
 // WebView on macOS, iOS and Android, where the page hands each token over
 // the `ListenjarTurnstile` JavaScript channel. Windows and Linux have no

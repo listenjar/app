@@ -3,9 +3,10 @@
 // order and the same words. Google and a passkey first, then the email form,
 // which also signs up and asks for a password link; both links open on
 // listenjar.com, and the person comes back here to sign in with the password.
-// Signing up passes Cloudflare Turnstile first, as on listenjar.com/signup
-// (turnstile.dart): its widget sits above Create account, or, without a
-// WebView, opens in the browser when Create account is pressed.
+// Signing up and asking for a password link pass Cloudflare Turnstile first,
+// as on listenjar.com/signup and /forgot-password (turnstile.dart): its widget
+// sits above Create account or Email me a link, or, without a WebView, opens
+// in the browser when the button is pressed.
 // The way this device signed in last wears listenjar.com's "Last used" mark.
 import 'dart:async';
 
@@ -87,8 +88,8 @@ final class _SignInFormState extends State<SignInForm> {
   /// Whether this device has passkeys to offer, once it says.
   var _passkeys = false;
 
-  /// Turnstile's widget in a WebView, while the form signs up on a platform
-  /// that has one.
+  /// Turnstile's widget in a WebView, while the form emails a link (signs up
+  /// or asks for a password link) on a platform that has one.
   TurnstileCheck? _check;
 
   /// Cancels Turnstile in the browser, while its page is open.
@@ -120,7 +121,7 @@ final class _SignInFormState extends State<SignInForm> {
     _sent = null;
     _problem = null;
     _account.authError = null;
-    if (mode == _Mode.signUp && turnstileEmbeds) {
+    if (mode != _Mode.signIn && turnstileEmbeds) {
       _check ??= TurnstileCheck();
     } else {
       _check?.dispose();
@@ -168,22 +169,23 @@ final class _SignInFormState extends State<SignInForm> {
           setState(() => _problem = 'Use at least 8 characters for your password.');
           return _passwordFocus.requestFocus();
         }
-        await _send(email, () async {
-          final turnstile = await _turnstileToken();
-          try {
-            return await _account.signUp(email, password, turnstile);
-          } finally {
-            // Each token works once, whatever the answer.
-            _check?.spend();
-          }
-        }, refused: 'Check the email address, and use a password of 8 to 256 characters.');
+        await _send(
+          email,
+          (turnstile) => _account.signUp(email, password, turnstile),
+          refused: 'Check the email address, and use a password of 8 to 256 characters.',
+        );
       case _Mode.forgot:
         if (email.isEmpty) return _emailFocus.requestFocus();
-        await _send(email, () => _account.requestPasswordLink(email), refused: 'Check the email address.');
+        await _send(
+          email,
+          (turnstile) => _account.requestPasswordLink(email, turnstile),
+          refused: 'Check the email address.',
+        );
     }
   }
 
-  Future<void> _send(String email, Future<bool> Function() request, {required String refused}) async {
+  /// Asks for a link with a fresh Turnstile token.
+  Future<void> _send(String email, Future<bool> Function(String turnstile) request, {required String refused}) async {
     setState(() {
       _sending = true;
       _problem = null;
@@ -191,7 +193,13 @@ final class _SignInFormState extends State<SignInForm> {
     String? problem;
     var sent = false;
     try {
-      sent = await request();
+      final turnstile = await _turnstileToken();
+      try {
+        sent = await request(turnstile);
+      } finally {
+        // Each token works once, whatever the answer.
+        _check?.spend();
+      }
       if (!sent) problem = refused;
     } catch (e) {
       problem = switch (e) {
@@ -386,7 +394,7 @@ final class _SignInFormState extends State<SignInForm> {
             ),
           ),
         ],
-        if (_check case final check? when _mode == _Mode.signUp) ...[
+        if (_check case final check? when _mode != _Mode.signIn) ...[
           const SizedBox(height: 16),
           TurnstileView(check),
         ],
