@@ -47,4 +47,5 @@ tracking, analytics or crash reports.
 ## For developers
 
 How to build, run and release it is in [DEVELOPMENT.md](DEVELOPMENT.md). The app is open source
-under the [MIT License](LICENSE).
+under the [Mozilla Public License 2.0](LICENSE): anyone may use, change and share it, and
+changes to its files stay open under the same license.
