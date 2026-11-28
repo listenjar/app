@@ -8,16 +8,18 @@ adaptive
 
 ## Users
 
-Podcast listeners. Anyone who wants a classic podcast player, free and without an account; and,
-among them, listeners who also want videos they did not make (YouTube videos, other people's
-channels, audiobooks posted as video) as podcast feeds.
+People who listen to YouTube more than they watch it: interviews, lectures, explainers, audiobooks
+posted as video, other people's channels, heard with the screen off. Most of them also follow
+podcasts, and want both in one player, free and without an account.
 
 ## Product Purpose
 
-The Listenjar app is a podcast player first: follow any RSS feed or a show from the directory,
+The Listenjar app is the podcast app for YouTube lovers: any YouTube video plays as an episode,
+with the screen off, offline, at any speed and from where you stopped. It is a complete podcast
+player too: follow any RSS feed or a show from the directory,
 refresh, download for offline, Up Next, playback speed, a sleep timer, and the system's media
-controls and headphone buttons. All of it is free and needs no account. A single YouTube video
-plays here as an episode of its own, also free.
+controls and headphone buttons. All of it, single YouTube videos included, is free and needs no
+account.
 
 Free stays 100% on the device: nothing is uploaded, so nothing a listener adds ever expires.
 Paying makes the player YouTube-charged. A paid plan adds YouTube playlists and channels,
@@ -40,8 +42,9 @@ complete; a Cloud listener sets their feeds up once and forgets them.
 
 ## Positioning
 
-A podcast player first, a YouTube player when you pay: the player is free, and YouTube channels
-(Local YouTube) and feeds for any podcast app (Cloud) are what people pay for. Downloads from
+The podcast app for YouTube lovers, not another general podcast app: any video plays free, and
+whole YouTube channels (Local YouTube) and feeds for any podcast app (Cloud) are what people pay
+for. Downloads from
 YouTube happen on the listener's own device, not on a server. The app is
 open source and sends no telemetry, tracing or crash reports.
 
