@@ -3,3 +3,5 @@
 /native/youtubejs.js
 # Written by `moon run app:scripts` (tool/scripts.mjs) from the scripts.
 /native/scripts.g.c
+# Prebuilt QuickJS from `moon run app:engine-<platform>` (tool/engine.dart).
+/native/engine/

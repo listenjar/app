@@ -5,15 +5,12 @@ import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:native_toolchain_c/native_toolchain_c.dart';
 
-const _sources = [
-  'native/bridge.c',
-  'native/quickjs/quickjs.c',
-  'native/quickjs/libregexp.c',
-  'native/quickjs/libunicode.c',
-  'native/quickjs/cutils.c',
-  'native/quickjs/dtoa.c',
-  'native/scripts.g.c',
-];
+import 'engine.dart';
+
+/// What youtubei compiles beside QuickJS (engine.dart's engineSources).
+const _bridgeSources = ['native/bridge.c', 'native/scripts.g.c'];
+
+const _sources = [..._bridgeSources, ...engineSources];
 
 /// The scripts native/scripts.g.c holds, as tool/scripts.mjs writes it
 /// (`moon run app:scripts`); youtubejs.js is the bundle `moon run
@@ -21,7 +18,6 @@ const _sources = [
 const _scripts = ['native/host.js', 'native/youtubejs.js', 'native/bindings.js'];
 
 const _assetName = 'src/bindings.g.dart';
-const _defines = {'_GNU_SOURCE': null, 'CONFIG_VERSION': '"2026-06-04"'};
 
 void main(List<String> args) async {
   await build(args, (input, output) async {
@@ -33,20 +29,46 @@ void main(List<String> args) async {
       await _windows(input, output);
       return;
     }
+    final os = input.config.code.targetOS;
+    final engine = _prebuiltEngine(input);
+    if (engine != null) {
+      output.dependencies.addAll([engine.resolve('key'), engine.resolve(os.staticlibFileName(engineName))]);
+    }
     await CBuilder.library(
       name: 'youtubei',
       assetName: _assetName,
-      sources: _sources,
-      includes: ['native', 'native/quickjs'],
-      defines: _defines,
-      flags: ['-std=gnu11', '-fwrapv'],
-      libraries: switch (input.config.code.targetOS) {
-        OS.linux => ['m', 'pthread'],
-        OS.android => ['m'],
-        _ => const [],
-      },
+      sources: engine == null ? _sources : _bridgeSources,
+      includes: includes,
+      defines: defines,
+      flags: flags,
+      // The engine before the system libraries it needs.
+      libraries: [if (engine != null) engineName, ...systemLibraries(os)],
+      libraryDirectories: [if (engine != null) engine.toFilePath()],
     ).run(input: input, output: output);
   });
+}
+
+/// native/engine/'s QuickJS for this build's target, when
+/// `moon run app:engine-<platform>` built it from the sources as they are now.
+Uri? _prebuiltEngine(BuildInput input) {
+  final code = input.config.code;
+  final apple = switch (code.targetOS) {
+    OS.macOS => code.macOS.deploymentVersion,
+    OS.iOS => code.iOS.deploymentVersion,
+    _ => null,
+  };
+  if (apple != null && apple < engineAppleVersion) return null;
+  final target = engineTarget(
+    code.targetOS,
+    code.targetArchitecture,
+    sdk: code.targetOS == OS.iOS ? code.iOS.targetSdk : null,
+  );
+  final directory = input.packageRoot.resolve('native/engine/$target/');
+  final key = File.fromUri(directory.resolve('key'));
+  final library = File.fromUri(directory.resolve(code.targetOS.staticlibFileName(engineName)));
+  if (!key.existsSync() || !library.existsSync()) return null;
+  if (key.readAsStringSync().trim() != engineKey(input.packageRoot, target)) return null;
+  return directory;
 }
 
 /// Fails unless [generated] holds the [scripts] as they are now: its first
@@ -90,7 +112,7 @@ Future<void> _windows(BuildInput input, BuildOutputBuilder output) async {
   final exports = input.packageRoot.resolve('native/windows.def');
   final result = await Process.run(compiler, [
     '-shared', '-O2', '-std=gnu11', '-fwrapv',
-    for (final MapEntry(:key, :value) in _defines.entries) value == null ? '-D$key' : '-D$key=$value',
+    for (final MapEntry(:key, :value) in defines.entries) value == null ? '-D$key' : '-D$key=$value',
     '-D__USE_MINGW_ANSI_STDIO',
     '-I${input.packageRoot.resolve('native/').toFilePath()}',
     '-I${input.packageRoot.resolve('native/quickjs/').toFilePath()}',

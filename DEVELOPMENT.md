@@ -52,7 +52,11 @@ touched. The rules run when the app starts, every hour, after a download finishe
 ends, and when they change; each deletion logs on the `storage` logger with its reason.
 
 SQLite comes from [`package:sqlite3`](https://pub.dev/packages/sqlite3)'s build hook. QuickJS
-is compiled by youtubei's build hook. Neither needs a system library.
+is compiled by youtubei's build hook. Neither needs a system library. `app:engine-macos`,
+`app:engine-ios` and `app:engine-linux` prebuild QuickJS into `packages/youtubei/native/engine/`,
+which the hook links instead of compiling it again; moon caches them on QuickJS's sources, in a
+cache every worktree shares, so each QuickJS version compiles once per machine. Android and
+Windows compile it in the hook.
 
 ## Run
 
@@ -66,9 +70,9 @@ moon run app:reinstall # it, Developer ID signed, into /Applications
 moon run app:check     # flutter analyze
 ```
 
-`app:codegen` (public.yaml → `lib/backend`, [pricing](pricing) → `lib/pricing`) and `app:scripts` (packages/youtubejs →
-`packages/youtubei/native/youtubejs.js` → `native/scripts.g.c`) run before each of those, and
-moon caches both on their inputs. For other platforms run `moon run app:codegen
+`app:codegen` (public.yaml → `lib/backend`, [pricing](pricing) → `lib/pricing`), `app:scripts` (packages/youtubejs →
+`packages/youtubei/native/youtubejs.js` → `native/scripts.g.c`) and the platform's `app:engine-*`
+run before each of those, and moon caches them on their inputs. For other platforms run `moon run app:codegen
 app:scripts`, then `flutter run -d windows|linux|ios|<android device>` in `packages/desktop`.
 
 - Windows builds QuickJS with MSYS2's MinGW-w64 compiler (MSVC can't build it): UCRT64's GCC on

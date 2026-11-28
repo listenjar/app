@@ -13,3 +13,9 @@ pipeline:
   syncWorkspace: false
 hasher:
   walkStrategy: glob
+# Cached task outputs in content-addressed storage, shared by every git
+# worktree of this repository (the monorepo's .moon/workspace.yml does the same).
+cache:
+  unstable_sharedWorktreeCache: true
+experiments:
+  casOutputsCache: true

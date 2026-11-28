@@ -10,6 +10,11 @@ fileGroups:
     - packages/youtubejs/package.json
     - packages/aube-workspace.yaml
     - packages/aube-lock.yaml
+  engine:
+    - packages/youtubei/native/quickjs/*.{c,h}
+    - packages/youtubei/hook/engine.dart
+    - packages/youtubei/tool/engine.dart
+    - pubspec.lock
   sources:
     - pubspec.yaml
     - pubspec.lock
@@ -20,6 +25,7 @@ fileGroups:
     - "!packages/desktop/**/ephemeral/**/*"
     - "!packages/desktop/android/{.gradle,.kotlin,app/build}/**/*"
     - packages/youtubei/{hook,lib,native,tool}/**/*
+    - "!packages/youtubei/native/engine/**/*"
     - packages/youtubei/pubspec.yaml
     - tool/**/*
 tasks:
@@ -57,6 +63,37 @@ tasks:
     outputs: [packages/youtubei/native/scripts.g.c]
     options:
       cache: true
+  # QuickJS prebuilt per target into packages/youtubei/native/engine/, which
+  # youtubei's build hook links instead of compiling QuickJS on every build
+  # (hook/engine.dart). Cached on QuickJS's sources, in the cache every
+  # worktree shares (.moon/workspace.yml), so each version compiles once per machine.
+  engine-macos:
+    description: Prebuild QuickJS for macOS on arm64 and x64 (tool/engine.dart).
+    command: dart packages/youtubei/tool/engine.dart macos-arm64 macos-x64
+    inputs: ["@group(engine)"]
+    outputs: [packages/youtubei/native/engine/macos-*/**/*]
+    options:
+      cache: true
+      os: macos
+      outputStyle: buffer-only-failure
+  engine-ios:
+    description: Prebuild QuickJS for iOS devices and Apple silicon simulators (tool/engine.dart).
+    command: dart packages/youtubei/tool/engine.dart ios-arm64 ios-arm64-simulator
+    inputs: ["@group(engine)"]
+    outputs: [packages/youtubei/native/engine/ios-*/**/*]
+    options:
+      cache: true
+      os: macos
+      outputStyle: buffer-only-failure
+  engine-linux:
+    description: Prebuild QuickJS for Linux on this machine's architecture (tool/engine.dart).
+    command: dart packages/youtubei/tool/engine.dart host
+    inputs: ["@group(engine)"]
+    outputs: [packages/youtubei/native/engine/linux-*/**/*]
+    options:
+      cache: true
+      os: linux
+      outputStyle: buffer-only-failure
   codegen:
     description: >-
       Generate the Dart API client in packages/desktop/lib/backend from public.yaml with oasmith,
@@ -129,7 +166,7 @@ tasks:
     description: >-
       Run the app on macOS against backend:dev on http://localhost:8787, hot reloading on every
       save under packages/*/lib (tool/dev.dart) and printing the DTD URI for the Dart MCP server.
-    deps: [~:codegen, ~:scripts]
+    deps: [~:codegen, ~:scripts, ~:engine-macos]
     script: dart tool/dev.dart macos
     # Uncached, so hash nothing: the default (every file in the project) walks node_modules
     # and the Flutter build tree, warning on each symlinked directory and running out of file handles.
@@ -137,7 +174,7 @@ tasks:
     preset: server
   build:
     description: Package the release macOS app into packages/desktop/build/macos.
-    deps: [~:codegen, ~:scripts]
+    deps: [~:codegen, ~:scripts, ~:engine-macos]
     inputs: ["@group(sources)"]
     outputs: [packages/desktop/build/macos/Build/Products/Release/**/*]
     script: cd packages/desktop && flutter build macos --release
@@ -148,7 +185,7 @@ tasks:
     description: >-
       Build the release macOS app with Sparkle's update key, sign it with this Mac's Developer ID
       (not notarized) and replace /Applications/Listenjar.app with it (tool/reinstall-macos.sh).
-    deps: [~:codegen, ~:scripts]
+    deps: [~:codegen, ~:scripts, ~:engine-macos]
     script: tool/reinstall-macos.sh
     inputs: []
     options:
@@ -160,7 +197,7 @@ tasks:
     description: >-
       Build the release macOS app with Sparkle's update key and package it as a DMG
       (tool/package-macos.sh; DEVELOPMENT.md's Releases). Signs and notarizes when given a Developer ID.
-    deps: [~:codegen, ~:scripts]
+    deps: [~:codegen, ~:scripts, ~:engine-macos]
     script: tool/package-macos.sh
     inputs: []
     options:
@@ -173,7 +210,7 @@ tasks:
       Build the release iOS app and export it for App Store Connect as
       build/release/Listenjar-<version>-ios.ipa (tool/package-ios.sh), which tool/testflight.ts
       sends to TestFlight. Signs with LISTENJAR_IOS_PROFILE's and LISTENJAR_IOS_SHARE_PROFILE's App Store profiles when given them.
-    deps: [~:codegen, ~:scripts]
+    deps: [~:codegen, ~:scripts, ~:engine-ios]
     script: tool/package-ios.sh
     inputs: []
     options:
@@ -203,7 +240,7 @@ tasks:
       runInCI: true
   package-linux:
     description: Build and package build/release/Listenjar-<version>-linux-x64.tar.gz.
-    deps: [~:codegen, ~:scripts]
+    deps: [~:codegen, ~:scripts, ~:engine-linux]
     command: dart tool/release.dart build linux
     inputs: []
     options:
