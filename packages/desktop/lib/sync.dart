@@ -9,8 +9,8 @@
 // 3. For every video the feed lacks: resolve it, add it (createEpisode).
 //    Audio is stored once per video, so if anyone's feed has it already the
 //    episode is live and that's all. Otherwise download it on this computer
-//    (transfer.dart), rewrite YouTube's AAC as a regular M4A (faststart.dart),
-//    upload it (uploads.dart: createUpload, a PUT straight
+//    (transfer.dart), rewrite YouTube's AAC as a regular M4A with the video's
+//    chapters in it (faststart.dart), upload it (uploads.dart: createUpload, a PUT straight
 //    to R2, completeEpisode), delete the file.
 //
 // Feeds take a Cloud plan; a plan that's full, or gone, stops the feed until
@@ -39,14 +39,18 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cancellation_token/cancellation_token.dart';
+import 'package:logging/logging.dart';
 
 import 'backend/api.dart';
+import 'chapters.dart';
 import 'faststart.dart';
 import 'links.dart';
 import 'net.dart';
 import 'transfer.dart';
 import 'uploads.dart';
 import 'youtube.dart';
+
+final _log = Logger('sync');
 
 const _videoWorkers = 2;
 const _attempts = 5;
@@ -590,6 +594,8 @@ final class SyncEngine {
 
         // Someone's feed has this video's audio already: live with nothing to download.
         if (episode.uploadedAt == null) {
+          // Only an M4A gets them: WebM is uploaded as it is.
+          final chapters = media.contentType == 'audio/mp4' ? await _chapters(youtube, video.id, token) : const <Chapter>[];
           File file;
           while (true) {
             try {
@@ -601,9 +607,10 @@ final class SyncEngine {
           }
 
           // A regular M4A rather than YouTube's fragments, which AVPlayer (and
-          // so Apple Podcasts) plays at twice the length (faststart.dart).
+          // so Apple Podcasts) plays at twice the length, with the video's
+          // chapters baked in for every podcast app (faststart.dart).
           show('Preparing');
-          final rewritten = media.contentType == 'audio/mp4' ? await faststart(file, token) : null;
+          final rewritten = media.contentType == 'audio/mp4' ? await faststart(file, token, chapters: chapters) : null;
           try {
             show('Uploading');
             await uploadThrough(
@@ -647,6 +654,22 @@ final class SyncEngine {
       _flights.remove((feed.id, url));
       status.videos.remove(url);
       _changed();
+    }
+  }
+
+  /// The chapters of the video [id], for its upload: asked of YouTube only
+  /// for audio no one has uploaded, since the upload carries them from then
+  /// on. None when YouTube doesn't answer for them; a network failure is
+  /// tried again with the rest of the video.
+  Future<List<Chapter>> _chapters(YouTube youtube, String id, CancellationToken token) async {
+    try {
+      return await youtube.chapters(id, token) ?? const [];
+    } on CancelledException {
+      rethrow;
+    } catch (e) {
+      if (_retryable(e)) rethrow;
+      _log.warning('Uploading $id without chapters', e);
+      return const [];
     }
   }
 

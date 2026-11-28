@@ -13,6 +13,14 @@
 // the second writes ftyp, moov and a single mdat, copying each run of
 // samples in order (one chunk per run). Anything unexpected (more than one
 // track, an edit list, encryption, a gap) leaves the file as downloaded.
+//
+// The video's chapters go in too, as podcast apps read them: a QuickTime
+// chapter track (a disabled text track the audio names in tref `chap`,
+// Apple's) and Nero's chpl in udta (everyone else's), laid out as ffmpeg
+// lays them out. Their titles lead the mdat, so the moov and the titles are
+// all in the file's first bytes: a player, or listenjar.com's
+// /media/<key>/chapters, reads them with one range request.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -20,17 +28,19 @@ import 'dart:typed_data';
 import 'package:cancellation_token/cancellation_token.dart';
 import 'package:logging/logging.dart';
 
+import 'chapters.dart';
+
 final _log = Logger('faststart');
 
 /// [file], YouTube's AAC as downloaded (`audio/mp4`), rewritten as a
-/// regular M4A next to it; the caller deletes or keeps the copy. Null, with
-/// a warning, when [file] isn't a fragmented MP4 this can rewrite: use it as
-/// it is.
-Future<File?> faststart(File file, CancellationToken token) async {
+/// regular M4A next to it with [chapters] in it; the caller deletes or keeps
+/// the copy. Null, with a warning, when [file] isn't a fragmented MP4 this
+/// can rewrite: use it as it is.
+Future<File?> faststart(File file, CancellationToken token, {List<Chapter> chapters = const []}) async {
   final output = File('${file.path}.m4a');
   try {
     final stopwatch = Stopwatch()..start();
-    await _rewrite(file, output, token);
+    await _rewrite(file, output, token, chapters);
     _log.fine('Rewrote ${file.path} in ${stopwatch.elapsedMilliseconds} ms');
     return output;
   } on Object catch (e) {
@@ -48,7 +58,7 @@ Future<File?> faststart(File file, CancellationToken token) async {
 /// A run of samples in the input: one chunk in the output.
 typedef _Run = ({int offset, int length, int count, int description});
 
-Future<void> _rewrite(File input, File output, CancellationToken token) async {
+Future<void> _rewrite(File input, File output, CancellationToken token, List<Chapter> chapters) async {
   final raf = await input.open();
   try {
     final length = await raf.length();
@@ -98,9 +108,11 @@ Future<void> _rewrite(File input, File output, CancellationToken token) async {
     if (track.runs.isEmpty) throw const FormatException('no fragments');
     track.checkInside(mdats);
 
-    // Pass 2: ftyp, moov, then the samples in one mdat.
+    // Pass 2: ftyp, moov, then the chapter titles and the samples in one mdat.
     final ftyp = _box('ftyp', [_fourcc('M4A '), _u32(0x200), _fourcc('M4A '), _fourcc('isom'), _fourcc('mp42')]);
-    final samples = track.runs.fold(0, (sum, run) => sum + run.length);
+    final marks = _marks(chapters, track.milliseconds);
+    final titles = marks.fold<int>(0, (sum, mark) => sum + mark.sample.length);
+    final samples = titles + track.runs.fold<int>(0, (sum, run) => sum + run.length);
     final mdatHeader = samples + 8 > 0xffffffff
       ? (ByteData(16)
           ..setUint32(0, 1)
@@ -110,19 +122,22 @@ Future<void> _rewrite(File input, File output, CancellationToken token) async {
           ..setUint32(0, samples + 8)
           ..setUint32(4, 0x6d646174 /* mdat */));
     var wide = false;
-    var moov = track.moov(0, wide: false);
+    var moov = track.moov(0, marks, wide: false);
     final lastOffset = ftyp.length + moov.length + mdatHeader.lengthInBytes + samples - track.runs.last.length;
     if (lastOffset > 0xffffffff) {
       wide = true;
-      moov = track.moov(0, wide: true);
+      moov = track.moov(0, marks, wide: true);
     }
-    moov = track.moov(ftyp.length + moov.length + mdatHeader.lengthInBytes, wide: wide);
+    moov = track.moov(ftyp.length + moov.length + mdatHeader.lengthInBytes, marks, wide: wide);
 
     final out = await output.open(mode: FileMode.write);
     try {
       await out.writeFrom(ftyp);
       await out.writeFrom(moov);
       await out.writeFrom(Uint8List.sublistView(mdatHeader));
+      for (final mark in marks) {
+        await out.writeFrom(mark.sample);
+      }
       final buffer = Uint8List(1 << 20);
       for (final run in track.runs) {
         token.throwIfCancelled();
@@ -280,19 +295,30 @@ final class _Track {
     }
   }
 
-  /// The regular moov, its chunks starting at [dataStart] in the output;
-  /// [wide] chunk offsets (co64) when they pass 4 GiB.
-  Uint8List moov(int dataStart, {required bool wide}) {
+  /// How long the audio is, in milliseconds.
+  int get milliseconds => _duration * 1000 ~/ _mediaTimescale;
+
+  /// The regular moov, its chunks starting at [dataStart] in the output, the
+  /// titles of [marks] first, then the audio's; [wide] chunk offsets (co64)
+  /// when they pass 4 GiB.
+  Uint8List moov(int dataStart, List<_Mark> marks, {required bool wide}) {
     final movieDuration = (_duration * _movieTimescale + _mediaTimescale ~/ 2) ~/ _mediaTimescale;
+    final mvhd = _one(_moov, 'mvhd').data;
+    // The chapter track's ID: the next free one, which the mvhd then moves on.
+    final chapterId = max(mvhd.getUint32(mvhd.lengthInBytes - 4), _id + 1);
+    final titles = marks.fold<int>(0, (sum, mark) => sum + mark.sample.length);
+    final hasUdta = _moov.any((b) => b.type == 'udta');
     return _rebuild('moov', _moov, (box) => switch (box.type) {
-      'mvhd' => _withDuration(box, 4, movieDuration),
+      'mvhd' => marks.isEmpty ? _withDuration(box, 4, movieDuration) : _withNextTrack(_withDuration(box, 4, movieDuration), chapterId + 1),
       'mvex' => Uint8List(0),
+      'udta' when marks.isNotEmpty => _rebuild('udta', _children(box.data), (box) => null, extra: [_chpl(marks)]),
       'trak' => _rebuild('trak', _children(box.data), (box) => switch (box.type) {
+        'tkhd' when marks.isNotEmpty => _join([_withDuration(box, 8, movieDuration), _box('tref', [_box('chap', [_u32(chapterId)])])]),
         'tkhd' => _withDuration(box, 8, movieDuration),
         'mdia' => _rebuild('mdia', _children(box.data), (box) => switch (box.type) {
           'mdhd' => _withDuration(box, 4, _duration),
           'minf' => _rebuild('minf', _children(box.data), (box) => switch (box.type) {
-            'stbl' => _stbl(box, dataStart, wide),
+            'stbl' => _stbl(box, dataStart + titles, wide),
             _ => null,
           }),
           _ => null,
@@ -300,7 +326,10 @@ final class _Track {
         _ => null,
       }),
       _ => null,
-    });
+    }, extra: [
+      if (marks.isNotEmpty) _chapterTrak(marks, id: chapterId, movieDuration: movieDuration, milliseconds: milliseconds, dataStart: dataStart, wide: wide),
+      if (marks.isNotEmpty && !hasUdta) _box('udta', [_chpl(marks)]),
+    ]);
   }
 
   Uint8List _stbl(_Box stbl, int dataStart, bool wide) {
@@ -378,9 +407,9 @@ _Box _one(List<_Box> boxes, String type) {
 }
 
 /// [children] in a box of [type], each replaced by what [replace] answers,
-/// or kept when it answers null.
-Uint8List _rebuild(String type, List<_Box> children, Uint8List? Function(_Box) replace) =>
-  _box(type, [for (final child in children) replace(child) ?? _box(child.type, [_bytes(child.data)])]);
+/// or kept when it answers null, then [extra].
+Uint8List _rebuild(String type, List<_Box> children, Uint8List? Function(_Box) replace, {List<Uint8List> extra = const []}) =>
+  _box(type, [for (final child in children) replace(child) ?? _box(child.type, [_bytes(child.data)]), ...extra]);
 
 /// A full box laid out as version and flags, creation and modification
 /// times, [mid] bytes, a duration, and the rest (mvhd, tkhd, mdhd), with
@@ -436,8 +465,132 @@ Uint8List _box(String type, List<Uint8List> parts) {
 
 Uint8List _bytes(ByteData data) => Uint8List.sublistView(data);
 
+Uint8List _join(List<Uint8List> parts) => Uint8List.fromList([for (final part in parts) ...part]);
+
+Uint8List _u16(int value) => Uint8List.sublistView(ByteData(2)..setUint16(0, value));
+
+Uint8List _hex(String hex) => Uint8List.fromList([for (var i = 0; i < hex.length; i += 2) int.parse(hex.substring(i, i + 2), radix: 16)]);
+
 Uint8List _u32(int value) => Uint8List.sublistView(ByteData(4)..setUint32(0, value));
 
 Uint8List _fourcc(String code) => Uint8List.fromList(code.codeUnits);
 
 String _type(ByteData data, int at) => String.fromCharCodes([for (var i = 0; i < 4; i++) data.getUint8(at + i)]);
+
+// Chapters.
+
+/// A chapter as the file keeps it: from [start] for [duration], in
+/// milliseconds, its title as [title] (Nero's chpl) and as [sample] (a
+/// QuickTime text sample: length, UTF-8, an `encd` box saying so).
+typedef _Mark = ({int start, int duration, Uint8List title, Uint8List sample});
+
+/// A title longer than this is cut: Nero's chpl gives it a byte of length.
+const _titleBytes = 255;
+
+/// Of [chapters], the ones within [milliseconds] of audio, in order, one per
+/// start, the first from the very start: a text track's samples follow one
+/// another from zero, so there's no gap before the first.
+List<_Mark> _marks(List<Chapter> chapters, int milliseconds) {
+  final starts = <int, String>{};
+  for (final c in [...chapters]..sort((a, b) => a.start.compareTo(b.start))) {
+    final start = c.start.inMilliseconds;
+    if (start < 0 || start >= milliseconds) continue;
+    starts.putIfAbsent(starts.isEmpty ? 0 : start, () => c.title.trim());
+  }
+  final list = starts.entries.take(255).toList();
+  final marks = <_Mark>[];
+  for (final (i, MapEntry(key: start, value: title)) in list.indexed) {
+    final bytes = _utf8Cut(title.isEmpty ? 'Chapter ${i + 1}' : title, _titleBytes);
+    marks.add((
+      start: start,
+      duration: (i + 1 < list.length ? list[i + 1].key : milliseconds) - start,
+      title: bytes,
+      sample: _join([_u16(bytes.length), bytes, _box('encd', [_u32(0x100)])]),
+    ));
+  }
+  return marks;
+}
+
+/// [text] as UTF-8, at most [limit] bytes, cut between characters.
+Uint8List _utf8Cut(String text, int limit) {
+  final bytes = utf8.encode(text);
+  if (bytes.length <= limit) return bytes;
+  var end = limit;
+  while (end > 0 && bytes[end] & 0xc0 == 0x80) {
+    end--;
+  }
+  return Uint8List.sublistView(bytes, 0, end);
+}
+
+/// Nero's chapter list, version 1: 100 ns starts and titles.
+Uint8List _chpl(List<_Mark> marks) => _box('chpl', [
+  _hex('0100000000000000'),
+  Uint8List.fromList([marks.length]),
+  for (final mark in marks) ...[
+    Uint8List.sublistView(ByteData(8)..setUint64(0, mark.start * 10000)),
+    Uint8List.fromList([mark.title.length]),
+    mark.title,
+  ],
+]);
+
+/// [mvhd] with its next track ID [next].
+Uint8List _withNextTrack(Uint8List mvhd, int next) {
+  ByteData.sublistView(mvhd).setUint32(mvhd.length - 4, next);
+  return mvhd;
+}
+
+/// The QuickTime chapter track: [marks] as a disabled text track [id], its
+/// titles one chunk at [dataStart], as ffmpeg writes it.
+Uint8List _chapterTrak(List<_Mark> marks, {required int id, required int movieDuration, required int milliseconds, required int dataStart, required bool wide}) {
+  final tkhd = ByteData(84)
+    // In the movie, not enabled: players don't show it as a track.
+    ..setUint32(0, 2)
+    ..setUint32(12, id)
+    ..setUint32(20, min(movieDuration, 0xffffffff))
+    ..setUint32(40, 0x00010000)
+    ..setUint32(56, 0x00010000)
+    ..setUint32(72, 0x40000000);
+  final mdhd = ByteData(24)
+    ..setUint32(12, 1000)
+    ..setUint32(16, min(milliseconds, 0xffffffff))
+    ..setUint16(20, 0x55c4 /* und */);
+  final stts = ByteData(8 + marks.length * 8)..setUint32(4, marks.length);
+  final stsz = ByteData(12 + marks.length * 4)..setUint32(8, marks.length);
+  for (final (i, mark) in marks.indexed) {
+    stts
+      ..setUint32(8 + i * 8, 1)
+      ..setUint32(12 + i * 8, mark.duration);
+    stsz.setUint32(12 + i * 4, mark.sample.length);
+  }
+  final chunk = wide
+    ? (ByteData(16)
+        ..setUint32(4, 1)
+        ..setUint64(8, dataStart))
+    : (ByteData(12)
+        ..setUint32(4, 1)
+        ..setUint32(8, dataStart));
+  return _box('trak', [
+    _box('tkhd', [Uint8List.sublistView(tkhd)]),
+    _box('mdia', [
+      _box('mdhd', [Uint8List.sublistView(mdhd)]),
+      _box('hdlr', [_hex('0000000000000000746578740000000000000000000000005375627469746c6548616e646c657200')]),
+      _box('minf', [
+        _box('gmhd', [
+          _box('gmin', [_hex('00000000004080008000800000000000')]),
+          _box('text', [_hex('000100000000000000000000000000000001000000000000000000000000000040000000')]),
+        ]),
+        _box('dinf', [
+          _box('dref', [_hex('00000000000000010000000c75726c2000000001')]),
+        ]),
+        _box('stbl', [
+          _box('stsd', [_hex('00000000000000010000003b7465787400000000000000010000000100000000000000000000000000000000000000010000000000000000000d667461620001000100')]),
+          _box('stts', [Uint8List.sublistView(stts)]),
+          // One chunk, of every title, in the one sample description.
+          _box('stsc', [_u32(0), _u32(1), _u32(1), _u32(marks.length), _u32(1)]),
+          _box('stsz', [Uint8List.sublistView(stsz)]),
+          _box(wide ? 'co64' : 'stco', [Uint8List.sublistView(chunk)]),
+        ]),
+      ]),
+    ]),
+  ]);
+}

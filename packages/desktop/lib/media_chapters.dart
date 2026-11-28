@@ -128,9 +128,9 @@ final class _HttpBytes extends _Bytes {
 
 /// In start order, each with a title.
 List<Chapter> _named(List<Chapter> chapters) {
-  chapters.sort((a, b) => a.start.compareTo(b.start));
+  final sorted = [...chapters]..sort((a, b) => a.start.compareTo(b.start));
   return [
-    for (final (i, c) in chapters.indexed) (start: c.start, title: c.title.isEmpty ? 'Chapter ${i + 1}' : c.title),
+    for (final (i, c) in sorted.indexed) (start: c.start, title: c.title.isEmpty ? 'Chapter ${i + 1}' : c.title),
   ];
 }
 

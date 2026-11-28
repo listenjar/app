@@ -510,11 +510,13 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
   }
 
   /// [episode]'s chapters, once it loads: [found] with its YouTube stream,
-  /// else its download's own; else, for a YouTube video (a Listenjar Cloud
-  /// episode, a download without them), YouTube's, kept on this device once
-  /// found, and for a podcast episode, its stream's own, read with range
-  /// requests. Without any of those, the ones its show notes list; for a
-  /// podcast episode those show at once, until its audio's own are read.
+  /// else its download's own; else, for a YouTube video YouTube still
+  /// streams (a download without them), YouTube's, kept on this device once
+  /// found, and for any other episode its stream's own, read with range
+  /// requests: a Listenjar Cloud episode's are baked into its upload
+  /// (faststart.dart), so YouTube isn't asked for them. Without any of
+  /// those, the ones its show notes list; for a podcast episode those show
+  /// at once, until its audio's own are read.
   Future<void> _findChapters(PodcastEpisode episode, List<Chapter>? found) async {
     // Loaded again (it finished, and plays again): already found.
     if (found == null && _chapters.isNotEmpty) return;
@@ -531,7 +533,7 @@ final class Player extends BaseAudioHandler with ChangeNotifier {
       }
       if (found == null && chapters.isEmpty) {
         final token = _life.merge(TimeoutCancellationToken(const Duration(seconds: 60)));
-        if (episode.videoId case final id?) {
+        if (episode.youtubeId case final id?) {
           chapters = _library.youtubeChapters(id) ?? await _youtubeChapters(id, token);
         } else if (!episode.downloaded && episode.audioUrl != null) {
           final url = Uri.parse(episode.audioUrl!);
