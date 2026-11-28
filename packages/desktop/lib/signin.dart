@@ -82,12 +82,37 @@ final class PasskeysUnavailable extends SignInRefused {
   const PasskeysUnavailable();
 }
 
+/// Turnstile refused the token listenjar.com/app-check gave (turnstile.dart).
+final class HumanCheckRefused extends SignInRefused {
+  const HumanCheckRefused();
+}
+
+/// The API's email limits held a sign-up or password link back: one a
+/// minute and five a day to an address, 20 an hour from a network.
+final class TooManyEmails extends SignInRefused {
+  const TooManyEmails(this.retryAfter);
+
+  /// How long until one would go.
+  final Duration retryAfter;
+}
+
+/// A 429, with its `Retry-After` when it has one.
+final class RetryLater extends ApiStatusException {
+  const RetryLater(this.retryAfter) : super(HttpStatus.tooManyRequests);
+  final Duration? retryAfter;
+}
+
 /// The API client, sending `Authorization: Bearer` while [token] has one.
 PublicApiClient apiClient(Uri api, http.Client client, String? Function() token) => PublicApiClient(
   baseUri: api,
   send: (request) {
     if (token() case final value?) request.headers['Authorization'] = 'Bearer $value';
     return client.send(request);
+  },
+  responseError: (response) async {
+    if (response.statusCode != HttpStatus.tooManyRequests) return ApiStatusException(response.statusCode);
+    final seconds = int.tryParse(response.headers['retry-after'] ?? '');
+    return RetryLater(seconds == null ? null : Duration(seconds: seconds));
   },
 );
 
@@ -237,10 +262,12 @@ Future<Session> signInWithPassword(PublicApiClient api, String email, String pas
 }
 
 /// Emails [email] a link that makes its account with [password], or, when
-/// it has one, a link that sets its password. False when the API refused
-/// the address or the password's length.
-Future<bool> signUp(PublicApiClient api, String email, String password, CancellationToken token) =>
-  _accepted(api.signUp(body: SignUp(email: email.trim(), password: password)), token);
+/// it has one, a link that sets its password, once Turnstile passes
+/// [turnstileToken] (turnstile.dart). False when the API refused the address
+/// or the password's length; [HumanCheckRefused] when Turnstile refused the
+/// token, [TooManyEmails] past the email limits.
+Future<bool> signUp(PublicApiClient api, String email, String password, String turnstileToken, CancellationToken token) =>
+  _accepted(api.signUp(body: SignUp(email: email.trim(), password: password, turnstileToken: turnstileToken)), token);
 
 /// Emails [email], if it has an account, a link that sets its password.
 Future<bool> requestPasswordLink(PublicApiClient api, String email, CancellationToken token) =>
@@ -250,9 +277,40 @@ Future<bool> _accepted(Future<void> call, CancellationToken token) async {
   try {
     await call.asCancellable(token);
     return true;
+  } on RetryLater catch (e) {
+    throw TooManyEmails(e.retryAfter ?? const Duration(minutes: 1));
   } on ApiStatusException catch (e) {
     if (e.statusCode == HttpStatus.badRequest) return false;
+    if (e.statusCode == HttpStatus.forbidden) throw const HumanCheckRefused();
     rethrow;
+  }
+}
+
+/// Turnstile in the browser, where the app has no WebView (turnstile.dart):
+/// opens listenjar.com/app-check with [open], which hands its token to the
+/// app's loopback address, as Google's page hands its code.
+Future<String> turnstileInBrowser(Future<void> Function(Uri) open, CancellationToken cancellation) async {
+  final token = cancellation.merge(TimeoutCancellationToken(signInTimeout));
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  try {
+    final back = 'http://127.0.0.1:${server.port}/';
+    final passed = CancellableCompleter<String>(token);
+    server.listen((request) async {
+      final value = request.uri.queryParameters['token'] ?? '';
+      final response = request.response;
+      if (request.method != 'GET' || request.uri.path != '/' || value.isEmpty) {
+        response.statusCode = HttpStatus.notFound;
+      } else {
+        response.headers.contentType = ContentType.html;
+        response.write(_callbackPage('Back to Listenjar', 'The app is sending your sign-up link. You can close this tab.'));
+        if (!passed.isCompleted) passed.complete(value);
+      }
+      await response.close();
+    });
+    await open(currentConfig().web.replace(path: '/app-check', queryParameters: {'return': back}));
+    return await passed.future;
+  } finally {
+    await server.close(force: true);
   }
 }
 

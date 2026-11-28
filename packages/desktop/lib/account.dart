@@ -164,8 +164,10 @@ final class Account extends ChangeNotifier {
   Future<void> signInWithPassword(String email, String password) =>
     _signIn(SignInMethod.password, (token) => auth.signInWithPassword(api, email, password, token));
 
-  /// Emails a sign-up link; false when the address or password won't do.
-  Future<bool> signUp(String email, String password) => auth.signUp(api, email, password, timeout());
+  /// Emails a sign-up link, with Turnstile's [turnstileToken]; false when
+  /// the address or password won't do.
+  Future<bool> signUp(String email, String password, String turnstileToken) =>
+    auth.signUp(api, email, password, turnstileToken, timeout());
 
   /// Emails a link that sets the password; false when the address won't do.
   Future<bool> requestPasswordLink(String email) => auth.requestPasswordLink(api, email, timeout());

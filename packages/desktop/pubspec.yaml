@@ -47,6 +47,7 @@ dependencies:
   jni: ^1.2.1
   jni_flutter: ^1.1.0
   objective_c: ^9.6.4
+  webview_flutter: ^4.14.1
 dev_dependencies:
   flutter_driver:
     sdk: flutter

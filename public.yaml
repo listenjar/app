@@ -636,9 +636,14 @@ paths:
         Emails the address a link to listenjar.com, valid for 24 hours, that
         makes the account with this password; the person then signs in here
         with it. An address that has an account gets an email saying so
-        instead, with a link that sets a password. At most three emails of
-        either kind go to an address in 10 minutes. The answer is the same
-        either way, so it never tells who has an account.
+        instead, with a link that sets a password. The answer is the same
+        either way, so it never tells who has an account. It needs a token
+        from the Turnstile widget on listenjar.com/app-check, which the app
+        shows in a WebView, or opens in the browser where it has none.
+        Turnstile is checked first; then the email limits: one request a
+        minute and five a day for an address, whether or not it has an
+        account (sign-ups and password links together), and 20 an hour from
+        the caller's network.
       security: []
       requestBody:
         required: true
@@ -650,7 +655,13 @@ paths:
         "202":
           description: An email is on its way, whether or not the address has an account.
         "400":
-          description: Not an email address, or the password is shorter than 8 or longer than 256 characters.
+          description: Not an email address, the password is shorter than 8 or longer than 256 characters, or no Turnstile token.
+        "403":
+          description: Turnstile refused the token (spent, expired, or not from listenjar.com's widget).
+        "429":
+          $ref: "#/components/responses/EmailLimited"
+        "503":
+          description: Turnstile couldn't check the token; try again.
   /desktop/password-resets:
     post:
       operationId: requestPasswordLink
@@ -659,8 +670,8 @@ paths:
         Emails the address, if it has an account, a link to listenjar.com,
         valid for an hour, that sets a new password, or a first one for an
         account that signs in only with Google or passkeys. Setting it signs
-        the account out everywhere, this app too. At most three go to an
-        address in 10 minutes.
+        the account out everywhere, this app too. The same email limits as
+        sign-up's apply, and count together with them.
       security: []
       requestBody:
         required: true
@@ -673,6 +684,8 @@ paths:
           description: Sent if the address has an account.
         "400":
           description: Not an email address.
+        "429":
+          $ref: "#/components/responses/EmailLimited"
   /desktop/passkey/options:
     post:
       operationId: passkeySignInOptions
@@ -898,6 +911,16 @@ components:
       type: http
       scheme: bearer
       description: The `Session` token from any of the sign-ins.
+  responses:
+    EmailLimited:
+      description: >-
+        Too many emails asked for this address lately, or from this network;
+        nothing was sent. `Retry-After` says when one would go.
+      headers:
+        Retry-After:
+          description: Seconds until the request would pass.
+          schema:
+            type: integer
   schemas:
     CheckoutRequest:
       type: object
@@ -1354,7 +1377,7 @@ components:
           type: string
     SignUp:
       type: object
-      required: [email, password]
+      required: [email, password, turnstileToken]
       properties:
         email:
           type: string
@@ -1363,6 +1386,9 @@ components:
           type: string
           minLength: 8
           maxLength: 256
+        turnstileToken:
+          type: string
+          description: The token listenjar.com/app-check's Cloudflare Turnstile widget gave; each works once.
     PasswordLinkRequest:
       type: object
       required: [email]

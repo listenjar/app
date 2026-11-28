@@ -3,6 +3,9 @@
 // order and the same words. Google and a passkey first, then the email form,
 // which also signs up and asks for a password link; both links open on
 // listenjar.com, and the person comes back here to sign in with the password.
+// Signing up passes Cloudflare Turnstile first, as on listenjar.com/signup
+// (turnstile.dart): its widget sits above Create account, or, without a
+// WebView, opens in the browser when Create account is pressed.
 import 'dart:async';
 
 import 'package:cancellation_token/cancellation_token.dart';
@@ -16,12 +19,37 @@ import 'config.dart';
 import 'marks.dart';
 import 'signin.dart';
 import 'theme.dart' as brand;
+import 'turnstile.dart';
 
 /// What the email form is for.
 enum _Mode { signIn, signUp, forgot }
 
 /// The email an email form last sent, and what it was.
 typedef _Sent = ({String email, _Mode mode});
+
+/// The WebView's widget gave no token in time.
+final class _Unchecked implements Exception {
+  const _Unchecked();
+}
+
+/// The person chose Cancel while the browser's check was open.
+final class _Abandoned implements Exception {
+  const _Abandoned();
+}
+
+/// listenjar.com's words for a held-back email (apps/web's emailLimits.ts).
+String tooManyEmails(Duration retryAfter) {
+  final seconds = retryAfter.inSeconds < 1 ? 1 : retryAfter.inSeconds;
+  final minutes = (seconds / 60).ceil();
+  final wait = switch (seconds) {
+    1 => 'in a second',
+    < 60 => 'in $seconds seconds',
+    _ when minutes == 1 => 'in a minute',
+    _ when minutes < 90 => 'in $minutes minutes',
+    _ => 'in ${(minutes / 60).ceil()} hours',
+  };
+  return 'That’s a lot of emails for now. Try again $wait.';
+}
 
 final class SignInForm extends StatefulWidget {
   const SignInForm({super.key, required this.account, required this.describe, this.why});
@@ -56,6 +84,13 @@ final class _SignInFormState extends State<SignInForm> {
   /// Whether this device has passkeys to offer, once it says.
   var _passkeys = false;
 
+  /// Turnstile's widget in a WebView, while the form signs up on a platform
+  /// that has one.
+  TurnstileCheck? _check;
+
+  /// Cancels Turnstile in the browser, while its page is open.
+  CancellationToken? _browserCheck;
+
   Account get _account => widget.account;
 
   @override
@@ -72,6 +107,8 @@ final class _SignInFormState extends State<SignInForm> {
     _password.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
+    _check?.dispose();
+    _browserCheck?.cancel();
     super.dispose();
   }
 
@@ -80,10 +117,35 @@ final class _SignInFormState extends State<SignInForm> {
     _sent = null;
     _problem = null;
     _account.authError = null;
+    if (mode == _Mode.signUp && turnstileEmbeds) {
+      _check ??= TurnstileCheck();
+    } else {
+      _check?.dispose();
+      _check = null;
+    }
   });
 
+  Future<bool> _openBrowser(Uri url) => launchUrl(url, mode: LaunchMode.externalApplication);
+
+  /// A Turnstile token: the WebView's, or the browser's page's.
+  Future<String> _turnstileToken() async {
+    if (_check case final check?) return await check.token() ?? (throw const _Unchecked());
+    final cancel = CancellationToken();
+    setState(() => _browserCheck = cancel);
+    try {
+      return await turnstileInBrowser((url) async {
+        if (!await _openBrowser(url)) throw StateError('open the browser');
+      }, cancel);
+    } on CancelledException {
+      if (cancel.isCancelled) throw const _Abandoned();
+      rethrow;
+    } finally {
+      if (mounted) setState(() => _browserCheck = null);
+    }
+  }
+
   Future<void> _google() => _account.signInWithGoogle((url) async {
-    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) throw StateError('open the browser');
+    if (!await _openBrowser(url)) throw StateError('open the browser');
   });
 
   Future<void> _submit() async {
@@ -103,8 +165,15 @@ final class _SignInFormState extends State<SignInForm> {
           setState(() => _problem = 'Use at least 8 characters for your password.');
           return _passwordFocus.requestFocus();
         }
-        await _send(email, () => _account.signUp(email, password),
-          refused: 'Check the email address, and use a password of 8 to 256 characters.');
+        await _send(email, () async {
+          final turnstile = await _turnstileToken();
+          try {
+            return await _account.signUp(email, password, turnstile);
+          } finally {
+            // Each token works once, whatever the answer.
+            _check?.spend();
+          }
+        }, refused: 'Check the email address, and use a password of 8 to 256 characters.');
       case _Mode.forgot:
         if (email.isEmpty) return _emailFocus.requestFocus();
         await _send(email, () => _account.requestPasswordLink(email), refused: 'Check the email address.');
@@ -122,7 +191,13 @@ final class _SignInFormState extends State<SignInForm> {
       sent = await request();
       if (!sent) problem = refused;
     } catch (e) {
-      problem = widget.describe(e);
+      problem = switch (e) {
+        _Abandoned() => null,
+        _Unchecked() => 'Cloudflare hasn’t finished checking that you’re a person. Wait for its check above, then try again.',
+        HumanCheckRefused() => 'Cloudflare couldn’t confirm you’re a person. Try again.',
+        TooManyEmails(:final retryAfter) => tooManyEmails(retryAfter),
+        _ => widget.describe(e),
+      };
     }
     if (!mounted) return;
     setState(() {
@@ -145,7 +220,18 @@ final class _SignInFormState extends State<SignInForm> {
       builder: (context, _) => ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
         child: switch ((_account.signingIn, _sent)) {
-          ((method: SignInMethod.google, :final token), _) => _waitingForBrowser(text, token),
+          _ when _browserCheck != null => _waitingForBrowser(
+            text,
+            _browserCheck!,
+            title: 'Confirm you’re a person',
+            body: 'Cloudflare checks your browser on the page that opened. The app emails your link when it’s done.',
+          ),
+          ((method: SignInMethod.google, :final token), _) => _waitingForBrowser(
+            text,
+            token,
+            title: 'Finish in your browser',
+            body: 'Pick your Google account on the page that opened. The app signs in when you do.',
+          ),
           (null, final sent?) => _sentView(text, sent),
           _ => _form(text),
         },
@@ -153,15 +239,12 @@ final class _SignInFormState extends State<SignInForm> {
     );
   }
 
-  /// Google's page is open in the browser.
-  Widget _waitingForBrowser(TextTheme text, CancellationToken token) =>
+  /// Google's page, or Turnstile's, is open in the browser.
+  Widget _waitingForBrowser(TextTheme text, CancellationToken token, {required String title, required String body}) =>
     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Finish in your browser', style: text.titleMedium),
+      Text(title, style: text.titleMedium),
       const SizedBox(height: 6),
-      Text(
-        'Pick your Google account on the page that opened. The app signs in when you do.',
-        style: text.bodyMedium!.copyWith(color: brand.fgSoft),
-      ),
+      Text(body, style: text.bodyMedium!.copyWith(color: brand.fgSoft)),
       const SizedBox(height: 18),
       TextButton(
         style: brand.button(brand.Tone.quiet, brand.ButtonSize.sm),
@@ -287,6 +370,10 @@ final class _SignInFormState extends State<SignInForm> {
               icon: Icon(_showPassword ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 20, color: brand.fgSoft),
             ),
           ),
+        ],
+        if (_check case final check? when _mode == _Mode.signUp) ...[
+          const SizedBox(height: 16),
+          TurnstileView(check),
         ],
         const SizedBox(height: 20),
         brand.accentShadow(
